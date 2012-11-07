@@ -1,3 +1,6 @@
+load("model.jl")
+load("tree.jl")
+load("probabiltiy_util.jl")
 
 function mcmc(Y::Array{Int64,2},
               X_r::Array{Float64,3},
@@ -38,85 +41,42 @@ end
 
 
 #@profile begin
-function mcmc_sweep(tree::Tree{Float64},
-                    full_move_prob::Float64,
-                    model::ModelParameters)
+function mcmc_sweep(model::ModelParameters,
+                    Y::Array{Int64,2},
+                    X_r::Array{Float64,3},
+                    X_p::Array{Float64,2},
+                    X_c::Array{Float64,2})
+
+    tree = model.tree
     N = (length(tree.nodes)+1)/2
     int_exp_elapsed = 0.0
     sample_elapsed = 0.0
-    for prune_index = 1:2N-2
+    for prune_index = 1:2N-1
         parent = tree.nodes[prune_index].parent
-        grandparent = tree.nodes[prune_index].parent.parent
-        if grandparent == Nil{Float64}()
+        if parent == Nil()
             continue
         end
-        PruneIndexFromTree!(tree,prune_index)
+
+        grandparent = tree.nodes[prune_index].parent.parent
+        if grandparent == Nil()
+            continue
+        end
+
+        prune_tree!(tree, prune_index)
         gp = grandparent.index
 
-        u = rand()
-        if u > full_move_prob
-            descendant_ind = GetRandomDescendant(tree,gp)
-            prior_probs = prior_path(tree,prune_index,descendant_ind)
 
-            path = GetPath(tree,descendant_ind) 
-        else
-            path = tree.nodes
-        end        
+        (priors, pstates) = infsites_logpdf(model, prune_index)
+        (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, Y, X_r, X_p, X_c)
 
- 
-        funcs = cell(length(path))
-        Z = zeros(length(path))
-        L = -Inf*ones(length(path))
-        A = -ones(length(path))
-        B = -ones(length(path))
-        for i = 1:length(path)-1 #Don't add above the root
-            f = continuous_pdf(tree,prune_index,path[i].index,prior_probs[i],model)
-            a = max(path[i].coalescent_time,
-                    tree.nodes[prune_index].coalescent_time)
-            b = path[i].parent.coalescent_time
-            if a < b
-                funcs[i] = f
-                A[i] = a
-                B[i] = b
-                s = time()
-                Z[i],L[i] = int_exp(f,a,b)
-                int_exp_elapsed += time()-s
-            end
-        end
-        Lold = L
-        Zold = Z
-        L = L - max(L)
-        Z = Z .* exp(L)
-        path_index = rand_multinomial(Z)
-#            if path_index == 0
-#                global F = funcs
-#                global T = tree
-#                global P = path
-#                global A = A
-#                global B = B
-#                global Lold = Lold
-#                global Zold = Zold
-#            end 
-        a = max(path[path_index].coalescent_time,
-                tree.nodes[prune_index].coalescent_time)
-        b = path[path_index].parent.coalescent_time
-        s = time()
-        t = sample_time(funcs[path_index], a, b, 100, 0.2) 
-        sample_elapsed += time()-s
+        logprobs = priors + likelihoods
+        probs = exp_normalize(logprobs)
 
-        InsertIndexIntoTree!(tree, prune_index, path[path_index].index)
-        parent.coalescent_time = t
+        state_index = randmult(probs)
 
-        neighbor_locations = [parent.parent.location',
-                              parent.children[1].location',
-                              parent.children[2].location']
-        neighbor_variances = model.k*[parent.parent.coalescent_time - t,
-                              t - parent.children[1].coalescent_time,
-                              t - parent.children[2].coalescent_time]
+        (graft_index, graftpoint_features, parent_features) = pstates[state_index]
 
-        parent.location = rand_normprod(neighbor_locations,
-                                        neighbor_variances)[:]
-        
+        graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
     end
     println(int_exp_elapsed, sample_elapsed)
 end

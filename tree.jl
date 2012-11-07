@@ -168,7 +168,7 @@ function GetPath{T}(tree::Tree{T},
 end
 
 function GetPathNumLeaves{T}(tree::Tree{T},
-                                  node_index::Int)
+                             node_index::Int)
     path_size = 0
     current_node = tree.nodes[node_index]
     while (current_node != Nil())
@@ -190,8 +190,8 @@ function GetPathNumLeaves{T}(tree::Tree{T},
 end
 
 function ProposedNumLeaves{T}(tree::Tree{T},
-                                   pruned_index::Int,
-                                   insert_index::Int)
+                              pruned_index::Int,
+                              insert_index::Int)
     current_node = tree.nodes[insert_index]
     num_leaves_added = tree.nodes[pruned_index].num_leaves
 
@@ -200,9 +200,9 @@ function ProposedNumLeaves{T}(tree::Tree{T},
     path_num_leaves + num_leaves_added
 end
 
-function GetDescendants{T}(tree::Tree{T},
-                           index::Int)
-    
+function GetLeaves{T}(tree::Tree{T},
+                      subtree_root::Int)
+
     if index <= (length(tree.nodes)+1)/2
         return [index]
     else
@@ -210,19 +210,20 @@ function GetDescendants{T}(tree::Tree{T},
         left = tree.nodes[index].children[1]
         right = tree.nodes[index].children[2]
         if left != Nil()
-            append!(a,GetDescendants(tree,left.index))
+            append!(a,GetLeaves(tree,left.index))
         end
         if right != Nil()
-            append!(a,GetDescendants(tree,right.index))
+            append!(a,GetLeaves(tree,right.index))
         end
         return a
     end
+
 end
 
 #don't think this works right now
 function GetRandomLeaf{T}(tree::Tree{T},
                                 index::Int)
-    leaves = GetDescendants(tree,index)
+    leaves = GetLeaves(tree,index)
     d_ind = randi(length(leaves))
     leaves[d_ind]
 end
@@ -253,8 +254,9 @@ function GetSubtreeIndicies{T}(tree::Tree{T},
     subtree_indices
 end
 
-function GetNodeStack{T}(tree::Tree{T},
-                         root_index::Int64)
+# stack will contain a leaves to root ordering of nodes in the pruned tree
+function GetLeafToRootOrdering{T}(tree::Tree{T},
+                                  root_index::Int64)
     queue = Int64[]
     stack = Int64[]
     enqueue(queue, root_index)
@@ -268,25 +270,24 @@ function GetNodeStack{T}(tree::Tree{T},
         end  
     end
 
-    stack
+    reverse(stack)
 end
 
 function ConstructZ{T}(tree::Tree{T})
-    _2Nm1 = length(tree.nodes)
-    N = (_2Nm1+1)/2
-    U = zeros(Int64,_2Nm1)
-    for i = 1:_2Nm1
+    N = (length(tree.nodes) + 1) / 2
+    U = zeros(Int64, 2N - 1)
+    for i = 1:2N-1
         U[i] = tree.nodes[i].location
     end
 
-    Z = zeros(Int64,N,sum(U))
+    Z = zeros(Int64, N, sum(U))
 
     cur_j = 0
-    for i = 1:_2Nm1
-        descendants = GetDescendants(tree,i)
+    for i = 1:2N-1
+        leaves = GetLeaves(tree, i)
         for j = 1:U[i]
             cur_j += 1
-            Z[descendants,cur_j] = 1
+            Z[leaves, cur_j] = 1
         end
     end
     Z
