@@ -41,7 +41,7 @@ end
 
 
 #@profile begin
-function mcmc_sweep(model::ModelParameters,
+function mcmc_sweep(model::ModelState,
                     Y::Array{Int64,2},
                     X_r::Array{Float64,3},
                     X_p::Array{Float64,2},
@@ -66,7 +66,7 @@ function mcmc_sweep(model::ModelParameters,
         gp = grandparent.index
 
 
-        (priors, pstates) = infsites_logpdf(model, prune_index)
+        (priors, pstates) = psi_infsites_logpdf(model, prune_index)
         (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, Y, X_r, X_p, X_c)
 
         logprobs = priors + likelihoods

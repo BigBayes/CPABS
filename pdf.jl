@@ -62,11 +62,15 @@ function likelihood(model::ModelState,
     total_prob
 end
 
-#Local pdfs for sampling
+# Local pdfs for sampling
+
+###################################
+###### pdfs for psi updates #######
+###################################
 
 #pdf for updating psi, the tree structure, assumes tree is already pruned at prune_index
-function infsites_logpdf(model::ModelState,
-                         pruned_index::Int64)
+function psi_infsites_logpdf(model::ModelState,
+                             pruned_index::Int64)
     (N,N) = size(Y)
     tree = model.tree
 
@@ -339,101 +343,48 @@ function prior_path(tree::Tree,
     -(original_partial_values[end]-original_partial_values+proposed_partial_values)
 end
 
-# Tree/Model Utility Functions
+###################################
+###### pdfs for W updates #########
+###################################
 
-# Prune tree while also adjusting the weight matrix appropriately
-function prune_tree!(model::ModelState,
-                     prune_index::Int)
-    tree = model.tree
-    weight_indices = weight_index_pointers(tree)
+# pdf for updating one element of W
+function W_local_logpdf(model::ModelState,
+                        Y::Array{Int64, 2},
+                        Z::Array{Int64, 2},
+                        relevant_pairs::Array{Int64, 2},
+                        latent_effects::Array{Float64, 2},
+                        observed_effects::Array{Float64, 2},
+                        k1::Int64,
+                        k2::Int64,
+                        w_new::Float64)
+    sigma = model.w_sigma 
+    W = model.weights
+    w_old = W[k1,k2]
 
-    parent = tree.nodes[prune_index].parent
+    (_, npairs) = size(relevant_pairs)
+  
+    logprob = 0.0 
+    for p = 1:npairs
+        i = relevant_pairs[p]
+        j = relevant_pairs[p]
 
-    if parent.children[0].index == prune_index
-        sibling = parent.children[1]
-    else
-        sibling = parent.children[0]
-    end
+        le = latent_effects[i,j]
+        oe = observed_effects[i,j]
 
+        le += w_new - w_old
 
-    sibling_start = weight_indices[sibling.index]
-    parent_start = weight_indices[parent.index]
+        logprob += log_logit(le + oe, Y[i,j]) + normal_logpdf(w_new/sigma)
+    end 
 
-    sibling_end = sibling_start + sibling.location - 1
-    parent_end = parent_start + parent.location - 1
-
-    weight_permutation = linspace(1,size(model.weights)[1],size(model.weights)[1])
-
-
-    if sibling_start < parent_start
-        del(weight_permutation, parent_start:parent_end)
-    
-        for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, start_end + 1, p)
-        end
-    else
-        for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, start_end + 1, p)
-        end
-
-        del(weight_permutation, parent_start:parent_end)
-    end
-
-    permute_rows_and_cols(model.weights, weight_permutation)
-
-    sibling.location += parent.location
-    parent.location = 0
-
-    PruneIndexFromTree!(tree, prune_index)
+    return logprob
 end
 
-# Graft tree while also adjusting the weight matrix appropriately
-function graft_tree!(model::ModelState,
-                     prune_index::Int,
-                     graftpoint_index::Int,
-                     parent_features::Array{Int64,1},
-                     graftpoint_features::Array{Int64,1})
-
-    tree = model.tree
-    weight_indices = weight_index_pointers(tree)
-
-    parent = tree.nodes[prune_index].parent
-   
-    graftpoint_start = weight_indices[graftpoint_index]
-    parent_start = weight_indices[parent.index]
-
-    graftnode = tree.nodes[graftpoint_index]
-    graftpoint_end = graftpoint_start + graftnode.location - 1
-    parent_end = parent_start + parent.location - 1
-
-    weight_permutation = linspace(1, size(model.weights)[1], size(model.weights)[1])
-
-    if graftpoint_start < parent_start
-        for p = reverse(parent_features)
-            insert(weight_permutation, parent_start, p)
-        end
-
-        del(weight_permutation, graftpoint_start:graftpoint_end)
-        for p = reverse(graftpoint_features)
-            insert(weight_permutation, graftpoint_start, p)
-        end
-    else
-        del(weight_permutation, graftpoint_start:graftpoint_end)
-        for p = reverse(graftpoint_features)
-            insert(weight_permutation, graftpoint_start, p)
-        end
-
-        for p = reverse(parent_features)
-            insert(weight_permutation, parent_start, p)
-        end
-    end
-
-    permute_rows_and_cols(model.weights, weight_permutation)
-
-    graftnode.location = length(graftpoint_features)
-    parent.location = length(parent_features)
-
-    InsertIndexIntoTree!(tree, prune_index, graftpoint_index)
+# Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
+function compute_relevent_pairs(Z::Array{Int64, 2},
+                                k1::Int64,
+                                k2::Int64)
+    (I, J) = findn(Z[:,k1]*Z[:,k2]')
+    [I', J']
 end
 
 # Utility Functions
