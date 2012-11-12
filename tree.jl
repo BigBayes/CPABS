@@ -4,7 +4,7 @@ type Nil <: Node
 end
 
 type TreeNode{T <: Real} <: Node
-    location::Array{T,1}
+    state::T
     parent::Node
     children::Array{Node,1}
     index::Int64
@@ -12,8 +12,8 @@ type TreeNode{T <: Real} <: Node
     num_ancestors::Int64 #not self inclusive
 end
 
-function TreeNode{T}(loc::Array{T,1}, ind::Int64)
-    TreeNode{T}(loc,Nil(),Array(Node,2),ind,1,0)
+function TreeNode{T}(state::T, ind::Int64)
+    TreeNode{T}(state,Nil(),Array(Node,2),ind,1,0)
 end
 
 show(tree::TreeNode) = print(tree.index)
@@ -25,8 +25,8 @@ end
 
 
 function Tree(U::Array{Int64,1})
-    _2nm1 = size(U)
-    N = (_2nm1+1)/2
+    (_2nm1,) = size(U)
+    N::Int64 = (_2nm1+1)/2
     tree = Tree{Int64}()
     tree.nodes = Array(TreeNode{Int64},2N-1)
 
@@ -97,10 +97,10 @@ function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
     parent.parent = Nil()
     parent.children[sibling_direction] = Nil()
 
-    UpdateDescendantCounts(tree, grandparent)
+    UpdateDescendantCounts!(tree, grandparent)
 
-    UpdateSubtreeAncestorCounts(tree, sibling)
-    UpdateSubtreeAncestorCounts(tree, parent)
+    UpdateSubtreeAncestorCounts!(tree, sibling)
+    UpdateSubtreeAncestorCounts!(tree, parent)
 
     nothing 
 end
@@ -125,8 +125,8 @@ function InsertIndexIntoTree!{T}(tree::Tree{T},
     new_sibling.parent = parent
     parent.parent = grandparent
 
-    UpdateDescendantCounts(tree, parent)
-    UpdateSubtreeAncestorCounts(tree, parent)
+    UpdateDescendantCounts!(tree, parent)
+    UpdateSubtreeAncestorCounts!(tree, parent)
     nothing
 end
 
@@ -134,21 +134,31 @@ function UpdateDescendantCounts!{T}(tree::Tree{T},
                                     start_node::TreeNode{T})
     cur = start_node
     while cur != Nil()
-        cur.num_leaves = cur.children[1].num_leaves 
-                            + cur.children[2].num_leaves 
+        cur.num_leaves = cur.children[1].num_leaves + 
+                         cur.children[2].num_leaves 
         cur = cur.parent
     end
 end
 
 function UpdateSubtreeAncestorCounts!{T}(tree::Tree{T},
                                          subtree_root::TreeNode{T})
-    subtree_queue = TreeNode{T}[]
-    enqueue(subtree_queue, subtree_root)
+    subtree_queue = Int64[]
+    if subtree_root == Nil()
+        return
+    end
+
+    enqueue(subtree_queue, subtree_root.index)
     while length(subtree_queue) > 0
-        cur = pop(subtree_queue)
-        if cur != Nil() 
-            enqueue(subtree_queue, cur.children[1])
-            enqueue(subtree_queue, cur.children[2])
+        cur = tree.nodes[pop(subtree_queue)]
+        if cur.children[1] != Nil() 
+            enqueue(subtree_queue, cur.children[1].index)
+        end
+        if cur.children[2] != Nil()
+            enqueue(subtree_queue, cur.children[2].index)
+        end
+        if cur.parent == Nil()
+            cur.num_ancestors = 0
+        else
             cur.num_ancestors = cur.parent.num_ancestors + 1
         end
     end
@@ -203,12 +213,12 @@ end
 function GetLeaves{T}(tree::Tree{T},
                       subtree_root::Int)
 
-    if index <= (length(tree.nodes)+1)/2
-        return [index]
+    if subtree_root <= (length(tree.nodes)+1)/2
+        return [subtree_root]
     else
         a = Array(Int64,0)
-        left = tree.nodes[index].children[1]
-        right = tree.nodes[index].children[2]
+        left = tree.nodes[subtree_root].children[1]
+        right = tree.nodes[subtree_root].children[2]
         if left != Nil()
             append!(a,GetLeaves(tree,left.index))
         end
@@ -240,15 +250,18 @@ end
 function GetSubtreeIndicies{T}(tree::Tree{T},
                                subtree_root::Int64)
     subtree_indices = IntSet()
+    assert( tree.nodes[subtree_root] != Nil())
     queue = Int64[]
     enqueue(queue, subtree_root)
     while length(queue) > 0
         cur = tree.nodes[pop(queue)]
-        if cur != Nil()
+        if cur.children[1] != Nil()
             enqueue(queue, cur.children[1].index)
+        end
+        if cur.children[2] != Nil()
             enqueue(queue, cur.children[2].index)
-            add(subtree_indices, cur.index)
-        end  
+        end
+        add(subtree_indices, cur.index)
     end
 
     subtree_indices
@@ -259,25 +272,28 @@ function GetLeafToRootOrdering{T}(tree::Tree{T},
                                   root_index::Int64)
     queue = Int64[]
     stack = Int64[]
+    assert( tree.nodes[root_index] != Nil())
     enqueue(queue, root_index)
 
     while length(queue) > 0
         cur = tree.nodes[pop(queue)]
-        if cur != Nil()
+        if cur.children[1] != Nil()
             enqueue(queue, cur.children[1].index)
+        end
+        if cur.children[2] != Nil()
             enqueue(queue, cur.children[2].index)
-            push(stack, cur.index)
         end  
+        push(stack, cur.index)
     end
 
     reverse(stack)
 end
 
 function ConstructZ{T}(tree::Tree{T})
-    N = (length(tree.nodes) + 1) / 2
+    N::Int = (length(tree.nodes) + 1) / 2
     U = zeros(Int64, 2N - 1)
     for i = 1:2N-1
-        U[i] = tree.nodes[i].location
+        U[i] = tree.nodes[i].state
     end
 
     Z = zeros(Int64, N, sum(U))

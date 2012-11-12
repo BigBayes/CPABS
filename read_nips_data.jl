@@ -17,5 +17,4 @@ perm = reverse(perm)
 
 top234 = perm[1:234]
 
-Y234 = Y[top234, top234]
-
+Y234 = convert(Array{Int64}, Y[top234, top234])

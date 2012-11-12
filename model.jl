@@ -14,6 +14,13 @@ type ModelState
     c::Float64
 end
 
+type ModelSpecification
+    use_pairwise::Bool
+    use_parenthood::Bool
+    use_childhood::Bool
+    symmetric_W::Bool
+end
+
 # Tree/Model Utility Functions
 
 # Prune tree while also adjusting the weight matrix appropriately
@@ -24,18 +31,18 @@ function prune_tree!(model::ModelState,
 
     parent = tree.nodes[prune_index].parent
 
-    if parent.children[0].index == prune_index
-        sibling = parent.children[1]
+    if parent.children[1].index == prune_index
+        sibling = parent.children[2]
     else
-        sibling = parent.children[0]
+        sibling = parent.children[1]
     end
 
 
     sibling_start = weight_indices[sibling.index]
     parent_start = weight_indices[parent.index]
 
-    sibling_end = sibling_start + sibling.location - 1
-    parent_end = parent_start + parent.location - 1
+    sibling_end = sibling_start + sibling.state - 1
+    parent_end = parent_start + parent.state - 1
 
     weight_permutation = linspace(1,size(model.weights)[1],size(model.weights)[1])
 
@@ -44,20 +51,20 @@ function prune_tree!(model::ModelState,
         del(weight_permutation, parent_start:parent_end)
     
         for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, start_end + 1, p)
+            insert(weight_permutation, sibling_end + 1, p)
         end
     else
         for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, start_end + 1, p)
+            insert(weight_permutation, sibling_end + 1, p)
         end
 
         del(weight_permutation, parent_start:parent_end)
     end
 
-    permute_rows_and_cols(model.weights, weight_permutation)
+    permute_rows_and_cols!(model.weights, weight_permutation)
 
-    sibling.location += parent.location
-    parent.location = 0
+    sibling.state += parent.state
+    parent.state = 0
 
     PruneIndexFromTree!(tree, prune_index)
 end
@@ -78,8 +85,8 @@ function graft_tree!(model::ModelState,
     parent_start = weight_indices[parent.index]
 
     graftnode = tree.nodes[graftpoint_index]
-    graftpoint_end = graftpoint_start + graftnode.location - 1
-    parent_end = parent_start + parent.location - 1
+    graftpoint_end = graftpoint_start + graftnode.state - 1
+    parent_end = parent_start + parent.state - 1
 
     weight_permutation = linspace(1, size(model.weights)[1], size(model.weights)[1])
 
@@ -103,11 +110,16 @@ function graft_tree!(model::ModelState,
         end
     end
 
-    permute_rows_and_cols(model.weights, weight_permutation)
+    permute_rows_and_cols!(model.weights, weight_permutation)
 
-    graftnode.location = length(graftpoint_features)
-    parent.location = length(parent_features)
+    graftnode.state = length(graftpoint_features)
+    parent.state = length(parent_features)
 
     InsertIndexIntoTree!(tree, prune_index, graftpoint_index)
+end
+
+function permute_rows_and_cols!(A, permutation)
+    A[:,:] = A[:,permutation]
+    A[:,:] = A[permutation,:]
 end
 

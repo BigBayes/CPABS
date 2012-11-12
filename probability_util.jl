@@ -10,10 +10,11 @@ end
 
 function log_logit(effect, y)
     if y == 1
-        -log(1 + exp(-effect))
+        return -log(1 + exp(-effect))
     elseif y == 0
-        -effect - log(1 + exp(-effect))
+        return -effect - log(1 + exp(-effect))
     end
+    return 0.0
 end
 
 # Probability Manipulation
@@ -25,8 +26,7 @@ function logsumexp(x)
 end
 
 function exp_normalize(x)
-    max_x = max(x)
-    xp = x - max_x
+    xp = x - max(x)
     exp_x = exp(xp)
     exp_x / sum(exp_x)
 end
@@ -35,7 +35,11 @@ end
 
 function randmult(x)
     v = cumsum(x)
-    assert(v[end] = 1.0)
+    assert( abs(v[end] - 1.0) < 10.0^-8)
+#    if v[end] != 1.0
+#        println("v[end]: ", v[end])
+#        assert(v[end] == 1.0)
+#    end
 
     u = rand()
     i = 1
