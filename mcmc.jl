@@ -32,7 +32,12 @@ function mcmc(Y::Array{Int64,2},
 
     U = zeros(Int64,2N-1)
     for i = 1:2N-1
-        U[i] = randi(3)-1
+        u = rand()
+        if u > .95
+            U[i] = 2
+        elseif u > .8
+            U[i] = 1
+        end
     end
 
     W = randn(sum(U),sum(U))
@@ -49,7 +54,6 @@ function mcmc(Y::Array{Int64,2},
 end
 
 
-@profile begin
 function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
                     Y::Array{Int64,2},
@@ -63,9 +67,8 @@ function mcmc_sweep(model::ModelState,
     psi_time = time()
 
     #for prune_index = 1:2N-1
-    for prune_index = 1:10
+    for prune_index = 1:N # only prune leaves, it's much faster
 
-        println("Sampling Prune Index ", prune_index)
         parent = tree.nodes[prune_index].parent
         if parent == Nil()
             continue
@@ -76,12 +79,18 @@ function mcmc_sweep(model::ModelState,
             continue
         end
 
+        println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
         prune_tree!(model, prune_index)
         gp = grandparent.index
 
+        println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
 
-        (priors, pstates) = psi_infsites_logpdf(model, prune_index)
-        (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, Y, X_r, X_p, X_c)
+
+        leaf = GetRandomLeaf(tree, gp)
+        path = GetPath(tree, leaf)
+
+        (priors, pstates) = psi_infsites_logpdf(model, prune_index, path[1:end-1])
+        (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, path[1:end-1], Y, X_r, X_p, X_c)
 
         logprobs = priors + likelihoods
         probs = exp_normalize(logprobs)
@@ -128,11 +137,11 @@ function mcmc_sweep(model::ModelState,
 
     for iter = 1:num_W_sweeps
    
-        for k1 = 1:3
-        #for k1 = 1:K
+        #for k1 = 1:3
+        for k1 = 1:K
             println("W sampling k1: ", k1)
-            for k2 = 1:3
-            #for k2 = 1:K
+            #for k2 = 1:3
+            for k2 = 1:K
                 relevant_pairs = compute_relevant_pairs(Z,k1,k2)
                 g = x -> W_local_logpdf(model, Y, relevant_pairs, latent_effects, observed_effects, k1, k2, x)
 
@@ -153,7 +162,6 @@ function mcmc_sweep(model::ModelState,
     println("MCMC Timings (psi, W) = ", (psi_time, W_time))
 end
 
-end #profile
 
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)

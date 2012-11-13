@@ -69,10 +69,11 @@ end
 ###### pdfs for psi updates #######
 ###################################
 
-@profile begin
+#@profile begin
 #pdf for updating psi, the tree structure, assumes tree is already pruned at prune_index
 function psi_infsites_logpdf(model::ModelState,
-                             pruned_index::Int64)
+                             pruned_index::Int64,
+                             path::Array{Int64,1})
     (N,N) = size(Y)
     tree = model.tree
     gam = model.gamma
@@ -145,26 +146,26 @@ function psi_infsites_logpdf(model::ModelState,
 
         descendant_mutation_probs[i] += child_mutation_contributions
 
-        (U, V) = all_splits(linspace(1, cur.state, cur.state))
+        if contains(path, i)
+            (U, V) = all_splits(linspace(1, cur.state, cur.state))
+            for j = 1:length(U)
+                u = U[j]
+                v = V[j]
 
-        for j = 1:length(U)
-            u = U[j]
-            v = V[j]
+                prob = poisson_logpdf(length(u), poisson_mean_after) +
+                       poisson_logpdf(length(v), poisson_mean_before) -
+                       poisson_logpdf(cur.state, poisson_mean_before)
 
-            prob = poisson_logpdf(length(u), poisson_mean_after) +
-                   poisson_logpdf(length(v), poisson_mean_before) -
-                   poisson_logpdf(cur.state, poisson_mean_before)
-
-            push(total_probs, prob + child_mutation_contributions + psi_probs[i] + subtree_probs[i])
-#            if true
-#                println("prob ", prob)
-#                println("child contributions ", child_mutation_contributions)
-#                println("psi prob ", psi_probs[i])
-#                println("subtree_probs ", subtree_probs[i])
-#            end
-            # (node above which to attach, features moved below graft point, features moved above)
-            push(tree_states, (i, u, v) )                
-
+                push(total_probs, prob + child_mutation_contributions + psi_probs[i] + subtree_probs[i])
+    #            if true
+    #                println("prob ", prob)
+    #                println("child contributions ", child_mutation_contributions)
+    #                println("psi prob ", psi_probs[i])
+    #                println("subtree_probs ", subtree_probs[i])
+    #            end
+                # (node above which to attach, features moved below graft point, features moved above)
+                push(tree_states, (i, u, v) )                
+            end
         end
     end
 
@@ -176,6 +177,7 @@ end
 # features above the pruned parent are moved to the unpruned child
 function psi_likelihood_logpdf(model::ModelState,
                                pruned_index::Int64,
+                               path::Array{Int64,1},
                                Y::Array{Int64,2},
                                X_r::Array{Float64,3},
                                X_p::Array{Float64,2},
@@ -238,61 +240,102 @@ function psi_likelihood_logpdf(model::ModelState,
 
     Z = ConstructZ(tree)
 
-    leaf_features = fill(Array(Int64,0), length(1:N))
-    for l = leaves
-        leaf_features[l] = find(Z[l,:] .> 0)
+    leaf_features = fill(Array(Int64,0), N)
+
+    nzI, nzJ = findn(Z .> 0)
+
+#    for l = leaves
+#        leaf_features[l] = find(Z[l,:] .> 0)
+#    end
+
+    for i = 1:length(nzI)
+        push(leaf_features[nzI[i]], nzJ[i])
     end
 
+    latent_effects = zeros(Float64, (length(path), length(subtree_leaves), N))
+    target_subtree_features = fill(Array(Int64,0), (length(path), length(subtree_leaves)))
 
     likelihoods = Float64[]
-    for i = indices
+    rpath = reverse(path)
+    for path_index = 1:length(path)
+        i = rpath[path_index]
         cur = tree.nodes[i]
 
-        ancestors = GetPath(tree, i)
+        if path_index > 1
+            parent = cur.parent
+            parent_path_index = find(rpath .== parent.index)[1]
+        end
+        # Don't include self in ancestors
+        ancestors = GetPath(tree, i)[2:end]
         features = Int64[]
 
         for k = 1:length(ancestors)
-            acur = ancestors[k]
+            acur = tree.nodes[ancestors[k]]
             features_start = weight_indices[acur.index]
             features_end = features_start + acur.state - 1
 
             append!(features, linspace(features_start, features_end, acur.state))
         end
       
-        features_start =  weight_indices[i]
-        features_end = weight_indices[i] + cur.state - 1
 
 
-        latent_effects = zeros(Float64, (length(subtree_leaves), N))
-
+        #latent_effects = zeros(Float64, (length(subtree_leaves), N))
+        #target_subtree_features = fill(Array(Int64,0), length(subtree_leaves))
         for j1 = 1:length(subtree_leaves)
-            total_features = Int64[]
-            append!(total_features, features)
-            append!(total_features, subtree_features[j1])
-            for j2 = 1:N
-                latent_effects[j1,j2] = sum(W[total_features, leaf_features[l2]])
+
+            if path_index == 1
+                append!(target_subtree_features[path_index,j1], features)
+                append!(target_subtree_features[path_index,j1], subtree_features[j1])
+
+                for j2 = 1:length(leaves)
+                    l2 = leaves[j2]
+                    latent_effects[path_index,j1,j2] = sum(W[target_subtree_features[path_index,j1], leaf_features[l2]])
+                end
+            else
+                features_start = weight_indices[parent.index]
+                features_end = features_start + parent.state - 1
+
+                new_features = linspace(features_start, features_end, parent.state)
+                for j2 = 1:length(leaves)
+                    l2 = leaves[j2]
+                    latent_effects[path_index,j1,j2] = sum(W[new_features, leaf_features[l2]]) +
+                                                       latent_effects[parent_path_index,j1,j2]
+                end
+            end
+
+        end
+        for j1 = 1:length(subtree_leaves)
+            for j2 = 1:length(subtree_leaves)
+                l2 = leaves[j2]
+                latent_effects[path_index,j1,l2] = sum(W[target_subtree_features[path_index,j1], target_subtree_features[path_index,j2]])
             end
         end
 
+        features_start = weight_indices[i]
+        features_end = weight_indices[i] + cur.state - 1
 
         (V, T) = all_splits(linspace(features_start, features_end, cur.state))
+
+        #do everything in reverse
+        rT = reverse(T)
+        rV = reverse(V)
         for m = 1:length(T)
             # t is the set of features to be included above the graft point,
             # so they are included in the likelihood computation for the 
             # leaves of the pruned subtree
-            t = T[m]
+            t = rT[m]
 
             likelihood = 0.0
 
             # TODO Optimize this if necessary (eg the appends in the second inner for loop can be removed)
             for j1 = 1:length(subtree_leaves)
                 l1 = subtree_leaves[j1]
-                total_features = Int64[]
-                append!(total_features, features)
-                append!(total_features, t)
-                append!(total_features, subtree_features[j1])
+                #total_features = Int64[]
+                #append!(total_features, features)
+                #append!(total_features, t)
+                #append!(total_features, subtree_features[j1])
                 for l2 = leaves
-                    latent_effect = sum(W[total_features, leaf_features[l2]])
+                    latent_effect = sum(W[t, leaf_features[l2]]) + latent_effects[j1,l2]
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
                     likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
                 end
@@ -300,16 +343,15 @@ function psi_likelihood_logpdf(model::ModelState,
                 for j2 = 1:length(subtree_leaves)
                     l2 = subtree_leaves[j2]
                     subtree_leaf_features = Int64[]
-                    append!(subtree_leaf_features, features)
                     append!(subtree_leaf_features, t)
-                    append!(subtree_leaf_features, subtree_features[j2])
-                    latent_effect = sum(W[total_features, subtree_leaf_features])
+                    append!(subtree_leaf_features, target_subtree_features[path_index,j2])
+                    latent_effect = sum(W[t, subtree_leaf_features]) + latent_effects[j1,j2]
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
                     likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
                 end
             end
-            push(likelihoods, likelihood)
-            push(tree_states, (i, V[m], t))
+            insert(likelihoods, 1, likelihood)
+            insert(tree_states, 1, (i, rV[m], t))
         end       
 
     end
@@ -404,7 +446,7 @@ function W_local_logpdf(model::ModelState,
 end
 
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
-function compute_relevant_pairs(Z::Array{Int64, 2},
+function compute_relevant_pairs(Z, #sparse or full binary array
                                 k1::Int64,
                                 k2::Int64)
     (I, J) = findn(Z[:,k1]*Z[:,k2]')
@@ -482,5 +524,5 @@ function weight_index_pointers(tree::Tree)
     weight_indices
 end
 
-end #profile
+#end #profile
 

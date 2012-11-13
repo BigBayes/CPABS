@@ -1,3 +1,4 @@
+load("sparse.jl")
 abstract Node
 
 type Nil <: Node
@@ -167,11 +168,10 @@ end
 # Returns a vector of nodes indicating the path from leaf to root
 function GetPath{T}(tree::Tree{T},
                     node_index::Int)
-    path = Array(TreeNode{T},0)
+    path = Array(Int64,0)
     current_node = tree.nodes[node_index]
-    push(path, current_node)
     while (current_node != Nil())
-        push(path, current_node)
+        push(path, current_node.index)
         current_node = current_node.parent
     end
     path
@@ -232,7 +232,7 @@ end
 
 #don't think this works right now
 function GetRandomLeaf{T}(tree::Tree{T},
-                                index::Int)
+                          index::Int)
     leaves = GetLeaves(tree,index)
     d_ind = randi(length(leaves))
     leaves[d_ind]
@@ -296,16 +296,22 @@ function ConstructZ{T}(tree::Tree{T})
         U[i] = tree.nodes[i].state
     end
 
-    Z = zeros(Int64, N, sum(U))
+    Z_I = Int64[]
+    Z_J = Int64[]
+    Z_S = Int64[]
 
     cur_j = 0
     for i = 1:2N-1
         leaves = GetLeaves(tree, i)
         for j = 1:U[i]
             cur_j += 1
-            Z[leaves, cur_j] = 1
+            for l = leaves
+                push(Z_I, l)
+                push(Z_J, cur_j)
+                push(Z_S, 1)
+            end
         end
     end
-    Z
+    sparse(Z_I, Z_J, Z_S, N, sum(U))
 end
 
