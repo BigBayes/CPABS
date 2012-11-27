@@ -420,12 +420,9 @@ function W_local_logpdf(model::ModelState,
                         relevant_pairs::Array{Int64, 2},
                         latent_effects::Array{Float64, 2},
                         observed_effects::Array{Float64, 2},
-                        k1::Int64,
-                        k2::Int64,
+                        w_old::Float64,
                         w_new::Float64)
     sigma = model.w_sigma 
-    W = model.weights
-    w_old = W[k1,k2]
 
     (_, npairs) = size(relevant_pairs)
   
@@ -445,6 +442,165 @@ function W_local_logpdf(model::ModelState,
     return logprob
 end
 
+###################################
+###### pdfs for vardim updates ####
+###################################
+
+# TODO switch to independent t distributions for each auxiliary W
+function vardim_local_logpdf(model::ModelState,
+                             Y::Array{Int64, 2},
+                             relevant_pairs::Array{Int64, 2},
+                             latent_effects::Array{Array{Float64, 2}, 1},
+                             observed_effects::Array{Float64, 2},
+                             mixture_component_index::Int64,
+                             u::Int64,
+                             node_index::Int64,
+                             effective_lambda::Float64,
+                             w_old::Float64,
+                             w_new::Float64,
+                             w_is_auxiliary::Bool)
+#                             w_k_squared_norm::Float64,
+#                             w_kp1_squared_norm::Float64)
+
+    (K,K) = size(model.weights)
+#    p_kp1 = 2K-1
+#    p_k = 2*(K-2)-1
+    if u == model.tree.nodes[node_index].state - 1
+        if w_is_auxiliary
+            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+                      observed_effects, w_old, w_old)
+
+            logprob += t_logpdf( w_new, model.nu)
+#            w_old_2 = w_old^2
+#            w_new_2 = w_new^2
+#            logprob += multivariate_t_logpdf(w_k_squared_norm + w_new_2 - w_old_2, p_k, model.nu)
+#            logprob += multivariate_t_logpdf(w_kp1_squared_norm + w_new_2 - w_old_2, p_kp1, model.nu)
+        else
+            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+                      observed_effects, w_old, w_new)
+#            logprob += multivariate_t_logpdf(w_k_squared_norm, p_k, model.nu)
+#            logprob += multivariate_t_logpdf(w_kp1_squared_norm, p_kp1, model.nu)
+        end
+    elseif u == model.tree.nodes[node_index].state
+        if w_is_auxiliary
+            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+                      observed_effects, w_old, w_old)
+
+            logprob += t_logpdf( w_new, model.nu)
+#            w_old_2 = w_old^2
+#            w_new_2 = w_new^2
+
+#            logprob += multivariate_t_logpdf(w_kp1_squared_norm + w_new_2 - w_old_2, p_kp1, model.nu)
+        else
+            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+                      observed_effects, w_old, w_new)
+#            logprob += multivariate_t_logpdf(w_kp1_squared_norm, p_kp1, model.nu)
+        end
+    else
+        logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+                  observed_effects, w_old, w_new)
+    end
+
+    logprob + poisson_logpdf(u, effective_lambda)
+end
+
+
+
+
+function vardim_local_sum(model::ModelState,
+                          Y::Array{Int64, 2},
+                          relevant_pairs::Array{Int64, 2},
+                          latent_effects::Array{Array{Float64, 2}, 1},
+                          observed_effects::Array{Float64, 2},
+                          u::Array{Int64, 1},
+                          weight_index_pointers::Array{Int64, 1},
+                          node_index::Int64,
+                          effective_lambda::Float64,
+                          w_old::Float64,
+                          w_new::Float64,
+                          w_is_auxiliary::Array{Bool, 1})
+    logprobs = vardim_local_splits(model, Y, relevant_pairs, latent_effects,
+                                   observed_effects, u, weight_index_pointers,
+                                   node_index, effective_lambda, w_old, w_new,
+                                   w_is_auxiliary)
+    logsumexp(logprobs)
+end
+
+function vardim_local_splits(model::ModelState,
+                             Y::Array{Int64, 2},
+                             relevant_pairs::Array{Int64, 2},
+                             latent_effects::Array{Array{Float64, 2}, 1},
+                             observed_effects::Array{Float64, 2},
+                             u::Array{Int64, 1},
+                             weight_index_pointers::Array{Int64, 1},
+                             node_index::Int64,
+                             effective_lambda::Float64,
+                             w_old::Float64,
+                             w_new::Float64,
+                             w_is_auxiliary::Array{Bool, 1})
+    logprobs = Float64[]
+
+    num_components = length(latent_effects)
+
+    new_k = weight_index_pointers[node_index] + u
+    for mixture_component = 1:num_components
+        logprob = vardim_local_logpdf(model, Y, relevant_pairs, latent_effects,
+                                      observed_effects, mixture_component, 
+                                      u[mixture_component], node_index,
+                                      effective_lambda, w_old, w_new,
+                                      w_is_auxiliary[mixture_component]) 
+        push(logprobs,logprob)
+    end
+    logprobs
+end
+
+function vardim_logpdf(model::ModelState,
+                       Y::Array{Int64, 2},
+                       latent_effects::Array{Float64, 2},
+                       observed_effects::Array{Float64, 2},
+                       u::Int64,
+                       weight_index_pointers::Array{Int64, 1},
+                       node_index::Int64,
+                       effective_lambda::Float64,
+                       w_is_auxiliary::Array{Bool, 2})
+    (N,N) = size(Y)
+
+    logprob = 0.0
+    for i = 1:N
+        for j = 1:N
+            le = latent_effects[i,j]
+            oe = observed_effects[i,j]
+            logprob += log_logit(le + oe, Y[i,j])   
+        end
+    end
+    W = model.weights
+    nu = model.nu
+    for k = find(w_is_auxiliary)
+        logprob += t_logpdf(W[k], nu)
+    end
+
+    logprob + poisson_logpdf(u, effective_lambda)
+end
+function vardim_splits(model::ModelState,
+                       Y::Array{Int64, 2},
+                       latent_effects::Array{Array{Float64, 2}, 1},
+                       observed_effects::Array{Float64, 2},
+                       U::Array{Int64, 1},
+                       weight_index_pointers::Array{Int64, 1},
+                       node_index::Int64,
+                       effective_lambda::Float64,
+                       w_is_auxiliary::Array{Array{Bool, 2}, 1})
+    logprobs = zeros(length(U))
+    for u_ind = 1:length(U)
+        u = U[u_ind]
+        logprobs[u_ind] = vardim_logpdf(model,Y, latent_effects[u_ind], observed_effects,
+                                        u, weight_index_pointers, node_index,
+                                        effective_lambda, w_is_auxiliary)
+    end
+    logprobs
+end
+# Utility Functions
+
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
 function compute_relevant_pairs(Z, #sparse or full binary array
                                 k1::Int64,
@@ -452,8 +608,6 @@ function compute_relevant_pairs(Z, #sparse or full binary array
     (I, J) = findn(Z[:,k1]*Z[:,k2]')
     [I', J']
 end
-
-# Utility Functions
 
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
 function compute_observed_effects(model::ModelState,

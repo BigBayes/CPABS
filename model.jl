@@ -4,6 +4,7 @@ type ModelState
     lambda::Float64
     gamma::Float64
     w_sigma::Float64
+    nu::Float64
     tree::Tree{Int64}
     weights::Array{Float64,2}
     beta::Array{Float64,1}
@@ -12,6 +13,11 @@ type ModelState
     a::Array{Float64,1}
     b::Array{Float64,1}
     c::Float64
+end
+
+function copy(model::ModelState)
+    ModelState(model.lambda, model.gamma, model.w_sigma, model.nu, model.tree, copy(model.weights), copy(model.beta), 
+               copy(model.beta_p), copy(model.beta_c), copy(model.a), copy(model.b), model.c)
 end
 
 type ModelSpecification
