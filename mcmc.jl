@@ -47,8 +47,8 @@ function mcmc(Y::Array{Int64,2},
 
     for iter = 1:iterations
         println("Iteration: ", iter)
-        tree_prob = full_pdf(model, model_spec, Y, X_r, X_p, X_c)
-        println("Tree probability: ", tree_prob)
+    #    tree_prob = full_pdf(model, model_spec, Y, X_r, X_p, X_c)
+    #    println("Tree probability: ", tree_prob)
         mcmc_sweep(model, model_spec, Y, X_r, X_p, X_c)
     end
 end
@@ -66,6 +66,9 @@ function mcmc_sweep(model::ModelState,
 
     psi_time = time()
 
+    tree_prior = prior(model) 
+    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
     #for prune_index = 1:2N-1
     for prune_index = 1:N # only prune leaves, it's much faster
 
@@ -107,6 +110,8 @@ function mcmc_sweep(model::ModelState,
 
         state_index = randmult(probs)
 
+        assert(pstates[state_index] == lstates[state_index])
+
         (graft_index, graftpoint_features, parent_features) = pstates[state_index]
 
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
@@ -128,7 +133,11 @@ function mcmc_sweep(model::ModelState,
     beta = model.beta
     beta_p = model.beta_p
     beta_c = model.beta_c
- 
+
+    tree_prior = prior(model) 
+    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
+
     for i = 1:N
         for j = 1:N
             latent_effects[i,j] = (Z[i,:] * W * Z[j,:]')[1]
@@ -169,10 +178,27 @@ function mcmc_sweep(model::ModelState,
 
     W_time = time() - W_time
 
+    tree_prior = prior(model) 
+    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
+
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
     root_to_leaf = reverse(leaf_to_root)
+
+
+    println("constuctZ")
+    Z = ConstructZ(tree)
+    (K, K) = size(model.weights)
+    old_relevant_pairs = Array(Array{Int64, 2}, (K,K))
+    println("construct relevant pairs")
+    for k1 = 1:K
+        for k2 = 1:K
+            old_relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
+            old_relevant_pairs[k2,k1] = old_relevant_pairs[k1,k2]
+        end
+    end 
 
 
     vardim_time = time()
@@ -192,7 +218,7 @@ function mcmc_sweep(model::ModelState,
 
         Z = ConstructZ(tree)
         # construct new Z col
-        println("construct Znew")
+        #println("construct Znew")
         leaves = GetLeaves(tree, node_index)
         Zk = zeros(Int64, N)
         Zk[leaves] = 1
@@ -205,26 +231,28 @@ function mcmc_sweep(model::ModelState,
 
         new_relevant_pairs = Array(Array{Int64, 2}, (K+1,K+1))
         # Leave space for new feature's weights
-        println("construct newmodel weights")
+        #println("construct newmodel weights")
         nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K]
         new_model.weights[nonzero_element_indices, nonzero_element_indices] = model.weights
         W = new_model.weights
 
+        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = old_relevant_pairs
+
 #        for k1 = nonzero_element_indices
 #        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = relevant_pairs
 
+        #println("construct new relevant pairs")
         new_k  = end_index + 1
         # update end_index+1 row and col of relevant pairs
         for k1 = 1:K+1
-            for k2 = 1:K+1
-                new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
-                new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
-            end
+            k2 = new_k
+            new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
+            new_relevant_pairs[k2,k1] = new_relevant_pairs[k1,k2]
         end 
 
         # All new weights initialized to zero, no need to update latent effects for the new feature
         # need to update them for the cases where we are removing features
-        println("construct component_latent_effects")
+        #println("construct component_latent_effects")
         component_latent_effects = Array(Array{Float64,2}, u+2)
         num_local_mutations = zeros(Int64, u+2)
         for u_ind = 1:u+2
@@ -253,22 +281,11 @@ function mcmc_sweep(model::ModelState,
             end
         end
     
-        println("construct w norms") 
-        w_k_norm = zeros(Float64, u+2)
-        for u_ind = 1:u
-            removed_k = start_index + u_ind - 1
-            new_k = end_index+1
-
-            w_k_norm[u_ind] = sum(W[removed_k,:].^2) + sum(W[:,removed_k].^2) -
-                              W[removed_k, new_k]^2 - W[new_k, removed_k]^2 - W[removed_k, removed_k]^2
-        end
-        w_kp1_norm = 0.0
- 
-        println("slice sample") 
+        #println("slice sample") 
         for k1 = start_index:end_index+1
             for k2 = 1:K+1
 
-                println("slice sample prep, start, end:", start_index, " ", end_index)
+                #println("slice sample prep, start, end:", start_index, " ", end_index)
 
                 w_is_auxiliary = zeros(Bool, length(num_local_mutations))
 
@@ -282,7 +299,7 @@ function mcmc_sweep(model::ModelState,
                     end
                 end
 
-                println("length(num_local_mutations): ", length(num_local_mutations))
+                #println("length(num_local_mutations): ", length(num_local_mutations))
                 if k1 == end_index+1 || k2 == end_index+1
                     w_is_auxiliary = ones(Bool, length(num_local_mutations))
                     w_is_auxiliary[end] = false
@@ -291,10 +308,10 @@ function mcmc_sweep(model::ModelState,
 
 
                 w_cur = W[k1,k2]
-                println("sample")
+                #println("sample")
 
                 w_old = w_cur
-                g = x -> vardim_local_sum(model, Y, new_relevant_pairs[k1,k2], component_latent_effects, observed_effects,
+                g = x -> vardim_local_sum(new_model, Y, new_relevant_pairs[k1,k2], component_latent_effects, observed_effects,
                                           num_local_mutations, W_index_pointers, node_index, effective_lambda, w_old,
                                           x, w_is_auxiliary) 
                 gx0 = g(w_cur)
@@ -305,7 +322,7 @@ function mcmc_sweep(model::ModelState,
                 W[k1,k2] = w_cur
 
 
-                println("adjust precomputations")
+                #println("adjust precomputations")
 
                 for p = 1:size(new_relevant_pairs[k1,k2])[2]
                     i = new_relevant_pairs[k1,k2][1,p]
@@ -320,22 +337,45 @@ function mcmc_sweep(model::ModelState,
 
                 end
                 
-                for u_ind = find(w_is_auxiliary)
-                    w_k_norm[u_ind] += w_cur^2 - w_old^2 
-                end
-
-                w_kp1_norm += w_cur^2 - w_old^2
  
             end
         end
 
+        # Construct w_is_auxiliary for each component
+        w_is_auxiliary = Array(Array{Bool,2},0)
+        U = [ x <= u ? u-1 : x == u+1 ? u : u+1 for x = 1:u+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
+        for u_ind = 1:u
+            k_ind = start_index + u_ind - 1
+            push(w_is_auxiliary,[x == k_ind  || y == k_ind ||
+                                 x == new_k || y == new_k
+                                 for x = 1:K+1, y = 1:K+1] )
+        end
+
+        push(w_is_auxiliary,[x === new_k || y == new_k for x = 1:K+1, y = 1:K+1] )
+        push(w_is_auxiliary, zeros(Bool, (K+1,K+1)))
+
+        logprobs = vardim_splits(new_model, Y, component_latent_effects, observed_effects, U, W_index_pointers, 
+                                 node_index, effective_lambda, w_is_auxiliary) 
+
+        sampled_component = randmult(exp_normalize(logprobs)) 
+
+        new_u = U[sampled_component]
+        new_K = K + new_u - u
+        new_valid_indices = find(!w_is_auxiliary[sampled_component])
+        new_W = reshape(W[new_valid_indices], (new_K, new_K)) 
+        old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
+
+        model.weights = new_W
+        tree.nodes[node_index].state = new_u
 
 
     end
 
     vardim_time = time() - vardim_time
 
+    (K,K) = size(model.weights)
     println("MCMC Timings (psi, W, vardim) = ", (psi_time, W_time, vardim_time))
+    println("K: ", K)
 end
 
 

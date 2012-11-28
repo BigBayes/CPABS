@@ -78,6 +78,7 @@ function psi_infsites_logpdf(model::ModelState,
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda
+    weight_indices = weight_index_pointers(tree)
 
     #psi_probs = prior_path(tree, pruned_index, path_leaf_index)
     psi_probs = prior_tree(tree, pruned_index)
@@ -146,8 +147,11 @@ function psi_infsites_logpdf(model::ModelState,
 
         descendant_mutation_probs[i] += child_mutation_contributions
 
+        features_start = weight_indices[i]
+        features_end = weight_indices[i] + cur.state - 1
+
         if contains(path, i)
-            (U, V) = all_splits(linspace(1, cur.state, cur.state))
+            (U, V) = all_splits(linspace(features_start, features_end, cur.state))
             for j = 1:length(U)
                 u = U[j]
                 v = V[j]
@@ -436,10 +440,10 @@ function W_local_logpdf(model::ModelState,
 
         le += w_new - w_old
 
-        logprob += log_logit(le + oe, Y[i,j]) + normal_logpdf(w_new/sigma)
+        logprob += log_logit(le + oe, Y[i,j])
     end 
 
-    return logprob
+    return logprob + normal_logpdf(w_new/sigma)
 end
 
 ###################################
@@ -463,6 +467,7 @@ function vardim_local_logpdf(model::ModelState,
 #                             w_kp1_squared_norm::Float64)
 
     (K,K) = size(model.weights)
+    sigma = model.w_sigma
 #    p_kp1 = 2K-1
 #    p_k = 2*(K-2)-1
     if u == model.tree.nodes[node_index].state - 1
@@ -470,7 +475,7 @@ function vardim_local_logpdf(model::ModelState,
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
-            logprob += t_logpdf( w_new, model.nu)
+            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old/sigma)
 #            w_old_2 = w_old^2
 #            w_new_2 = w_new^2
 #            logprob += multivariate_t_logpdf(w_k_squared_norm + w_new_2 - w_old_2, p_k, model.nu)
@@ -486,7 +491,7 @@ function vardim_local_logpdf(model::ModelState,
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
-            logprob += t_logpdf( w_new, model.nu)
+            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old/sigma)
 #            w_old_2 = w_old^2
 #            w_new_2 = w_new^2
 
@@ -573,10 +578,17 @@ function vardim_logpdf(model::ModelState,
             logprob += log_logit(le + oe, Y[i,j])   
         end
     end
+
+
     W = model.weights
     nu = model.nu
     for k = find(w_is_auxiliary)
         logprob += t_logpdf(W[k], nu)
+    end
+
+    sigma = model.w_sigma
+    for k = find(!w_is_auxiliary)
+        logprob += normal_logpdf(W[k]/sigma)
     end
 
     logprob + poisson_logpdf(u, effective_lambda)
@@ -595,7 +607,7 @@ function vardim_splits(model::ModelState,
         u = U[u_ind]
         logprobs[u_ind] = vardim_logpdf(model,Y, latent_effects[u_ind], observed_effects,
                                         u, weight_index_pointers, node_index,
-                                        effective_lambda, w_is_auxiliary)
+                                        effective_lambda, w_is_auxiliary[u_ind])
     end
     logprobs
 end
@@ -608,6 +620,26 @@ function compute_relevant_pairs(Z, #sparse or full binary array
     (I, J) = findn(Z[:,k1]*Z[:,k2]')
     [I', J']
 end
+
+#function compute_relevant_pairs(Z,
+#                                k1::Int64,
+#                                k2::Int64)
+#    k1_I = find(Z[:,k1])
+#    k2_I = find(Z[:,k2])
+#
+#    I = Int64[]
+#    J = Int64[]
+#
+#    for i = k1_I
+#        for j = k2_I
+#            push(I,i)
+#            push(J,j)
+#        end
+#    end
+#
+#    [I', J']
+#
+#end
 
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
 function compute_observed_effects(model::ModelState,
