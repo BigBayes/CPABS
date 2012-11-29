@@ -14,13 +14,15 @@ function full_pdf(model::ModelState,
 end
 
 function prior(model::ModelState)
-    total_prob = sum(normal_logpdf(model.weights))
-    total_prob += sum(normal_logpdf(model.beta))
-    total_prob += sum(normal_logpdf(model.beta_p))
-    total_prob += sum(normal_logpdf(model.beta_c))
-    total_prob += sum(normal_logpdf(model.a))
-    total_prob += sum(normal_logpdf(model.b))
-    total_prob += normal_logpdf(model.c)
+    w_sigma = model.w_sigma
+    b_sigma = 1.0
+    total_prob = sum(normal_logpdf(model.weights, w_sigma ))
+    total_prob += sum(normal_logpdf(model.beta, b_sigma))
+    total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
+    total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
+    total_prob += sum(normal_logpdf(model.a, b_sigma))
+    total_prob += sum(normal_logpdf(model.b, b_sigma))
+    total_prob += normal_logpdf(model.c, b_sigma)
 
     gam = model.gamma
     lambda = model.lambda
@@ -55,7 +57,7 @@ function likelihood(model::ModelState,
     for i = indices
         for j = 1:N
             logit_arg = squeeze( Z[i,:] * W * Z[j,:]' + 
-                        compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c))
+                        compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c))[1]
 
             total_prob += log_logit(logit_arg, Y[i,j])
         end
@@ -342,6 +344,10 @@ function psi_likelihood_logpdf(model::ModelState,
                     latent_effect = sum(W[t, leaf_features[l2]]) + latent_effects[j1,l2]
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
                     likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    if likelihood == -Inf
+                        println("leaves")
+                        println(latent_effect,",",observed_parenthood_effects[j1,l2],",",observed_childhood_effects[j1,l2])
+                    end
                 end
 
                 for j2 = 1:length(subtree_leaves)
@@ -352,13 +358,20 @@ function psi_likelihood_logpdf(model::ModelState,
                     latent_effect = sum(W[t, subtree_leaf_features]) + latent_effects[j1,j2]
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
                     likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    if likelihood == -Inf
+                        println("subtree leaves")
+                        println(latent_effect,",",observed_parenthood_effects[j1,l2],",",observed_childhood_effects[j1,l2])
+                    end
+                
                 end
+    
             end
             insert(likelihoods, 1, likelihood)
             insert(tree_states, 1, (i, rV[m], t))
         end       
 
     end
+
     (likelihoods, tree_states)
 end
 
@@ -443,7 +456,7 @@ function W_local_logpdf(model::ModelState,
         logprob += log_logit(le + oe, Y[i,j])
     end 
 
-    return logprob + normal_logpdf(w_new/sigma)
+    return logprob + normal_logpdf(w_new, sigma)
 end
 
 ###################################
@@ -475,7 +488,7 @@ function vardim_local_logpdf(model::ModelState,
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
-            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old/sigma)
+            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
 #            w_old_2 = w_old^2
 #            w_new_2 = w_new^2
 #            logprob += multivariate_t_logpdf(w_k_squared_norm + w_new_2 - w_old_2, p_k, model.nu)
@@ -491,7 +504,7 @@ function vardim_local_logpdf(model::ModelState,
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
-            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old/sigma)
+            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
 #            w_old_2 = w_old^2
 #            w_new_2 = w_new^2
 
@@ -588,7 +601,7 @@ function vardim_logpdf(model::ModelState,
 
     sigma = model.w_sigma
     for k = find(!w_is_auxiliary)
-        logprob += normal_logpdf(W[k]/sigma)
+        logprob += normal_logpdf(W[k], sigma)
     end
 
     logprob + poisson_logpdf(u, effective_lambda)

@@ -68,7 +68,7 @@ function mcmc_sweep(model::ModelState,
 
     tree_prior = prior(model) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
+    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
     #for prune_index = 1:2N-1
     for prune_index = 1:N # only prune leaves, it's much faster
 
@@ -105,6 +105,8 @@ function mcmc_sweep(model::ModelState,
             maxll = max(likelihoods)
             println("ind,logprob,prob: ", (nan_ind, logprobs[nan_ind], probs[nan_ind]))
             println("maxprior, maxlikelihood = ", (maxprior, maxll))
+            println(likelihoods)
+            println(lstates)
             assert(false)
         end
 
@@ -136,7 +138,7 @@ function mcmc_sweep(model::ModelState,
 
     tree_prior = prior(model) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
+    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
     for i = 1:N
         for j = 1:N
@@ -180,7 +182,7 @@ function mcmc_sweep(model::ModelState,
 
     tree_prior = prior(model) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL[1], ",", tree_prior, ",",tree_LL[1])
+    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
@@ -208,8 +210,6 @@ function mcmc_sweep(model::ModelState,
         effective_lambda = model.lambda * (1 - model.gamma) * model.gamma^(tree.nodes[node_index].num_ancestors - 1)
 
         (K, K) = size(model.weights)
-        new_model = copy(model)
-        new_model.weights = zeros(Float64, (K+1,K+1))
         
         W_index_pointers = weight_index_pointers(model.tree)
         start_index = W_index_pointers[node_index]
@@ -232,6 +232,8 @@ function mcmc_sweep(model::ModelState,
         new_relevant_pairs = Array(Array{Int64, 2}, (K+1,K+1))
         # Leave space for new feature's weights
         #println("construct newmodel weights")
+        new_model = copy(model)
+        new_model.weights = zeros(Float64, (K+1,K+1))
         nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K]
         new_model.weights[nonzero_element_indices, nonzero_element_indices] = model.weights
         W = new_model.weights
@@ -365,9 +367,21 @@ function mcmc_sweep(model::ModelState,
         new_W = reshape(W[new_valid_indices], (new_K, new_K)) 
         old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
 
+        oldW = copy(model.weights)
+
         model.weights = new_W
         tree.nodes[node_index].state = new_u
 
+#        tree_prior = prior(model) 
+#        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+#        println("new probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+        latent_effects = component_latent_effects[sampled_component]
+
+#        println("new_u,weight_prob,new_weight_prob ", new_u, ",", sum(normal_logpdf(oldW, model.w_sigma )), ",", sum(normal_logpdf(new_W, model.w_sigma )))
+
+        println("K,eff_lambda,Delta_K: ", new_K, ",",effective_lambda, ",",new_u - u)
+        println(logprobs)
 
     end
 

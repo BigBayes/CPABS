@@ -1,7 +1,7 @@
 
 # Utility probability functions
-function normal_logpdf(x)
-    -x.*x/2 - log(sqrt(2pi))
+function normal_logpdf(x, sigma)
+    -x.*x/(2sigma*sigma) - log(sqrt(2pi)*sigma)
 end
 
 function poisson_logpdf(k,lambda)
@@ -19,12 +19,19 @@ function multivariate_t_logpdf(x_squared_norm, p, nu)
 end
 
 function log_logit(effect, y)
+    value = 0.0
     if y == 1
-        return -log(1 + exp(-effect))
+        value = -log(1 + exp(-effect))
+        if isinf(value)
+            value = effect
+        end
     elseif y == 0
-        return -effect - log(1 + exp(-effect))
+        value = -effect - log(1 + exp(-effect))
+        if isinf(value)
+            value = 0.0
+        end
     end
-    return 0.0
+    return value
 end
 
 
