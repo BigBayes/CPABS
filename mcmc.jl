@@ -124,7 +124,7 @@ function mcmc_sweep(model::ModelState,
     W_time = time()
     (K,K) = size(model.weights)
 
-    num_W_sweeps = 1
+    num_W_sweeps = 5
     num_W_slice_steps = 1
     Z = ConstructZ(tree)
     W = model.weights
@@ -283,63 +283,65 @@ function mcmc_sweep(model::ModelState,
             end
         end
     
-        #println("slice sample") 
-        for k1 = start_index:end_index+1
-            for k2 = 1:K+1
+        #println("slice sample")
+        for iter = 1:num_W_sweeps
+            for k1 = start_index:end_index+1
+                for k2 = 1:K+1
 
-                #println("slice sample prep, start, end:", start_index, " ", end_index)
+                    #println("slice sample prep, start, end:", start_index, " ", end_index)
 
-                w_is_auxiliary = zeros(Bool, length(num_local_mutations))
+                    w_is_auxiliary = zeros(Bool, length(num_local_mutations))
 
-                aux1 = k1 - start_index + 1
-                aux2 = k2 - start_index + 1
+                    aux1 = k1 - start_index + 1
+                    aux2 = k2 - start_index + 1
 
-                if start_index <= end_index
-                    w_is_auxiliary[aux1] = true
-                    if aux2 > 0 && aux2 <= u
-                        w_is_auxiliary[aux2] = true
-                    end
-                end
-
-                #println("length(num_local_mutations): ", length(num_local_mutations))
-                if k1 == end_index+1 || k2 == end_index+1
-                    w_is_auxiliary = ones(Bool, length(num_local_mutations))
-                    w_is_auxiliary[end] = false
-                end
-
-
-
-                w_cur = W[k1,k2]
-                #println("sample")
-
-                w_old = w_cur
-                g = x -> vardim_local_sum(new_model, Y, new_relevant_pairs[k1,k2], component_latent_effects, observed_effects,
-                                          num_local_mutations, W_index_pointers, node_index, effective_lambda, w_old,
-                                          x, w_is_auxiliary) 
-                gx0 = g(w_cur)
-                for slice_iter = 1:num_W_slice_steps
-                    (w_cur, gx0) = slice_sampler(w_cur, g, 1.0, 10, -Inf, Inf, gx0)
-                end
-              
-                W[k1,k2] = w_cur
-
-
-                #println("adjust precomputations")
-
-                for p = 1:size(new_relevant_pairs[k1,k2])[2]
-                    i = new_relevant_pairs[k1,k2][1,p]
-                    j = new_relevant_pairs[k1,k2][2,p]
-
-                    latent_effects[i,j] += w_cur - w_old
-
-
-                    for u_ind = find(!w_is_auxiliary)
-                        component_latent_effects[u_ind][i,j] += w_cur - w_old
+                    if start_index <= end_index
+                        w_is_auxiliary[aux1] = true
+                        if aux2 > 0 && aux2 <= u
+                            w_is_auxiliary[aux2] = true
+                        end
                     end
 
+                    #println("length(num_local_mutations): ", length(num_local_mutations))
+                    if k1 == end_index+1 || k2 == end_index+1
+                        w_is_auxiliary = ones(Bool, length(num_local_mutations))
+                        w_is_auxiliary[end] = false
+                    end
+
+
+
+                    w_cur = W[k1,k2]
+                    #println("sample")
+
+                    w_old = w_cur
+                    g = x -> vardim_local_sum(new_model, Y, new_relevant_pairs[k1,k2], component_latent_effects, observed_effects,
+                                              num_local_mutations, W_index_pointers, node_index, effective_lambda, w_old,
+                                              x, w_is_auxiliary) 
+                    gx0 = g(w_cur)
+                    for slice_iter = 1:num_W_slice_steps
+                        (w_cur, gx0) = slice_sampler(w_cur, g, 1.0, 10, -Inf, Inf, gx0)
+                    end
+                  
+                    W[k1,k2] = w_cur
+
+
+                    #println("adjust precomputations")
+
+                    for p = 1:size(new_relevant_pairs[k1,k2])[2]
+                        i = new_relevant_pairs[k1,k2][1,p]
+                        j = new_relevant_pairs[k1,k2][2,p]
+
+                        latent_effects[i,j] += w_cur - w_old
+
+
+                        for u_ind = find(!w_is_auxiliary)
+                            component_latent_effects[u_ind][i,j] += w_cur - w_old
+                        end
+
+                    end
+                    
+     
                 end
-                
- 
             end
         end
 

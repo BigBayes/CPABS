@@ -445,8 +445,8 @@ function W_local_logpdf(model::ModelState,
   
     logprob = 0.0 
     for p = 1:npairs
-        i = relevant_pairs[p]
-        j = relevant_pairs[p]
+        i = relevant_pairs[1,p]
+        j = relevant_pairs[2,p]
 
         le = latent_effects[i,j]
         oe = observed_effects[i,j]
