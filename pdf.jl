@@ -56,8 +56,14 @@ function likelihood(model::ModelState,
     total_prob = 0.0
     for i = indices
         for j = 1:N
-            logit_arg = squeeze( Z[i,:] * W * Z[j,:]' + 
-                        compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c))[1]
+
+#            if i == 1 && mod(j, 20) == 0
+#                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
+#            end
+            oe = compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c)
+            assert(oe == 0.0)
+            logit_arg = squeeze( Z[i,:] * W * Z[j,:]' + oe)[1]
+                        
 
             total_prob += log_logit(logit_arg, Y[i,j])
         end
@@ -198,6 +204,8 @@ function psi_likelihood_logpdf(model::ModelState,
     subtree_indices_array = [k for k in subtree_indices]
     subtree_leaves = subtree_indices_array[find(subtree_indices_array .<= N)]
 
+    #println("subtree_leaves: ", subtree_leaves)
+
     i = 1
     while contains(subtree_indices, i)
         i += 1
@@ -212,7 +220,9 @@ function psi_likelihood_logpdf(model::ModelState,
     observed_parenthood_effects = zeros(Float64, (length(subtree_leaves), N))
     observed_childhood_effects = zeros(Float64, (length(subtree_leaves), N))
 
-    subtree_features = fill(Array(Int64,0), length(subtree_leaves))
+    #subtree_features = fill(Array(Int64,0), length(subtree_leaves))
+    subtree_features = [Array(Int64,0) for x = 1:length(subtree_leaves)]
+
 
     for i = 1:length(subtree_leaves)
         l1 = subtree_leaves[i]
@@ -231,7 +241,7 @@ function psi_likelihood_logpdf(model::ModelState,
 
         # cycle through all subtree leaves, find if the current node is its ancestor
         # and if so add the current node's features to the leaf's features for 
-        # likelihood computations.  Can certainly be optimized
+        # likelihood computations.  Could be optimized
         for l = 1:length(subtree_leaves)
             ancestor = tree.nodes[subtree_leaves[l]]
             while ancestor != Nil()
@@ -246,7 +256,7 @@ function psi_likelihood_logpdf(model::ModelState,
 
     Z = ConstructZ(tree)
 
-    leaf_features = fill(Array(Int64,0), N)
+    leaf_features = [Array(Int64,0) for x = 1:N] #fill(Array(Int64,0), N) this is an array of references!!! 
 
     nzI, nzJ = findn(Z .> 0)
 
@@ -259,7 +269,9 @@ function psi_likelihood_logpdf(model::ModelState,
     end
 
     latent_effects = zeros(Float64, (length(path), length(subtree_leaves), N))
-    target_subtree_features = fill(Array(Int64,0), (length(path), length(subtree_leaves)))
+    #target_subtree_features = fill(Array(Int64,0), (length(path), length(subtree_leaves)))
+    target_subtree_features = [Array(Int64,0) for x = 1:length(path), y = length(subtree_leaves)]
+
 
     likelihoods = Float64[]
     rpath = reverse(path)
@@ -271,48 +283,41 @@ function psi_likelihood_logpdf(model::ModelState,
             parent = cur.parent
             parent_path_index = find(rpath .== parent.index)[1]
         end
-        # Don't include self in ancestors
-        ancestors = GetPath(tree, i)[2:end]
-        features = Int64[]
-
-        for k = 1:length(ancestors)
-            acur = tree.nodes[ancestors[k]]
-            features_start = weight_indices[acur.index]
-            features_end = features_start + acur.state - 1
-
-            append!(features, linspace(features_start, features_end, acur.state))
-        end
-      
-
 
         #latent_effects = zeros(Float64, (length(subtree_leaves), N))
         #target_subtree_features = fill(Array(Int64,0), length(subtree_leaves))
         for j1 = 1:length(subtree_leaves)
 
             if path_index == 1
-                append!(target_subtree_features[path_index,j1], features)
+
+                assert(cur.parent == Nil())
                 append!(target_subtree_features[path_index,j1], subtree_features[j1])
 
                 for j2 = 1:length(leaves)
                     l2 = leaves[j2]
-                    latent_effects[path_index,j1,j2] = sum(W[target_subtree_features[path_index,j1], leaf_features[l2]])
+                    assert(subtree_leaves[j1] != l2)
+                    latent_effects[path_index,j1,l2] = sum(W[target_subtree_features[path_index,j1], leaf_features[l2]])
                 end
             else
                 features_start = weight_indices[parent.index]
                 features_end = features_start + parent.state - 1
 
                 new_features = linspace(features_start, features_end, parent.state)
+                target_subtree_features[path_index,j1] = copy(target_subtree_features[parent_path_index,j1])
+                append!(target_subtree_features[path_index,j1], new_features)
+
                 for j2 = 1:length(leaves)
                     l2 = leaves[j2]
-                    latent_effects[path_index,j1,j2] = sum(W[new_features, leaf_features[l2]]) +
-                                                       latent_effects[parent_path_index,j1,j2]
+                    latent_effects[path_index,j1,l2] = sum(W[new_features, leaf_features[l2]]) +
+                                                       latent_effects[parent_path_index,j1,l2]
                 end
             end
 
         end
+
         for j1 = 1:length(subtree_leaves)
             for j2 = 1:length(subtree_leaves)
-                l2 = leaves[j2]
+                l2 = subtree_leaves[j2]
                 latent_effects[path_index,j1,l2] = sum(W[target_subtree_features[path_index,j1], target_subtree_features[path_index,j2]])
             end
         end
@@ -333,7 +338,7 @@ function psi_likelihood_logpdf(model::ModelState,
 
             likelihood = 0.0
 
-            # TODO Optimize this if necessary (eg the appends in the second inner for loop can be removed)
+            # TODO Optimize this if necessary (eg the appends in the second inner for loop could be removed)
             for j1 = 1:length(subtree_leaves)
                 l1 = subtree_leaves[j1]
                 #total_features = Int64[]
@@ -341,7 +346,14 @@ function psi_likelihood_logpdf(model::ModelState,
                 #append!(total_features, t)
                 #append!(total_features, subtree_features[j1])
                 for l2 = leaves
-                    latent_effect = sum(W[t, leaf_features[l2]]) + latent_effects[j1,l2]
+                    assert(l1 != l2)
+                    latent_effect = sum(W[t, leaf_features[l2]]) + latent_effects[path_index,j1,l2]
+
+#                    if l1 == 1 && mod(l2,20) == 0
+#                        println("latent effect: ", latent_effect)
+#                        println("leaf features: ", leaf_features[l2])
+#                    end
+
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
                     likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
                     if likelihood == -Inf
@@ -352,12 +364,15 @@ function psi_likelihood_logpdf(model::ModelState,
 
                 for j2 = 1:length(subtree_leaves)
                     l2 = subtree_leaves[j2]
-                    subtree_leaf_features = Int64[]
-                    append!(subtree_leaf_features, t)
-                    append!(subtree_leaf_features, target_subtree_features[path_index,j2])
-                    latent_effect = sum(W[t, subtree_leaf_features]) + latent_effects[j1,j2]
+                    subtree_leaf_features1 = Int64[]
+                    subtree_leaf_features2 = Int64[]
+                    if l2 != l1
+                        append!(subtree_leaf_features1, target_subtree_features[path_index,j1])
+                        append!(subtree_leaf_features2, target_subtree_features[path_index,j2])
+                    end
+                    latent_effect = sum(W[t, subtree_leaf_features2]) + sum(W[t, subtree_leaf_features1]) + sum(W[t,t]) + latent_effects[path_index,j1,l2]
                     likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
-                    likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    #likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
                     if likelihood == -Inf
                         println("subtree leaves")
                         println(latent_effect,",",observed_parenthood_effects[j1,l2],",",observed_childhood_effects[j1,l2])
@@ -463,7 +478,6 @@ end
 ###### pdfs for vardim updates ####
 ###################################
 
-# TODO switch to independent t distributions for each auxiliary W
 function vardim_local_logpdf(model::ModelState,
                              Y::Array{Int64, 2},
                              relevant_pairs::Array{Int64, 2},
@@ -476,28 +490,20 @@ function vardim_local_logpdf(model::ModelState,
                              w_old::Float64,
                              w_new::Float64,
                              w_is_auxiliary::Bool)
-#                             w_k_squared_norm::Float64,
-#                             w_kp1_squared_norm::Float64)
 
     (K,K) = size(model.weights)
     sigma = model.w_sigma
-#    p_kp1 = 2K-1
-#    p_k = 2*(K-2)-1
     if u == model.tree.nodes[node_index].state - 1
         if w_is_auxiliary
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
+            # W_local_logpdf includes the prior term for w_old as if it were normal,
+            # need to subtract it out here
             logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
-#            w_old_2 = w_old^2
-#            w_new_2 = w_new^2
-#            logprob += multivariate_t_logpdf(w_k_squared_norm + w_new_2 - w_old_2, p_k, model.nu)
-#            logprob += multivariate_t_logpdf(w_kp1_squared_norm + w_new_2 - w_old_2, p_kp1, model.nu)
         else
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
-#            logprob += multivariate_t_logpdf(w_k_squared_norm, p_k, model.nu)
-#            logprob += multivariate_t_logpdf(w_kp1_squared_norm, p_kp1, model.nu)
         end
     elseif u == model.tree.nodes[node_index].state
         if w_is_auxiliary
@@ -505,14 +511,9 @@ function vardim_local_logpdf(model::ModelState,
                       observed_effects, w_old, w_old)
 
             logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
-#            w_old_2 = w_old^2
-#            w_new_2 = w_new^2
-
-#            logprob += multivariate_t_logpdf(w_kp1_squared_norm + w_new_2 - w_old_2, p_kp1, model.nu)
         else
             logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
-#            logprob += multivariate_t_logpdf(w_kp1_squared_norm, p_kp1, model.nu)
         end
     else
         logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
@@ -630,7 +631,9 @@ end
 function compute_relevant_pairs(Z, #sparse or full binary array
                                 k1::Int64,
                                 k2::Int64)
-    (I, J) = findn(Z[:,k1]*Z[:,k2]')
+    ZZ = Z[:,k1]*Z[:,k2]'
+    ZZZ = ZZ + ZZ' - ZZ .* ZZ'
+    (I, J) = findn(ZZZ)
     [I', J']
 end
 

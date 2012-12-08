@@ -20,11 +20,16 @@ function copy(model::ModelState)
                copy(model.beta_p), copy(model.beta_c), copy(model.a), copy(model.b), model.c)
 end
 
+# Model and inference specifications
 type ModelSpecification
     use_pairwise::Bool
     use_parenthood::Bool
     use_childhood::Bool
     symmetric_W::Bool
+
+    global_move_probability::Float64
+
+    debug::Bool
 end
 
 # Tree/Model Utility Functions
@@ -125,6 +130,7 @@ function graft_tree!(model::ModelState,
 end
 
 function permute_rows_and_cols!(A, permutation)
+    assert( length(permutation) == size(A)[1])
     A[:,:] = A[:,permutation]
     A[:,:] = A[permutation,:]
 end

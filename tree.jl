@@ -118,10 +118,11 @@ function InsertIndexIntoTree!{T}(tree::Tree{T},
     self_direction = find(parent.children .== self)[1]
     sibling_direction = find(parent.children .== Nil())[1]
 
-    new_sibling_direction = find(grandparent.children .== new_sibling)[1]
-
     parent.children[sibling_direction] = new_sibling 
-    grandparent.children[new_sibling_direction] = parent
+    if grandparent != Nil()
+        new_sibling_direction = find(grandparent.children .== new_sibling)[1]
+        grandparent.children[new_sibling_direction] = parent
+    end
 
     new_sibling.parent = parent
     parent.parent = grandparent

@@ -33,9 +33,9 @@ function mcmc(Y::Array{Int64,2},
     U = zeros(Int64,2N-1)
     for i = 1:2N-1
         u = rand()
-        if u > .95
+        if u > .995
             U[i] = 2
-        elseif u > .8
+        elseif u > .95
             U[i] = 1
         end
     end
@@ -47,8 +47,12 @@ function mcmc(Y::Array{Int64,2},
 
     for iter = 1:iterations
         println("Iteration: ", iter)
-    #    tree_prob = full_pdf(model, model_spec, Y, X_r, X_p, X_c)
-    #    println("Tree probability: ", tree_prob)
+        tree_prior = prior(model) 
+        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+        if iter == 2
+            model_spec.debug = true
+        end
         mcmc_sweep(model, model_spec, Y, X_r, X_p, X_c)
     end
 end
@@ -61,85 +65,13 @@ function mcmc_sweep(model::ModelState,
                     X_p::Array{Float64,2},
                     X_c::Array{Float64,2})
 
+    (N,N) = size(Y)
     tree = model.tree
-    N::Int = (length(tree.nodes)+1)/2
-
-    psi_time = time()
-
-    tree_prior = prior(model) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-    #for prune_index = 1:2N-1
-    for prune_index = 1:N # only prune leaves, it's much faster
-
-
-        parent = tree.nodes[prune_index].parent
-        if parent == Nil()
-            continue
-        end
-
-        grandparent = tree.nodes[prune_index].parent.parent
-        if grandparent == Nil()
-            continue
-        end
-
-        println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
-        prune_tree!(model, prune_index)
-        gp = grandparent.index
-
-        println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
-
-
-        leaf = GetRandomLeaf(tree, gp)
-        path = GetPath(tree, leaf)
-
-        (priors, pstates) = psi_infsites_logpdf(model, prune_index, path[1:end-1])
-        (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, path[1:end-1], Y, X_r, X_p, X_c)
-
-        logprobs = priors + likelihoods
-        probs = exp_normalize(logprobs)
-
-        if any(isnan(probs))
-            nan_ind = find(isnan(probs))[1]
-            maxprior = max(priors)
-            maxll = max(likelihoods)
-            println("ind,logprob,prob: ", (nan_ind, logprobs[nan_ind], probs[nan_ind]))
-            println("maxprior, maxlikelihood = ", (maxprior, maxll))
-            println(likelihoods)
-            println(lstates)
-            assert(false)
-        end
-
-        state_index = randmult(probs)
-
-        assert(pstates[state_index] == lstates[state_index])
-
-        (graft_index, graftpoint_features, parent_features) = pstates[state_index]
-
-        graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
-    end
-
-    psi_time = time() - psi_time
-
-    W_time = time()
-    (K,K) = size(model.weights)
-
-    num_W_sweeps = 5
-    num_W_slice_steps = 1
     Z = ConstructZ(tree)
     W = model.weights
 
     latent_effects = zeros(Float64, (N,N))
     observed_effects = zeros(Float64, (N,N))
-   
-    beta = model.beta
-    beta_p = model.beta_p
-    beta_c = model.beta_c
-
-    tree_prior = prior(model) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
     for i = 1:N
         for j = 1:N
             latent_effects[i,j] = (Z[i,:] * W * Z[j,:]')[1]
@@ -147,12 +79,65 @@ function mcmc_sweep(model::ModelState,
         end
     end
 
+
+    W_time = time()
+    sample_W(model, model_spec, Y, X_r, X_p, X_c, Z, latent_effects, observed_effects)
+    W_time = time() - W_time
+
+    tree_prior = prior(model) 
+    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+    vardim_time = time()
+    sample_Z(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
+    vardim_time = time() - vardim_time
+
+    tree_prior = prior(model) 
+    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+
+    psi_time = time()
+    sample_psi(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
+    psi_time = time() - psi_time
+
+
+
+    (K,K) = size(model.weights)
+    println("MCMC Timings (psi, W, vardim) = ", (psi_time, W_time, vardim_time))
+    println("K: ", K)
+end
+
+function sample_W(model::ModelState,
+                  model_spec::ModelSpecification,
+                  Y::Array{Int64,2},
+                  X_r::Array{Float64,3},
+                  X_p::Array{Float64,2},
+                  X_c::Array{Float64,2},
+                  Z,#sparse or full 2d array
+                  latent_effects::Array{Float64,2},
+                  observed_effects::Array{Float64,2})
+
+    (K,K) = size(model.weights)
+    (N,N) = size(Y)
+    W = model.weights
+
+    num_W_sweeps = 5
+    num_W_slice_steps = 1
+
+   
+    beta = model.beta
+    beta_p = model.beta_p
+    beta_c = model.beta_c
+
+#    tree_prior = prior(model) 
+#    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+#    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
     for iter = 1:num_W_sweeps
    
-        #for k1 = 1:3
         for k1 = 1:K
             println("W sampling k1: ", k1)
-            #for k2 = 1:3
             for k2 = 1:K
                 relevant_pairs = compute_relevant_pairs(Z,k1,k2)
                 w_cur = W[k1,k2]
@@ -173,22 +158,35 @@ function mcmc_sweep(model::ModelState,
 
                     latent_effects[i,j] += w_cur - w_old
                 end
+#                if k1 == 45 && k2 == 40
+#                    println(relevant_pairs)
+#                    assert(false)
+#                end
+
             end
 
         end 
     end
 
-    W_time = time() - W_time
+end
 
-    tree_prior = prior(model) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+function sample_Z(model::ModelState,
+                  model_spec::ModelSpecification,
+                  Y::Array{Int64,2},
+                  X_r::Array{Float64,3},
+                  X_p::Array{Float64,2},
+                  X_c::Array{Float64,2},
+                  latent_effects::Array{Float64,2},
+                  observed_effects::Array{Float64,2})
 
+    (N,N) = size(Y)
+    tree = model.tree
+    num_W_sweeps = 3
+    num_W_slice_steps = 1
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
     root_to_leaf = reverse(leaf_to_root)
-
 
     println("constuctZ")
     Z = ConstructZ(tree)
@@ -203,7 +201,6 @@ function mcmc_sweep(model::ModelState,
     end 
 
 
-    vardim_time = time()
     for node_index = root_to_leaf
         println("vardim sampling node_index: ", node_index)
         u = tree.nodes[node_index].state
@@ -385,16 +382,128 @@ function mcmc_sweep(model::ModelState,
         println("K,eff_lambda,Delta_K: ", new_K, ",",effective_lambda, ",",new_u - u)
         println(logprobs)
 
+        if model_spec.debug
+            tree_prior = prior(model) 
+            tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+            println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+        end
     end
-
-    vardim_time = time() - vardim_time
-
-    (K,K) = size(model.weights)
-    println("MCMC Timings (psi, W, vardim) = ", (psi_time, W_time, vardim_time))
-    println("K: ", K)
 end
 
 
+function sample_psi(model::ModelState,
+                    model_spec::ModelSpecification,
+                    Y::Array{Int64,2},
+                    X_r::Array{Float64,3},
+                    X_p::Array{Float64,2},
+                    X_c::Array{Float64,2},
+                    latent_effects::Array{Float64,2},
+                    observed_effects::Array{Float64,2})
+
+    tree = model.tree
+    N::Int = (length(tree.nodes)+1)/2
+
+#    tree_prior = prior(model) 
+#    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+#    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+    #for prune_index = 1:2N-1
+    for prune_index = 1:N # only prune leaves, it's much faster
+
+
+        parent = tree.nodes[prune_index].parent
+        if parent == Nil()
+            continue
+        end
+
+        grandparent = tree.nodes[prune_index].parent.parent
+        if grandparent == Nil()
+            continue
+        end
+
+        println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
+        prune_tree!(model, prune_index)
+        gp = grandparent.index
+
+
+        println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
+
+        original_sibling = grandparent.children[find( grandparent.children .!= Nil())][1]
+
+        if rand() < model_spec.global_move_probability
+            subtree_indices = GetSubtreeIndicies(tree, prune_index)
+            i = 1
+            while contains(subtree_indices, i)
+                i += 1
+            end
+            root = FindRoot(tree, i)
+            path = GetLeafToRootOrdering(tree, root.index)
+        else
+            leaf = GetRandomLeaf(tree, original_sibling.index)
+            path = GetPath(tree, leaf)
+        end
+
+        sibling_path_index = find(path .== original_sibling.index)
+
+        (priors, pstates) = psi_infsites_logpdf(model, prune_index, path)
+        (likelihoods, lstates) = psi_likelihood_logpdf(model, prune_index, path, Y, X_r, X_p, X_c)
+
+        logprobs = priors + likelihoods
+        probs = exp_normalize(logprobs)
+
+        if any(isnan(probs))
+            nan_ind = find(isnan(probs))[1]
+            maxprior = max(priors)
+            maxll = max(likelihoods)
+            println("ind,logprob,prob: ", (nan_ind, logprobs[nan_ind], probs[nan_ind]))
+            println("maxprior, maxlikelihood = ", (maxprior, maxll))
+            println(likelihoods)
+            println(lstates)
+            assert(false)
+        end
+
+        state_index = randmult(probs)
+
+        subtree_indices = GetSubtreeIndicies(tree, prune_index)
+        i = 1
+        while contains(subtree_indices, i)
+            i += 1
+        end
+        root = FindRoot(tree, i)
+
+        A = Int64[]
+        graft_indices = Int64[]
+        new_parent_features = Array(Array{Int64,1},0)
+        for i = 1:length(pstates)
+            if pstates[i][1] == original_sibling.index
+                push(A, i)
+            end 
+
+            push(graft_indices, pstates[i][1])
+            push(new_parent_features, pstates[i][3])
+        end
+
+
+#        println("original_index,insert_index,root: ", original_sibling.index, ",", pstates[state_index][1], ",", root.index)
+#        println("logprobs: ", logprobs)
+#        println("graft indices: ", graft_indices)
+#        println("new parent features: ", new_parent_features)
+#        println("start_probs, end_prob: ",logprobs[A]  ,", ", logprobs[state_index])
+#        println("start_prior, start_LL: ",priors[A], ", ", likelihoods[A])
+#        println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
+
+
+        assert(pstates[state_index] == lstates[state_index])
+
+        (graft_index, graftpoint_features, parent_features) = pstates[state_index]
+
+        graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
+
+#        tree_prior = prior(model) 
+#        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+#        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    end
+end
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)
     fx::Float64 = f(0.5(a+b))::Float64
