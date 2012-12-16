@@ -17,13 +17,72 @@ function TreeNode{T}(state::T, ind::Int64)
     TreeNode{T}(state,Nil(),Array(Node,2),ind,1,0)
 end
 
-show(tree::TreeNode) = print(tree.index)
+show(tree_node::TreeNode) = print(tree_node.index)
+copy(tree_node::TreeNode) = TreeNode(copy(tree_node.state), tree_node.index)
+function ==(n1::TreeNode, n2::TreeNode)
+    b1 = n1.state == n2.state && n1.index == n2.index
+    if n1.parent == Nil() || n2.parent == Nil()
+        b2 = n1.parent == n2.parent
+    else
+        b2 = n1.parent.index == n2.parent.index
+    end
+
+    if n1.children[1] == Nil() || n2.children[1] == Nil()
+        b3 = n1.children[1] == n2.children[1] && n2.children[2] == n2.children[2]
+    else
+        b3 = n1.children[1].index == n2.children[1].index &&
+             n2.children[2].index == n2.children[2].index
+    end
+
+    b1 && b2 && b3
+end
 
 type Tree{T}
     nodes::Array{TreeNode{T},1}
     Tree() = new()
 end
 
+function ==(tree1::Tree, tree2::Tree)
+    b = length(tree1.nodes) == length(tree2.nodes)
+    if !b
+        return b
+    end
+
+    for i = 1:length(tree1.nodes)
+        b = b && tree1.nodes[i] == tree2.nodes[i]
+    end
+    b
+end
+
+function copy(tree::Tree{Int64})
+    n = length(tree.nodes)
+    new_tree = Tree{Int64}()
+    new_tree.nodes = Array(TreeNode{Int64}, n)  
+    for i = 1:n
+        new_tree.nodes[i] = copy(tree.nodes[i])
+        new_tree.nodes[i].num_ancestors = tree.nodes[i].num_ancestors
+        new_tree.nodes[i].num_leaves = tree.nodes[i].num_leaves
+    end
+
+    for i = 1:n
+        if tree.nodes[i].parent == Nil()
+            p = Nil()
+        else
+            p = new_tree.nodes[tree.nodes[i].parent.index]
+        end
+
+        if tree.nodes[i].children[1] == Nil()
+            l = Nil()
+            r = Nil()
+        else
+            l = new_tree.nodes[tree.nodes[i].children[1].index]
+            r = new_tree.nodes[tree.nodes[i].children[2].index]
+        end
+        new_tree.nodes[i].parent = p
+        new_tree.nodes[i].children = [l, r]
+    end
+    new_tree
+end
 
 function Tree(U::Array{Int64,1})
     (_2nm1,) = size(U)

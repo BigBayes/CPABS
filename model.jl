@@ -16,7 +16,7 @@ type ModelState
 end
 
 function copy(model::ModelState)
-    ModelState(model.lambda, model.gamma, model.w_sigma, model.nu, model.tree, copy(model.weights), copy(model.beta), 
+    ModelState(model.lambda, model.gamma, model.w_sigma, model.nu, copy(model.tree), copy(model.weights), copy(model.beta), 
                copy(model.beta_p), copy(model.beta_c), copy(model.a), copy(model.b), model.c)
 end
 

@@ -61,8 +61,7 @@ function likelihood(model::ModelState,
 #                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
 #            end
             oe = compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c)
-            assert(oe == 0.0)
-            logit_arg = squeeze( Z[i,:] * W * Z[j,:]' + oe)[1]
+            logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
                         
 
             total_prob += log_logit(logit_arg, Y[i,j])
@@ -188,6 +187,7 @@ end
 # Assumes features are moved around appropriately after pruning the tree (ie the
 # features above the pruned parent are moved to the unpruned child
 function psi_likelihood_logpdf(model::ModelState,
+                               model_spec::ModelSpecification,
                                pruned_index::Int64,
                                path::Array{Int64,1},
                                Y::Array{Int64,2},
@@ -523,8 +523,33 @@ function vardim_local_logpdf(model::ModelState,
     logprob + poisson_logpdf(u, effective_lambda)
 end
 
+function vardim_local_splits(model::ModelState,
+                             Y::Array{Int64, 2},
+                             relevant_pairs::Array{Int64, 2},
+                             latent_effects::Array{Array{Float64, 2}, 1},
+                             observed_effects::Array{Float64, 2},
+                             u::Array{Int64, 1},
+                             weight_index_pointers::Array{Int64, 1},
+                             node_index::Int64,
+                             effective_lambda::Float64,
+                             constant_terms::Array{Float64,1},
+                             w_old::Float64,
+                             w_new::Float64,
+                             w_is_auxiliary::Array{Bool, 1})
 
+    num_components = length(latent_effects)
+    logprobs = zeros(num_components)
 
+    for mixture_component = 1:num_components
+        logprob = vardim_local_logpdf(model, Y, relevant_pairs, latent_effects,
+                                      observed_effects, mixture_component, 
+                                      u[mixture_component], node_index,
+                                      effective_lambda, w_old, w_new,
+                                      w_is_auxiliary[mixture_component]) 
+        logprobs[mixture_component] = logprob
+    end
+    logprobs + constant_terms
+end
 
 function vardim_local_sum(model::ModelState,
                           Y::Array{Int64, 2},
@@ -535,42 +560,15 @@ function vardim_local_sum(model::ModelState,
                           weight_index_pointers::Array{Int64, 1},
                           node_index::Int64,
                           effective_lambda::Float64,
+                          constant_terms::Array{Float64,1},
                           w_old::Float64,
                           w_new::Float64,
                           w_is_auxiliary::Array{Bool, 1})
     logprobs = vardim_local_splits(model, Y, relevant_pairs, latent_effects,
                                    observed_effects, u, weight_index_pointers,
-                                   node_index, effective_lambda, w_old, w_new,
-                                   w_is_auxiliary)
+                                   node_index, effective_lambda, constant_terms, 
+                                   w_old, w_new, w_is_auxiliary)
     logsumexp(logprobs)
-end
-
-function vardim_local_splits(model::ModelState,
-                             Y::Array{Int64, 2},
-                             relevant_pairs::Array{Int64, 2},
-                             latent_effects::Array{Array{Float64, 2}, 1},
-                             observed_effects::Array{Float64, 2},
-                             u::Array{Int64, 1},
-                             weight_index_pointers::Array{Int64, 1},
-                             node_index::Int64,
-                             effective_lambda::Float64,
-                             w_old::Float64,
-                             w_new::Float64,
-                             w_is_auxiliary::Array{Bool, 1})
-    logprobs = Float64[]
-
-    num_components = length(latent_effects)
-
-    new_k = weight_index_pointers[node_index] + u
-    for mixture_component = 1:num_components
-        logprob = vardim_local_logpdf(model, Y, relevant_pairs, latent_effects,
-                                      observed_effects, mixture_component, 
-                                      u[mixture_component], node_index,
-                                      effective_lambda, w_old, w_new,
-                                      w_is_auxiliary[mixture_component]) 
-        push(logprobs,logprob)
-    end
-    logprobs
 end
 
 function vardim_logpdf(model::ModelState,
@@ -632,8 +630,8 @@ function compute_relevant_pairs(Z, #sparse or full binary array
                                 k1::Int64,
                                 k2::Int64)
     ZZ = Z[:,k1]*Z[:,k2]'
-    ZZZ = ZZ + ZZ' - ZZ .* ZZ'
-    (I, J) = findn(ZZZ)
+    #ZZ = ZZ + ZZ' - ZZ .* ZZ'
+    (I, J) = findn(ZZ)
     [I', J']
 end
 
