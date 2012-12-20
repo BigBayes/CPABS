@@ -1,7 +1,7 @@
 
 # Utility probability functions
 function normal_logpdf(x, sigma)
-    -x.*x/(2sigma*sigma) - log(sqrt(2pi)*sigma)
+    -x.*x/(2sigma*sigma) - 0.5log(2pi) - log(sigma)
 end
 
 function poisson_logpdf(k,lambda)
@@ -65,4 +65,15 @@ function randmult(x)
         i += 1
     end
     i
+end
+
+function randpois(lambda)
+    L = exp(-lambda)
+    k = 0
+    p = 1.0
+    while p > L
+        k += 1
+        p = p * rand()
+    end
+    k - 1
 end

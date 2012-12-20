@@ -13,10 +13,16 @@ function full_pdf(model::ModelState,
     prior(model)+likelihood(model,model_spec,Y,X_r,X_p,X_c,linspace(1,N,N))
 end
 
-function prior(model::ModelState)
+function prior(model::ModelState,
+               model_spec::ModelSpecification)
     w_sigma = model.w_sigma
-    b_sigma = 1.0
-    total_prob = sum(normal_logpdf(model.weights, w_sigma ))
+    b_sigma = model.b_sigma
+   
+    if model_spec.diagonal_W 
+        total_prob = sum(normal_logpdf(diag(model.weights), w_sigma ))
+    else
+        total_prob = sum(normal_logpdf(model.weights, w_sigma ))
+    end
     total_prob += sum(normal_logpdf(model.beta, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
@@ -475,6 +481,40 @@ function W_local_logpdf(model::ModelState,
 end
 
 ###################################
+###### pdfs for bias updates ######
+###################################
+
+
+function bias_logpdf(model::ModelState,
+                     model_spec::ModelSpecification,
+                     latent_effects::Array{Float64, 2},
+                     observed_effects::Array{Float64, 2},
+                     Y::Array{Int64,2},
+                     X_r::Array{Float64,3},
+                     X_p::Array{Float64,2},
+                     X_c::Array{Float64,2},
+                     old_bias::Float64,
+                     new_bias::Float64)
+
+    (N,N) = size(Y)
+     
+    b_sigma = model.b_sigma
+    total_prob = 0.0
+    total_prob += normal_logpdf(new_bias, b_sigma)
+
+    for i = 1:N
+        for j = 1:N
+            oe = observed_effects[i,j] + new_bias - old_bias
+            logit_arg = latent_effects[i,j] + oe
+
+            total_prob += log_logit(logit_arg, Y[i,j])
+        end
+    end
+    total_prob
+end
+
+
+###################################
 ###### pdfs for vardim updates ####
 ###################################
 
@@ -572,6 +612,7 @@ function vardim_local_sum(model::ModelState,
 end
 
 function vardim_logpdf(model::ModelState,
+                       model_spec::ModelSpecification,
                        Y::Array{Int64, 2},
                        latent_effects::Array{Float64, 2},
                        observed_effects::Array{Float64, 2},
@@ -593,19 +634,38 @@ function vardim_logpdf(model::ModelState,
 
 
     W = model.weights
+    (K,K) = size(W)
     nu = model.nu
-    for k = find(w_is_auxiliary)
-        logprob += t_logpdf(W[k], nu)
-    end
-
     sigma = model.w_sigma
-    for k = find(!w_is_auxiliary)
-        logprob += normal_logpdf(W[k], sigma)
+
+    for k1 = 1:K
+        if model_spec.diagonal_W
+            k2_range = k1
+        else
+            k2_range = 1:K
+        end
+
+        for k2 = k2_range
+            if w_is_auxiliary[k1,k2]
+                logprob += t_logpdf(W[k1,k2], nu)
+            else
+                logprob += normal_logpdf(W[k1,k2], sigma)
+            end
+        end
     end
 
+#    for k = find(w_is_auxiliary)
+#        logprob += t_logpdf(W[k], nu)
+#    end
+#
+#    for k = find(!w_is_auxiliary)
+#        logprob += normal_logpdf(W[k], sigma)
+#    end
+#
     logprob + poisson_logpdf(u, effective_lambda)
 end
 function vardim_splits(model::ModelState,
+                       model_spec::ModelSpecification,
                        Y::Array{Int64, 2},
                        latent_effects::Array{Array{Float64, 2}, 1},
                        observed_effects::Array{Float64, 2},
@@ -617,12 +677,13 @@ function vardim_splits(model::ModelState,
     logprobs = zeros(length(U))
     for u_ind = 1:length(U)
         u = U[u_ind]
-        logprobs[u_ind] = vardim_logpdf(model,Y, latent_effects[u_ind], observed_effects,
-                                        u, weight_index_pointers, node_index,
-                                        effective_lambda, w_is_auxiliary[u_ind])
+        logprobs[u_ind] = vardim_logpdf(model, model_spec, Y, latent_effects[u_ind],
+                              observed_effects, u, weight_index_pointers, node_index,
+                              effective_lambda, w_is_auxiliary[u_ind])
     end
     logprobs
 end
+
 # Utility Functions
 
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
@@ -634,26 +695,6 @@ function compute_relevant_pairs(Z, #sparse or full binary array
     (I, J) = findn(ZZ)
     [I', J']
 end
-
-#function compute_relevant_pairs(Z,
-#                                k1::Int64,
-#                                k2::Int64)
-#    k1_I = find(Z[:,k1])
-#    k2_I = find(Z[:,k2])
-#
-#    I = Int64[]
-#    J = Int64[]
-#
-#    for i = k1_I
-#        for j = k2_I
-#            push(I,i)
-#            push(J,j)
-#        end
-#    end
-#
-#    [I', J']
-#
-#end
 
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
 function compute_observed_effects(model::ModelState,

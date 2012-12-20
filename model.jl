@@ -4,6 +4,7 @@ type ModelState
     lambda::Float64
     gamma::Float64
     w_sigma::Float64
+    b_sigma::Float64
     nu::Float64
     tree::Tree{Int64}
     weights::Array{Float64,2}
@@ -16,8 +17,10 @@ type ModelState
 end
 
 function copy(model::ModelState)
-    ModelState(model.lambda, model.gamma, model.w_sigma, model.nu, copy(model.tree), copy(model.weights), copy(model.beta), 
-               copy(model.beta_p), copy(model.beta_c), copy(model.a), copy(model.b), model.c)
+    ModelState(model.lambda, model.gamma, model.w_sigma, model.b_sigma, 
+               model.nu, copy(model.tree), copy(model.weights),
+               copy(model.beta), copy(model.beta_p), copy(model.beta_c), 
+               copy(model.a), copy(model.b), model.c)
 end
 
 # Model and inference specifications
@@ -26,6 +29,7 @@ type ModelSpecification
     use_parenthood::Bool
     use_childhood::Bool
     symmetric_W::Bool
+    diagonal_W::Bool
 
     global_move_probability::Float64
 
