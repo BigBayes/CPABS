@@ -10,7 +10,7 @@ function full_pdf(model::ModelState,
                   X_p::Array{Float64,2},
                   X_c::Array{Float64,2})
     (N,N) = size(Y)
-    prior(model)+likelihood(model,model_spec,Y,X_r,X_p,X_c,linspace(1,N,N))
+    prior(model,model_spec)+likelihood(model,model_spec,Y,X_r,X_p,X_c,linspace(1,N,N))
 end
 
 function prior(model::ModelState,
@@ -517,7 +517,7 @@ end
 ###################################
 ###### pdfs for vardim updates ####
 ###################################
-
+@profile begin
 function vardim_local_logpdf(model::ModelState,
                              Y::Array{Int64, 2},
                              relevant_pairs::Array{Int64, 2},
@@ -639,11 +639,7 @@ function vardim_logpdf(model::ModelState,
     sigma = model.w_sigma
 
     for k1 = 1:K
-        if model_spec.diagonal_W
-            k2_range = k1
-        else
-            k2_range = 1:K
-        end
+        k2_range = model_spec.diagonal_W ? k1 : 1:K
 
         for k2 = k2_range
             if w_is_auxiliary[k1,k2]
@@ -684,7 +680,163 @@ function vardim_splits(model::ModelState,
     logprobs
 end
 
+end #profile
 # Utility Functions
+
+function compute_constant_terms(model::ModelState,
+                                model_spec::ModelSpecification,
+                                Y::Array{Int64, 2},
+                                relevant_pairs::Array{Array{Int64, 2}, 2},
+                                latent_effects::Array{Array{Float64, 2}, 1},
+                                observed_effects::Array{Float64, 2},
+                                U::Array{Int64, 1},
+                                weight_index_pointers::Array{Int64, 1},
+                                node_index::Int64,
+                                effective_lambda::Float64,
+                                total_logprob::Float64)
+    logprobs = total_logprob * ones(length(U))
+    current_ind = length(U) - 1
+    current_u = U[current_ind]
+    W = model.weights
+
+    (K,K) = size(W)
+
+    start_index = weight_index_pointers[node_index]
+    end_index = start_index + model.tree.nodes[node_index].state - 1
+    new_index = end_index + 1
+
+    # Assume that new weights will be zero when passed to this function
+    # since we only need to call it before sampling begins
+    assert(W[new_index,new_index] == 0.0)
+    assert(sum(W[:,new_index]) + sum(W[new_index,:]) == 0.0)
+
+    for u_ind = 1:length(U)
+        u = U[u_ind]
+        prior_terms = 0.0
+        likelihood_terms = 0.0
+        if model_spec.diagonal_W
+            if u < current_u
+                prior_terms += t_logpdf(W[new_index,new_index], model.nu)
+                removed_ind = start_index + u_ind - 1
+                prior_terms += t_logpdf(W[removed_ind, removed_ind], model.nu)
+                prior_terms -= normal_logpdf(W[removed_ind, removed_ind], model.w_sigma)
+
+                rpairs = relevant_pairs[removed_ind, removed_ind]
+                for p = 1:size(rpairs)[2]
+                    i = rpairs[1,p]
+                    j = rpairs[2,p]
+
+                    le = latent_effects[u_ind][i,j]
+                    oe = observed_effects[i,j]
+                    old_le = latent_effects[current_ind][i,j]
+                    likelihood_terms += log_logit(le + oe, Y[i,j])
+                    likelihood_terms -= log_logit(old_le + oe, Y[i,j]) 
+                end 
+
+            elseif u == current_u
+                prior_terms += t_logpdf(W[new_index,new_index], model.nu)
+            else
+                prior_terms += normal_logpdf(W[new_index,new_index], model.w_sigma)
+            end
+        else
+            for k1 = start_index:new_index
+                k2_range = k1 == new_index ? start_index:new_index : new_index
+                for k2 = k2_range
+                    if u <= current_u
+                        prior_terms += t_logpdf(W[k1,k2], model.nu)
+                    else
+                        prior_terms += normal_logpdf(W[k1,k2], model.w_sigma)
+                    end
+                end
+            end
+
+            if u < current_u
+                removed_ind = start_index + u_ind - 1
+                for k1 = 1:K
+                    k2_range = k1 == removed_ind ? 1:K : removed_ind 
+                    for k2 = k2_range
+                        prior_terms += t_logpdf(W[k1,k2], model.nu)
+                        prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
+
+                        rpairs = relevant_pairs[k1,k2]
+                        for p = 1:size(rpairs)[2]
+                            i = rpairs[1,p]
+                            j = rpairs[2,p]
+
+                            le = latent_effects[u_ind][i,j]
+                            oe = observed_effects[i,j]
+                            ole_le = latent_effects[current_ind][i,j]
+                            likelihood_terms += log_logit(le + oe, Y[i,j])
+                            likelihood_terms -= log_logit(ole_le + oe, Y[i,j])
+                        end
+                    end
+                end
+            end
+        end
+
+
+        logprobs[u_ind] += prior_terms + likelihood_terms
+        logprobs[u_ind] += poisson_logpdf(u,effective_lambda) - 
+                           poisson_logpdf(current_u,effective_lambda)
+    end 
+    logprobs
+end
+
+function compute_unaugmented_prob(model::ModelState,
+                                  model_spec::ModelSpecification,
+                                  Y::Array{Int64, 2},
+                                  relevant_pairs::Array{Array{Int64, 2}, 2},
+                                  latent_effects::Array{Array{Float64, 2}, 1},
+                                  observed_effects::Array{Float64, 2},
+                                  U::Array{Int64, 1},
+                                  weight_index_pointers::Array{Int64, 1},
+                                  node_index::Int64,
+                                  effective_lambda::Float64,
+                                  u_index::Int64,
+                                  augmented_logprob::Float64)
+    W = model.weights
+    (K,K) = size(W)
+
+    start_index = weight_index_pointers[node_index]
+    end_index = start_index + model.tree.nodes[node_index].state - 1
+    new_index = end_index + 1
+
+    u = U[u_index]
+    current_u = U[end-1]
+
+    assert(current_u == model.tree.nodes[node_index].state)
+
+    unaugmented_logprob = augmented_logprob
+    if model_spec.diagonal_W
+        if u < current_u
+            removed_ind = start_index + u_index - 1
+            unaugmented_logprob -= t_logpdf(W[removed_ind,removed_ind], model.nu)
+            unaugmented_logprob -= t_logpdf(W[new_index,new_index], model.nu)
+        elseif u == current_u 
+            unaugmented_logprob -= t_logpdf(W[new_index,new_index], model.nu)
+        end #if u => current_u, no changes are necessary
+    else
+        if u < current_u
+            removed_ind = start_index + u_index - 1
+            for k1 = 1:K
+                k2_range = k1 == removed_ind || k1 == new_index ? 
+                           1:K : [removed_ind, new_index]
+                for k2 = k2_range
+                    unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
+                end
+            end
+        elseif u == current_u
+            for k1 = 1:K
+                k2_range = k1 == new_index ? 1:K : new_index
+                for k2 = k2_range
+                    unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
+                end
+            end
+        end
+    end 
+
+    unaugmented_logprob
+end
 
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
 function compute_relevant_pairs(Z, #sparse or full binary array

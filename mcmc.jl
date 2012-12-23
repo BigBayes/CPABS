@@ -4,6 +4,7 @@ load("probability_util.jl")
 load("pdf.jl")
 load("slicesampler.jl")
 
+@profile begin
 function mcmc(Y::Array{Int64,2},
               X_r::Array{Float64,3},
               X_p::Array{Float64,2},
@@ -106,7 +107,7 @@ function mcmc(Y::Array{Int64,2},
 
     for iter = 1:iterations
         println("Iteration: ", iter)
-        tree_prior = prior(model) 
+        tree_prior = prior(model,model_spec) 
         tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
         println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
         if iter == 5 && false 
@@ -132,7 +133,7 @@ function mcmc_sweep(model::ModelState,
         construct_effects(model, model_spec, Y, X_r, X_p, X_c, Z)
 
     sample_bias(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
-    tree_prior = prior(model) 
+    tree_prior = prior(model,model_spec) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
     println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
@@ -141,10 +142,9 @@ function mcmc_sweep(model::ModelState,
     sample_psi(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
     psi_time = time() - psi_time
 
-    tree_prior = prior(model) 
+    tree_prior = prior(model,model_spec) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
     println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
 
 
     W_time = time()
@@ -154,13 +154,14 @@ function mcmc_sweep(model::ModelState,
     sample_W(model, model_spec, Y, X_r, X_p, X_c, Z, latent_effects, observed_effects)
     W_time = time() - W_time
 
-    tree_prior = prior(model) 
+    tree_prior = prior(model,model_spec) 
     tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
     println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
     vardim_time = time()
     if rand() > 0.0
-        sample_Z(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
+        sample_Z(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects,
+                 tree_prior + tree_LL)
     end
     vardim_time = time() - vardim_time
 
@@ -217,19 +218,14 @@ function sample_W(model::ModelState,
     beta_p = model.beta_p
     beta_c = model.beta_c
 
-#    tree_prior = prior(model) 
+#    tree_prior = prior(model,model_spec) 
 #    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
 #    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
         for k1 = 1:K
-            if model_spec.diagonal_W
-                k2_range = k1
-            else
-                k2_range = 1:K
-            end
-
+            k2_range = model_spec.diagonal_W ? k1 : 1:K
             for k2 = k2_range
                 relevant_pairs = compute_relevant_pairs(Z,k1,k2)
                 w_cur = W[k1,k2]
@@ -302,7 +298,8 @@ function sample_Z(model::ModelState,
                   X_p::Array{Float64,2},
                   X_c::Array{Float64,2},
                   latent_effects::Array{Float64,2},
-                  observed_effects::Array{Float64,2})
+                  observed_effects::Array{Float64,2},
+                  model_logprob::Float64)
 
     (N,N) = size(Y)
     tree = model.tree
@@ -316,14 +313,18 @@ function sample_Z(model::ModelState,
     println("constuctZ")
     Z = ConstructZ(tree)
     (K, K) = size(model.weights)
-    old_relevant_pairs = Array(Array{Int64, 2}, (K,K))
+    #Array(Array{Int64, 2}, (K,K))
+    old_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
+
     println("construct relevant pairs")
     for k1 = 1:K
-        for k2 = 1:K
+        k2_range = model_spec.diagonal_W ? k1 : 1:K
+        for k2 = k2_range
             old_relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
         end
     end 
 
+    current_model_logprob = model_logprob 
 
     for node_index = root_to_leaf
 
@@ -355,7 +356,8 @@ function sample_Z(model::ModelState,
         Znew[:,end_index+2:end] = Z[:,end_index+1:end]        
         Znew = sparse(Znew)
 
-        new_relevant_pairs = Array(Array{Int64, 2}, (K+1,K+1))
+        #new_relevant_pairs = Array(Array{Int64, 2}, (K+1,K+1))
+        new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K+1, y = 1:K+1]
         # Leave space for new feature's weights
         #println("construct newmodel weights")
         new_model = copy(model)
@@ -366,21 +368,18 @@ function sample_Z(model::ModelState,
 
         new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(old_relevant_pairs)
 
-        if model_spec.debug
-            println("W[start,start]: ", new_model.weights[start_index,start_index])
-        end
-
 #        for k1 = nonzero_element_indices
 #        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = relevant_pairs
 
         #println("construct new relevant pairs")
         # update end_index+1 row and col of relevant pairs
-        for k1 = 1:K+1
+
+        k1_range = model_spec.diagonal_W ? start_index:end_index+1 : 1:K+1
+        for k1 = k1_range
             k2 = new_k
             new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
             new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
         end 
-
         # All new weights initialized to zero, no need to update latent effects for the new feature
         # need to update them for the cases where we are removing features
         #println("construct component_latent_effects")
@@ -391,7 +390,8 @@ function sample_Z(model::ModelState,
             if u_ind <= u
                 num_local_mutations[u_ind] = u - 1
                 removed_k = start_index + u_ind - 1
-                for k = 1:K+1
+                k_range = model_spec.diagonal_W ? removed_k : 1:K+1
+                for k = k_range
                     for p = 1:size(new_relevant_pairs[removed_k, k])[2]
                         i = new_relevant_pairs[removed_k, k][1,p]
                         j = new_relevant_pairs[removed_k, k][2,p]
@@ -427,13 +427,35 @@ function sample_Z(model::ModelState,
 
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
-        const_terms = vardim_splits(new_model, model_spec, Y, component_latent_effects,
-                          observed_effects, U, W_index_pointers, node_index,
-                          effective_lambda, w_is_auxiliary) 
 
-        #println("slice sample")
+        const_terms = compute_constant_terms(new_model, model_spec, Y, new_relevant_pairs,
+                          component_latent_effects, observed_effects, U,
+                          W_index_pointers, node_index, effective_lambda, 
+                          current_model_logprob)
+
+
+        if !model_spec.diagonal_W
+            const_terms2 = vardim_splits(new_model, model_spec, Y, component_latent_effects,
+                              observed_effects, U, W_index_pointers, node_index,
+                              effective_lambda, w_is_auxiliary)
+
+            if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms))) > 10.0^-5
+                println("SLDKJF")
+                println(exp_normalize(const_terms))
+                println(exp_normalize(const_terms2))
+            end
+        end
+
+
+        if model_spec.debug
+            println("W[start,start]: ", new_model.weights[start_index,start_index])
+            println("slice sample")
+        end
+
+
         for iter = 1:num_W_sweeps
-            for k1 = 1:K+1
+            k1_range = model_spec.diagonal_W ? new_k : 1:K+1
+            for k1 = k1_range
                 if model_spec.diagonal_W
                     k2_range = k1
                 elseif k1 >= start_index && k1 <= end_index+1
@@ -445,7 +467,6 @@ function sample_Z(model::ModelState,
                 for k2 = k2_range
 
                     #println("slice sample prep, start, end:", start_index, " ", end_index)
-
                     w_is_auxiliary_k1k2 = zeros(Bool, length(num_local_mutations))
 
                     aux1 = k1 - start_index + 1
@@ -487,22 +508,22 @@ function sample_Z(model::ModelState,
                                  effective_lambda, const_terms, w_old, x,
                                  w_is_auxiliary_k1k2) 
                     gx0 = g(w_cur)
+                   
                     for slice_iter = 1:num_W_slice_steps
                         (w_cur, gx0) = slice_sampler(w_cur, g, 1.0, 10, -Inf, Inf, gx0)
                     end
- 
                     W[k1,k2] = w_cur
 
-                    if model_spec.debug
-                        delta_const_terms = vardim_local_splits(new_model, Y, 
-                            new_relevant_pairs[k1,k2], component_latent_effects,
-                            observed_effects, num_local_mutations, W_index_pointers,
-                            node_index, effective_lambda, zeros(length(num_local_mutations)),
-                            w_old, w_cur, w_is_auxiliary_k1k2)
-                        println("w_old, w_new, prob: ", w_old,", ", w_cur, ", ", g(w_cur))
-                        println(delta_const_terms)
-                        println(const_terms)
-                    end
+#                    if model_spec.debug
+#                        delta_const_terms = vardim_local_splits(new_model, Y, 
+#                            new_relevant_pairs[k1,k2], component_latent_effects,
+#                            observed_effects, num_local_mutations, W_index_pointers,
+#                            node_index, effective_lambda, zeros(length(num_local_mutations)),
+#                            w_old, w_cur, w_is_auxiliary_k1k2)
+#                        println("w_old, w_new, prob: ", w_old,", ", w_cur, ", ", g(w_cur))
+#                        println(delta_const_terms)
+#                        println(const_terms)
+#                    end
 
                     delta_const_terms = vardim_local_splits(new_model, Y, 
                         new_relevant_pairs[k1,k2], component_latent_effects,
@@ -513,28 +534,35 @@ function sample_Z(model::ModelState,
                     const_terms += delta_const_terms
 
                     #println("adjust precomputations")
-
-                    for p = 1:size(new_relevant_pairs[k1,k2])[2]
-                        i = new_relevant_pairs[k1,k2][1,p]
-                        j = new_relevant_pairs[k1,k2][2,p]
+                    rpairs = new_relevant_pairs[k1,k2]
+                    u_ind_range = find(!w_is_auxiliary_k1k2)
+                    for p = 1:size(rpairs)[2]
+                        i = rpairs[1,p]
+                        j = rpairs[2,p]
 
                         latent_effects[i,j] += w_cur - w_old
 
 
-                        for u_ind = find(!w_is_auxiliary_k1k2)
+                        for u_ind = u_ind_range 
                             component_latent_effects[u_ind][i,j] += w_cur - w_old
                         end
 
                     end
-                    
      
                 end
             end
         end
 
-        logprobs = vardim_splits(new_model, model_spec, Y, component_latent_effects,
-                                 observed_effects, U, W_index_pointers, node_index,
-                                 effective_lambda, w_is_auxiliary)
+        logprobs = const_terms
+#        logprobs = vardim_splits(new_model, model_spec, Y, component_latent_effects,
+#                                 observed_effects, U, W_index_pointers, node_index,
+#                                 effective_lambda, w_is_auxiliary)
+
+#        if norm(const_terms - logprobs) > 10.0^-5
+#            println("BLAH")
+#            println(const_terms)
+#            println(logprobs)
+#        end
 
         sampled_component = randmult(exp_normalize(logprobs)) 
 
@@ -560,6 +588,7 @@ function sample_Z(model::ModelState,
         println("K,eff_lambda,Delta_K: ", new_K, ",",effective_lambda, ",",new_u - u)
         println(logprobs)
 
+
         if model_spec.debug
 
             Z = ConstructZ(model.tree)
@@ -579,7 +608,7 @@ function sample_Z(model::ModelState,
                 new_model.weights = copy(new_W)
                 new_model.tree.nodes[node_index].state = new_uu
 
-                tree_prior = prior(new_model) 
+                tree_prior = prior(new_model,model_spec) 
                 tree_LL = likelihood(new_model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
                 full_probs[cmp] = tree_prior + tree_LL
                 if cmp == sampled_component
@@ -595,6 +624,13 @@ function sample_Z(model::ModelState,
 
             println(logprobs - max(logprobs))
             println(full_probs - max(full_probs))
+
+            current_model_logprob = compute_unaugmented_prob(new_model, model_spec, Y, 
+                                        new_relevant_pairs, component_latent_effects,
+                                        observed_effects, U, W_index_pointers,
+                                        node_index, effective_lambda, sampled_component,
+                                        logprobs[sampled_component])
+
 #            tree_prior = prior(model) 
 #            tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
 #            println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
@@ -800,4 +836,4 @@ function sample_time(f::Function,
     return x
 end
 
-#end #end profile
+end #end profile
