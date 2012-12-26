@@ -36,6 +36,15 @@ type ModelSpecification
     debug::Bool
 end
 
+# Data container
+type DataState
+    Ytrain::Array{Int64,2}
+    Ytest::Array{Int64,2}
+    X_r::Array{Float64,3}
+    X_p::Array{Float64,2}
+    X_c::Array{Float64,2}
+end
+
 # Tree/Model Utility Functions
 
 # Prune tree while also adjusting the weight matrix appropriately

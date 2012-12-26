@@ -5,15 +5,17 @@ load("pdf.jl")
 load("slicesampler.jl")
 
 @profile begin
-function mcmc(Y::Array{Int64,2},
-              X_r::Array{Float64,3},
-              X_p::Array{Float64,2},
-              X_c::Array{Float64,2},
+function mcmc(data::DataState,
               lambda::Float64,
               gamma::Float64,
               model_spec::ModelSpecification,
               iterations::Int64)
 
+    Y = data.Ytrain
+    X_r = data.X_r
+    X_p = data.X_p
+    X_c = data.X_c
+ 
     (N,N) = size(Y)
 
     if model_spec.use_pairwise
@@ -108,59 +110,56 @@ function mcmc(Y::Array{Int64,2},
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
-        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+        tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+        println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
         if iter == 5 && false 
             model_spec.debug = true
         end
-        mcmc_sweep(model, model_spec, Y, X_r, X_p, X_c)
+        mcmc_sweep(model, model_spec, data)
     end
 end
 
 
 function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
-                    Y::Array{Int64,2},
-                    X_r::Array{Float64,3},
-                    X_p::Array{Float64,2},
-                    X_c::Array{Float64,2})
+                    data::DataState)
 
+    Y = data.Ytrain
     (N,N) = size(Y)
     tree = model.tree
     Z = ConstructZ(tree)
 
     (latent_effects, observed_effects) = 
-        construct_effects(model, model_spec, Y, X_r, X_p, X_c, Z)
+        construct_effects(model, model_spec, data, Z)
 
-    sample_bias(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
+    sample_bias(model, model_spec, data, latent_effects, observed_effects)
     tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
+    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
     psi_time = time()
-    sample_psi(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects)
+    sample_psi(model, model_spec, data, latent_effects, observed_effects)
     psi_time = time() - psi_time
 
     tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
 
     W_time = time()
     Z = ConstructZ(tree)
     (latent_effects, observed_effects) = 
-        construct_effects(model, model_spec, Y, X_r, X_p, X_c, Z)
-    sample_W(model, model_spec, Y, X_r, X_p, X_c, Z, latent_effects, observed_effects)
+        construct_effects(model, model_spec, data, Z)
+    sample_W(model, model_spec, data, Z, latent_effects, observed_effects)
     W_time = time() - W_time
 
     tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
     vardim_time = time()
     if rand() > 0.0
-        sample_Z(model, model_spec, Y, X_r, X_p, X_c, latent_effects, observed_effects,
+        sample_Z(model, model_spec, data, latent_effects, observed_effects,
                  tree_prior + tree_LL)
     end
     vardim_time = time() - vardim_time
@@ -172,10 +171,7 @@ end
 
 function sample_bias(model::ModelState,
                      model_spec::ModelSpecification,
-                     Y::Array{Int64,2},
-                     X_r::Array{Float64,3},
-                     X_p::Array{Float64,2},
-                     X_c::Array{Float64,2},
+                     data::DataState,
                      latent_effects::Array{Float64,2},
                      observed_effects::Array{Float64,2})
 
@@ -184,8 +180,8 @@ function sample_bias(model::ModelState,
 
     c = model.c
     c_old = c
-    g = x -> bias_logpdf(model,model_spec,latent_effects,observed_effects,
-                         Y, X_r, X_p, X_c, c_old, x)
+    g = x -> bias_logpdf(model,model_spec,data,latent_effects,observed_effects,
+                         c_old, x)
     gx0 = g(c)
 
     for iter = 1:num_slice_steps
@@ -198,14 +194,12 @@ end
 
 function sample_W(model::ModelState,
                   model_spec::ModelSpecification,
-                  Y::Array{Int64,2},
-                  X_r::Array{Float64,3},
-                  X_p::Array{Float64,2},
-                  X_c::Array{Float64,2},
+                  data::DataState,
                   Z,#sparse or full 2d array
                   latent_effects::Array{Float64,2},
                   observed_effects::Array{Float64,2})
 
+    Y = data.Ytrain
     (K,K) = size(model.weights)
     (N,N) = size(Y)
     W = model.weights
@@ -230,7 +224,7 @@ function sample_W(model::ModelState,
                 relevant_pairs = compute_relevant_pairs(Z,k1,k2)
                 w_cur = W[k1,k2]
                 w_old = w_cur
-                g = x -> W_local_logpdf(model, Y, relevant_pairs, latent_effects, observed_effects, w_old, x)
+                g = x -> W_local_logpdf(model, data, relevant_pairs, latent_effects, observed_effects, w_old, x)
 
 
                 gx0 = g(w_cur)
@@ -293,14 +287,12 @@ end
 
 function sample_Z(model::ModelState,
                   model_spec::ModelSpecification,
-                  Y::Array{Int64,2},
-                  X_r::Array{Float64,3},
-                  X_p::Array{Float64,2},
-                  X_c::Array{Float64,2},
+                  data::DataState,
                   latent_effects::Array{Float64,2},
                   observed_effects::Array{Float64,2},
                   model_logprob::Float64)
 
+    Y = data.Ytrain
     (N,N) = size(Y)
     tree = model.tree
     num_W_sweeps = 5
@@ -428,10 +420,10 @@ function sample_Z(model::ModelState,
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
 
-        const_terms = compute_constant_terms(new_model, model_spec, Y, new_relevant_pairs,
-                          component_latent_effects, observed_effects, U,
-                          W_index_pointers, node_index, effective_lambda, 
-                          current_model_logprob)
+        const_terms = compute_constant_terms(new_model, model_spec, data, 
+                          new_relevant_pairs, component_latent_effects,
+                          observed_effects, U, W_index_pointers, node_index,
+                          effective_lambda, current_model_logprob)
 
 
         if !model_spec.diagonal_W
@@ -494,7 +486,7 @@ function sample_Z(model::ModelState,
                     w_cur = W[k1,k2]
                     w_old = w_cur
 
-                    delta_const_terms = vardim_local_splits(new_model, Y, 
+                    delta_const_terms = vardim_local_splits(new_model, data, 
                         new_relevant_pairs[k1,k2], component_latent_effects,
                         observed_effects, num_local_mutations, W_index_pointers,
                         node_index, effective_lambda, zeros(length(num_local_mutations)),
@@ -502,7 +494,7 @@ function sample_Z(model::ModelState,
 
                     const_terms -= delta_const_terms
 
-                    g = x -> vardim_local_sum(new_model, Y, new_relevant_pairs[k1,k2],
+                    g = x -> vardim_local_sum(new_model, data, new_relevant_pairs[k1,k2],
                                  component_latent_effects, observed_effects,
                                  num_local_mutations, W_index_pointers, node_index,
                                  effective_lambda, const_terms, w_old, x,
@@ -525,7 +517,7 @@ function sample_Z(model::ModelState,
 #                        println(const_terms)
 #                    end
 
-                    delta_const_terms = vardim_local_splits(new_model, Y, 
+                    delta_const_terms = vardim_local_splits(new_model, data, 
                         new_relevant_pairs[k1,k2], component_latent_effects,
                         observed_effects, num_local_mutations, W_index_pointers,
                         node_index, effective_lambda, zeros(length(num_local_mutations)),
@@ -609,7 +601,7 @@ function sample_Z(model::ModelState,
                 new_model.tree.nodes[node_index].state = new_uu
 
                 tree_prior = prior(new_model,model_spec) 
-                tree_LL = likelihood(new_model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+                tree_LL, test_LL = likelihood(new_model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
                 full_probs[cmp] = tree_prior + tree_LL
                 if cmp == sampled_component
                     str = "*tree probability["
@@ -625,7 +617,7 @@ function sample_Z(model::ModelState,
             println(logprobs - max(logprobs))
             println(full_probs - max(full_probs))
 
-            current_model_logprob = compute_unaugmented_prob(new_model, model_spec, Y, 
+            current_model_logprob = compute_unaugmented_prob(new_model, model_spec, 
                                         new_relevant_pairs, component_latent_effects,
                                         observed_effects, U, W_index_pointers,
                                         node_index, effective_lambda, sampled_component,
@@ -657,10 +649,7 @@ end
 
 function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
-                    Y::Array{Int64,2},
-                    X_r::Array{Float64,3},
-                    X_p::Array{Float64,2},
-                    X_c::Array{Float64,2},
+                    data::DataState,
                     latent_effects::Array{Float64,2},
                     observed_effects::Array{Float64,2})
 
@@ -723,7 +712,7 @@ function sample_psi(model::ModelState,
         sibling_path_index = find(path .== original_sibling.index)
 
         (priors, pstates) = psi_infsites_logpdf(model, prune_index, path)
-        (likelihoods, lstates) = psi_likelihood_logpdf(model, model_spec, prune_index, path, Y, X_r, X_p, X_c)
+        (likelihoods, lstates) = psi_likelihood_logpdf(model, model_spec, data, prune_index, path)
 
         logprobs = priors + likelihoods
         probs = exp_normalize(logprobs)
@@ -784,20 +773,18 @@ function sample_psi(model::ModelState,
             println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
 
             tree_prior = prior(model) 
-            tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-            println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+            println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
         end
     end
 end
 
 function construct_effects(model::ModelState,
                            model_spec::ModelSpecification,
-                           Y::Array{Int64,2},
-                           X_r::Array{Float64,3},
-                           X_p::Array{Float64,2},
-                           X_c::Array{Float64,2},
+                           data::DataState,
                            Z) #sparse or full binary array
 
+    Y = data.Ytrain
     W = model.weights
     (N,N) = size(Y)
     #latent_effects = zeros(Float64, (N,N))
@@ -805,7 +792,7 @@ function construct_effects(model::ModelState,
     for i = 1:N
         for j = 1:N
             #latent_effects[i,j] = (Z[i,:] * W * Z[j,:]')[1]
-            observed_effects[i,j] = compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c)
+            observed_effects[i,j] = compute_observed_effects(model, model_spec, data, i, j)
         end
     end
     latent_effects = Z*W*Z'

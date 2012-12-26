@@ -5,12 +5,10 @@ load("profile.jl")
 #Global pdf
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
-                  Y::Array{Int64,2},
-                  X_r::Array{Float64,3},
-                  X_p::Array{Float64,2},
-                  X_c::Array{Float64,2})
+                  data::DataState)
+    Y = data.Ytrain
     (N,N) = size(Y)
-    prior(model,model_spec)+likelihood(model,model_spec,Y,X_r,X_p,X_c,linspace(1,N,N))
+    prior(model,model_spec)+likelihood(model,model_spec,data,linspace(1,N,N))[1]
 end
 
 function prior(model::ModelState,
@@ -46,11 +44,10 @@ end
 
 function likelihood(model::ModelState,
                     model_spec::ModelSpecification,
-                    Y::Array{Int64,2},
-                    X_r::Array{Float64,3},
-                    X_p::Array{Float64,2},
-                    X_c::Array{Float64,2},
+                    data::DataState,
                     indices::Array{Int64,1})
+    Y = data.Ytrain
+    Ytest = data.Ytest
     (N,N) = size(Y)
     tree = model.tree
     Z = ConstructZ(tree)
@@ -60,20 +57,23 @@ function likelihood(model::ModelState,
     beta_c = model.beta_c
  
     total_prob = 0.0
+    total_test_prob = 0.0
+
     for i = indices
         for j = 1:N
 
 #            if i == 1 && mod(j, 20) == 0
 #                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
 #            end
-            oe = compute_observed_effects(model, model_spec, i, j, X_r, X_p, X_c)
+            oe = compute_observed_effects(model, model_spec, data, i, j)
             logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
                         
-
+            
             total_prob += log_logit(logit_arg, Y[i,j])
+            total_test_prob += log_logit(logit_arg, Ytest[i,j])
         end
     end
-    total_prob
+    (total_prob, total_test_prob)
 end
 
 # Local pdfs for sampling
@@ -194,12 +194,11 @@ end
 # features above the pruned parent are moved to the unpruned child
 function psi_likelihood_logpdf(model::ModelState,
                                model_spec::ModelSpecification,
+                               data::DataState,
                                pruned_index::Int64,
-                               path::Array{Int64,1},
-                               Y::Array{Int64,2},
-                               X_r::Array{Float64,3},
-                               X_p::Array{Float64,2},
-                               X_c::Array{Float64,2})
+                               path::Array{Int64,1})
+
+    Y = data.Ytrain
     (N,N) = size(Y)
     tree = model.tree
     W = model.weights
@@ -233,8 +232,8 @@ function psi_likelihood_logpdf(model::ModelState,
     for i = 1:length(subtree_leaves)
         l1 = subtree_leaves[i]
         for l2 = 1:N
-            observed_parenthood_effects[i,l2] = compute_observed_effects(model, model_spec, l1, l2, X_r, X_p, X_c)
-            observed_childhood_effects[i,l2] = compute_observed_effects(model, model_spec, l2, l1, X_r, X_p, X_c)
+            observed_parenthood_effects[i,l2] = compute_observed_effects(model, model_spec, data, l1, l2 )
+            observed_childhood_effects[i,l2] = compute_observed_effects(model, model_spec, data, l2, l1)
         end
     end
 
@@ -454,12 +453,13 @@ end
 
 # pdf for updating one element of W
 function W_local_logpdf(model::ModelState,
-                        Y::Array{Int64, 2},
+                        data::DataState,
                         relevant_pairs::Array{Int64, 2},
                         latent_effects::Array{Float64, 2},
                         observed_effects::Array{Float64, 2},
                         w_old::Float64,
                         w_new::Float64)
+    Y = data.Ytrain
     sigma = model.w_sigma 
 
     (_, npairs) = size(relevant_pairs)
@@ -487,15 +487,13 @@ end
 
 function bias_logpdf(model::ModelState,
                      model_spec::ModelSpecification,
+                     data::DataState,
                      latent_effects::Array{Float64, 2},
                      observed_effects::Array{Float64, 2},
-                     Y::Array{Int64,2},
-                     X_r::Array{Float64,3},
-                     X_p::Array{Float64,2},
-                     X_c::Array{Float64,2},
                      old_bias::Float64,
                      new_bias::Float64)
 
+    Y = data.Ytrain
     (N,N) = size(Y)
      
     b_sigma = model.b_sigma
@@ -519,7 +517,7 @@ end
 ###################################
 @profile begin
 function vardim_local_logpdf(model::ModelState,
-                             Y::Array{Int64, 2},
+                             data::DataState,
                              relevant_pairs::Array{Int64, 2},
                              latent_effects::Array{Array{Float64, 2}, 1},
                              observed_effects::Array{Float64, 2},
@@ -531,32 +529,33 @@ function vardim_local_logpdf(model::ModelState,
                              w_new::Float64,
                              w_is_auxiliary::Bool)
 
+    Y = data.Ytrain
     (K,K) = size(model.weights)
     sigma = model.w_sigma
     if u == model.tree.nodes[node_index].state - 1
         if w_is_auxiliary
-            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+            logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
             # W_local_logpdf includes the prior term for w_old as if it were normal,
             # need to subtract it out here
             logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
         else
-            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+            logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
         end
     elseif u == model.tree.nodes[node_index].state
         if w_is_auxiliary
-            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+            logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
             logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
         else
-            logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+            logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
         end
     else
-        logprob = W_local_logpdf(model,Y,relevant_pairs, latent_effects[mixture_component_index],
+        logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                   observed_effects, w_old, w_new)
     end
 
@@ -564,7 +563,7 @@ function vardim_local_logpdf(model::ModelState,
 end
 
 function vardim_local_splits(model::ModelState,
-                             Y::Array{Int64, 2},
+                             data::DataState,
                              relevant_pairs::Array{Int64, 2},
                              latent_effects::Array{Array{Float64, 2}, 1},
                              observed_effects::Array{Float64, 2},
@@ -581,7 +580,7 @@ function vardim_local_splits(model::ModelState,
     logprobs = zeros(num_components)
 
     for mixture_component = 1:num_components
-        logprob = vardim_local_logpdf(model, Y, relevant_pairs, latent_effects,
+        logprob = vardim_local_logpdf(model, data, relevant_pairs, latent_effects,
                                       observed_effects, mixture_component, 
                                       u[mixture_component], node_index,
                                       effective_lambda, w_old, w_new,
@@ -592,7 +591,7 @@ function vardim_local_splits(model::ModelState,
 end
 
 function vardim_local_sum(model::ModelState,
-                          Y::Array{Int64, 2},
+                          data::DataState,
                           relevant_pairs::Array{Int64, 2},
                           latent_effects::Array{Array{Float64, 2}, 1},
                           observed_effects::Array{Float64, 2},
@@ -604,7 +603,7 @@ function vardim_local_sum(model::ModelState,
                           w_old::Float64,
                           w_new::Float64,
                           w_is_auxiliary::Array{Bool, 1})
-    logprobs = vardim_local_splits(model, Y, relevant_pairs, latent_effects,
+    logprobs = vardim_local_splits(model, data, relevant_pairs, latent_effects,
                                    observed_effects, u, weight_index_pointers,
                                    node_index, effective_lambda, constant_terms, 
                                    w_old, w_new, w_is_auxiliary)
@@ -613,7 +612,7 @@ end
 
 function vardim_logpdf(model::ModelState,
                        model_spec::ModelSpecification,
-                       Y::Array{Int64, 2},
+                       data::DataState,
                        latent_effects::Array{Float64, 2},
                        observed_effects::Array{Float64, 2},
                        u::Int64,
@@ -621,6 +620,7 @@ function vardim_logpdf(model::ModelState,
                        node_index::Int64,
                        effective_lambda::Float64,
                        w_is_auxiliary::Array{Bool, 2})
+    Y = data.Ytrain
     (N,N) = size(Y)
 
     logprob = 0.0
@@ -662,7 +662,7 @@ function vardim_logpdf(model::ModelState,
 end
 function vardim_splits(model::ModelState,
                        model_spec::ModelSpecification,
-                       Y::Array{Int64, 2},
+                       data::DataState,
                        latent_effects::Array{Array{Float64, 2}, 1},
                        observed_effects::Array{Float64, 2},
                        U::Array{Int64, 1},
@@ -673,7 +673,7 @@ function vardim_splits(model::ModelState,
     logprobs = zeros(length(U))
     for u_ind = 1:length(U)
         u = U[u_ind]
-        logprobs[u_ind] = vardim_logpdf(model, model_spec, Y, latent_effects[u_ind],
+        logprobs[u_ind] = vardim_logpdf(model, model_spec, data, latent_effects[u_ind],
                               observed_effects, u, weight_index_pointers, node_index,
                               effective_lambda, w_is_auxiliary[u_ind])
     end
@@ -685,7 +685,7 @@ end #profile
 
 function compute_constant_terms(model::ModelState,
                                 model_spec::ModelSpecification,
-                                Y::Array{Int64, 2},
+                                data::DataState,
                                 relevant_pairs::Array{Array{Int64, 2}, 2},
                                 latent_effects::Array{Array{Float64, 2}, 1},
                                 observed_effects::Array{Float64, 2},
@@ -694,6 +694,8 @@ function compute_constant_terms(model::ModelState,
                                 node_index::Int64,
                                 effective_lambda::Float64,
                                 total_logprob::Float64)
+
+    Y = data.Ytrain
     logprobs = total_logprob * ones(length(U))
     current_ind = length(U) - 1
     current_u = U[current_ind]
@@ -784,7 +786,6 @@ end
 
 function compute_unaugmented_prob(model::ModelState,
                                   model_spec::ModelSpecification,
-                                  Y::Array{Int64, 2},
                                   relevant_pairs::Array{Array{Int64, 2}, 2},
                                   latent_effects::Array{Array{Float64, 2}, 1},
                                   observed_effects::Array{Float64, 2},
@@ -851,12 +852,13 @@ end
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
 function compute_observed_effects(model::ModelState,
                                   model_spec::ModelSpecification,
+                                  data::DataState,
                                   i::Int64,
-                                  j::Int64,
-                                  X_r::Array{Float64,3},
-                                  X_p::Array{Float64,2},
-                                  X_c::Array{Float64,2})
+                                  j::Int64)
 
+    X_r = data.X_r
+    X_p = data.X_p
+    X_c = data.X_c
     observed_effect = model.c
 
     if model_spec.use_pairwise
