@@ -42,6 +42,9 @@ function mcmc(data::DataState,
         num_ancestors = tree.nodes[i].num_ancestors
         effective_lambda = lambda* (1.0-gamma)*gamma^(num_ancestors-1)
         U[i] = randpois(effective_lambda)
+        if U[i] > 0
+            U[i] = 1
+        end
         tree.nodes[i].state = U[i] 
     end
 
@@ -112,11 +115,13 @@ function mcmc(data::DataState,
         tree_prior = prior(model,model_spec) 
         tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
-        if iter == 5 && false 
+        if iter == 2 && false 
             model_spec.debug = true
         end
         mcmc_sweep(model, model_spec, data)
     end
+
+    model
 end
 
 
@@ -157,6 +162,7 @@ function mcmc_sweep(model::ModelState,
     tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
+    sample_bias(model, model_spec, data, latent_effects, observed_effects)
     vardim_time = time()
     if rand() > 0.0
         sample_Z(model, model_spec, data, latent_effects, observed_effects,
@@ -219,7 +225,7 @@ function sample_W(model::ModelState,
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
         for k1 = 1:K
-            k2_range = model_spec.diagonal_W ? k1 : 1:K
+            k2_range = model_spec.diagonal_W ? k1 : (1:K)
             for k2 = k2_range
                 relevant_pairs = compute_relevant_pairs(Z,k1,k2)
                 w_cur = W[k1,k2]
@@ -233,9 +239,9 @@ function sample_W(model::ModelState,
                     (w_cur, gx0) = slice_sampler(w_cur, g, 1.0, 10, -Inf, Inf, gx0)
                 end
     
-                if model_spec.debug
-                    println(gx0-gx00)
-                end
+#                if model_spec.debug
+#                    println(gx0-gx00)
+#                end
  
                 W[k1,k2] = w_cur
 
@@ -296,7 +302,7 @@ function sample_Z(model::ModelState,
     (N,N) = size(Y)
     tree = model.tree
     num_W_sweeps = 5
-    num_W_slice_steps = 1
+    num_W_slice_steps = 3
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
@@ -310,7 +316,7 @@ function sample_Z(model::ModelState,
 
     println("construct relevant pairs")
     for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : 1:K
+        k2_range = model_spec.diagonal_W ? k1 : (1:K)
         for k2 = k2_range
             old_relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
         end
@@ -366,7 +372,8 @@ function sample_Z(model::ModelState,
         #println("construct new relevant pairs")
         # update end_index+1 row and col of relevant pairs
 
-        k1_range = model_spec.diagonal_W ? start_index:end_index+1 : 1:K+1
+        
+        k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K+1)
         for k1 = k1_range
             k2 = new_k
             new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
@@ -382,7 +389,7 @@ function sample_Z(model::ModelState,
             if u_ind <= u
                 num_local_mutations[u_ind] = u - 1
                 removed_k = start_index + u_ind - 1
-                k_range = model_spec.diagonal_W ? removed_k : 1:K+1
+                k_range = model_spec.diagonal_W ? removed_k : (1:K+1)
                 for k = k_range
                     for p = 1:size(new_relevant_pairs[removed_k, k])[2]
                         i = new_relevant_pairs[removed_k, k][1,p]
@@ -426,15 +433,20 @@ function sample_Z(model::ModelState,
                           effective_lambda, current_model_logprob)
 
 
-        if !model_spec.diagonal_W
-            const_terms2 = vardim_splits(new_model, model_spec, Y, component_latent_effects,
+        if model_spec.debug
+            const_terms2 = vardim_splits(new_model, model_spec, data, component_latent_effects,
                               observed_effects, U, W_index_pointers, node_index,
                               effective_lambda, w_is_auxiliary)
 
             if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms))) > 10.0^-5
                 println("SLDKJF")
+                println(current_model_logprob)
                 println(exp_normalize(const_terms))
                 println(exp_normalize(const_terms2))
+                println(const_terms)
+                println(const_terms2)
+                println(const_terms - max(const_terms))
+                println(const_terms2 - max(const_terms2))
             end
         end
 
@@ -446,7 +458,7 @@ function sample_Z(model::ModelState,
 
 
         for iter = 1:num_W_sweeps
-            k1_range = model_spec.diagonal_W ? new_k : 1:K+1
+            k1_range = model_spec.diagonal_W ? new_k : (1:K+1)
             for k1 = k1_range
                 if model_spec.diagonal_W
                     k2_range = k1
@@ -581,7 +593,7 @@ function sample_Z(model::ModelState,
         println(logprobs)
 
 
-        if model_spec.debug
+        if model_spec.debug && false
 
             Z = ConstructZ(model.tree)
 
@@ -601,7 +613,7 @@ function sample_Z(model::ModelState,
                 new_model.tree.nodes[node_index].state = new_uu
 
                 tree_prior = prior(new_model,model_spec) 
-                tree_LL, test_LL = likelihood(new_model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
+                tree_LL, test_LL = likelihood(new_model, model_spec, data, linspace(1,N,N))
                 full_probs[cmp] = tree_prior + tree_LL
                 if cmp == sampled_component
                     str = "*tree probability["
@@ -617,11 +629,6 @@ function sample_Z(model::ModelState,
             println(logprobs - max(logprobs))
             println(full_probs - max(full_probs))
 
-            current_model_logprob = compute_unaugmented_prob(new_model, model_spec, 
-                                        new_relevant_pairs, component_latent_effects,
-                                        observed_effects, U, W_index_pointers,
-                                        node_index, effective_lambda, sampled_component,
-                                        logprobs[sampled_component])
 
 #            tree_prior = prior(model) 
 #            tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
@@ -643,6 +650,33 @@ function sample_Z(model::ModelState,
 #            end
             #println(!w_is_auxiliary[sampled_component])
         end
+
+        if model_spec.debug && new_u - u > 0
+            tree_prior = prior(model,model_spec) 
+            tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+        end
+
+        current_model_logprob = compute_unaugmented_prob(new_model, model_spec, 
+                                    new_relevant_pairs, component_latent_effects,
+                                    observed_effects, U, W_index_pointers,
+                                    node_index, effective_lambda, sampled_component,
+                                    logprobs[sampled_component])
+
+
+        if model_spec.debug && new_u - u > 0
+            if abs(current_model_logprob - (tree_prior + tree_LL)) > 10.0^-5
+                println((start_index,end_index,new_k))
+                println(current_model_logprob)
+                println(tree_prior + tree_LL)
+                println(new_relevant_pairs[new_k,new_k])
+                println(new_relevant_pairs[start_index,start_index])
+                println(Zk)
+                println(findn(Znew[:,new_k]*Znew[:,new_k]'))
+                 
+                assert(length(new_relevant_pairs[new_k,new_k]) > 0)
+            end
+        end
+
     end
 end
 
@@ -760,7 +794,7 @@ function sample_psi(model::ModelState,
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
 
 
-        if model_spec.debug
+        if model_spec.debug && false
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
             println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
             println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
@@ -772,7 +806,7 @@ function sample_psi(model::ModelState,
             println("start_prior, start_LL: ",priors[A], ", ", likelihoods[A])
             println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
 
-            tree_prior = prior(model) 
+            tree_prior = prior(model, model_spec) 
             tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
             println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
         end

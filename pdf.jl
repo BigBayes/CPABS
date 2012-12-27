@@ -632,6 +632,8 @@ function vardim_logpdf(model::ModelState,
         end
     end
 
+    LL = logprob
+    println("LL: ", LL)
 
     W = model.weights
     (K,K) = size(W)
@@ -639,7 +641,7 @@ function vardim_logpdf(model::ModelState,
     sigma = model.w_sigma
 
     for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : 1:K
+        k2_range = model_spec.diagonal_W ? k1 : (1:K)
 
         for k2 = k2_range
             if w_is_auxiliary[k1,k2]
@@ -649,6 +651,7 @@ function vardim_logpdf(model::ModelState,
             end
         end
     end
+    println("prior: ", logprob - LL)
 
 #    for k = find(w_is_auxiliary)
 #        logprob += t_logpdf(W[k], nu)
@@ -741,8 +744,8 @@ function compute_constant_terms(model::ModelState,
                 prior_terms += normal_logpdf(W[new_index,new_index], model.w_sigma)
             end
         else
-            for k1 = start_index:new_index
-                k2_range = k1 == new_index ? start_index:new_index : new_index
+            for k1 = 1:K # start_index:new_index
+                k2_range = k1 == new_index ? (1:K) : new_index
                 for k2 = k2_range
                     if u <= current_u
                         prior_terms += t_logpdf(W[k1,k2], model.nu)
@@ -755,10 +758,13 @@ function compute_constant_terms(model::ModelState,
             if u < current_u
                 removed_ind = start_index + u_ind - 1
                 for k1 = 1:K
-                    k2_range = k1 == removed_ind ? 1:K : removed_ind 
+                    k2_range = k1 == removed_ind ? (1:K) : removed_ind 
                     for k2 = k2_range
-                        prior_terms += t_logpdf(W[k1,k2], model.nu)
-                        prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
+
+                        if k1 != new_index && k2 != new_index
+                            prior_terms += t_logpdf(W[k1,k2], model.nu)
+                            prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
+                        end
 
                         rpairs = relevant_pairs[k1,k2]
                         for p = 1:size(rpairs)[2]
@@ -767,16 +773,17 @@ function compute_constant_terms(model::ModelState,
 
                             le = latent_effects[u_ind][i,j]
                             oe = observed_effects[i,j]
-                            ole_le = latent_effects[current_ind][i,j]
+                            old_le = latent_effects[current_ind][i,j]
                             likelihood_terms += log_logit(le + oe, Y[i,j])
-                            likelihood_terms -= log_logit(ole_le + oe, Y[i,j])
+                            likelihood_terms -= log_logit(old_le + oe, Y[i,j])
                         end
                     end
                 end
             end
         end
 
-
+        println("likelihood_terms: ", likelihood_terms)
+        println("prior_terms: ", prior_terms)
         logprobs[u_ind] += prior_terms + likelihood_terms
         logprobs[u_ind] += poisson_logpdf(u,effective_lambda) - 
                            poisson_logpdf(current_u,effective_lambda)
@@ -821,14 +828,14 @@ function compute_unaugmented_prob(model::ModelState,
             removed_ind = start_index + u_index - 1
             for k1 = 1:K
                 k2_range = k1 == removed_ind || k1 == new_index ? 
-                           1:K : [removed_ind, new_index]
+                           (1:K) : [removed_ind, new_index]
                 for k2 = k2_range
                     unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
                 end
             end
         elseif u == current_u
             for k1 = 1:K
-                k2_range = k1 == new_index ? 1:K : new_index
+                k2_range = k1 == new_index ? (1:K) : new_index
                 for k2 = k2_range
                     unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
                 end
