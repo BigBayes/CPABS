@@ -36,7 +36,7 @@ function mcmc(data::DataState,
     U = zeros(Int64,2N-1)
     W = randn(0,0)
     tree = Tree(U)
-    model = ModelState(lambda,gamma,1.0,1.0,1.0,tree,W,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
+    model = ModelState(lambda,gamma,1.0,1.0,1.0,tree,W,copy(W),[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
     for i = 1:2N-1
         num_ancestors = tree.nodes[i].num_ancestors
@@ -56,6 +56,7 @@ function mcmc(data::DataState,
         W = randn(sU,sU)
     end
     model.weights = W
+    model.augmented_weights = copy(W)
     #perform some unit tests
   
 #    W_copy = copy(W) 
@@ -110,6 +111,10 @@ function mcmc(data::DataState,
 
     ###
 
+    # if not diagonal, initialize using a diagonal model
+    diagonal = model_spec.diagonal_W
+    model_spec.diagonal_W = true
+
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
@@ -117,6 +122,9 @@ function mcmc(data::DataState,
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
         if iter == 2 && false 
             model_spec.debug = true
+        end
+        if iter == 1
+            model_spec.diagonal_W = diagonal
         end
         mcmc_sweep(model, model_spec, data)
     end
@@ -162,7 +170,6 @@ function mcmc_sweep(model::ModelState,
     tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
-    sample_bias(model, model_spec, data, latent_effects, observed_effects)
     vardim_time = time()
     if rand() > 0.0
         sample_Z(model, model_spec, data, latent_effects, observed_effects,
@@ -210,8 +217,8 @@ function sample_W(model::ModelState,
     (N,N) = size(Y)
     W = model.weights
 
-    num_W_sweeps = 5
-    num_W_slice_steps = 5
+    num_W_sweeps = 3
+    num_W_slice_steps = 3
 
    
     beta = model.beta
@@ -289,6 +296,7 @@ function sample_W(model::ModelState,
  
     end
 
+    model.augmented_weights[1:K,1:K] = W
 end
 
 function sample_Z(model::ModelState,
@@ -301,7 +309,7 @@ function sample_Z(model::ModelState,
     Y = data.Ytrain
     (N,N) = size(Y)
     tree = model.tree
-    num_W_sweeps = 5
+    num_W_sweeps = 3
     num_W_slice_steps = 3
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
@@ -330,6 +338,8 @@ function sample_Z(model::ModelState,
 #            continue
 #        end
 
+        old_model_logprob = current_model_logprob
+
         println("vardim sampling node_index: ", node_index)
         u = tree.nodes[node_index].state
         effective_lambda = model.lambda * (1 - model.gamma) * model.gamma^(tree.nodes[node_index].num_ancestors - 1)
@@ -341,101 +351,126 @@ function sample_Z(model::ModelState,
         end_index = start_index + u - 1
         new_k  = end_index + 1
 
-        Z = ConstructZ(tree)
+#        Z = ConstructZ(tree)
         # construct new Z col
         #println("construct Znew")
-        leaves = GetLeaves(tree, node_index)
-        Zk = zeros(Int64, N)
-        Zk[leaves] = 1
-
-        Znew = zeros(Int64, (N, K+1))
-        Znew[:,1:end_index] = Z[:,1:end_index]
-        Znew[:,end_index+1] = Zk
-        Znew[:,end_index+2:end] = Z[:,end_index+1:end]        
-        Znew = sparse(Znew)
+#        leaves = GetLeaves(tree, node_index)
+#        Zk = zeros(Int64, N)
+#        Zk[leaves] = 1
+#
+#        Znew = zeros(Int64, (N, K+1))
+#        Znew[:,1:end_index] = Z[:,1:end_index]
+#        Znew[:,end_index+1] = Zk
+#        Znew[:,end_index+2:end] = Z[:,end_index+1:end]        
+#        Znew = sparse(Znew)
 
         #new_relevant_pairs = Array(Array{Int64, 2}, (K+1,K+1))
-        new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K+1, y = 1:K+1]
+#        new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K+1, y = 1:K+1]
         # Leave space for new feature's weights
         #println("construct newmodel weights")
+        assert(all(model.weights[1:K,1:K] .== model.augmented_weights[1:K,1:K]))
         new_model = copy(model)
-        new_model.weights = zeros(Float64, (K+1,K+1))
+        augmented_K = min(K+1, size(model.augmented_weights)[1])
+
+        new_model.weights = compute_augmented_weight_matrix(new_model, model_spec, end_index)
+       
         nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K]
-        new_model.weights[nonzero_element_indices, nonzero_element_indices] = copy(model.weights)
+#        new_model.weights[nonzero_element_indices, nonzero_element_indices] = copy(model.weights)
         W = new_model.weights
+#        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(old_relevant_pairs)
+#
+#        k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K+1)
+#        for k1 = k1_range
+#            k2 = new_k
+#            new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
+#            new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
+#        end 
 
-        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(old_relevant_pairs)
+        new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
+                                 old_relevant_pairs, node_index, start_index, end_index)
 
-#        for k1 = nonzero_element_indices
-#        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = relevant_pairs
-
-        #println("construct new relevant pairs")
-        # update end_index+1 row and col of relevant pairs
-
-        
-        k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K+1)
-        for k1 = k1_range
-            k2 = new_k
-            new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
-            new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
-        end 
-        # All new weights initialized to zero, no need to update latent effects for the new feature
-        # need to update them for the cases where we are removing features
         #println("construct component_latent_effects")
-        component_latent_effects = Array(Array{Float64,2}, u+2)
-        num_local_mutations = zeros(Int64, u+2)
-        for u_ind = 1:u+2
-            component_latent_effects[u_ind] = copy(latent_effects)
-            if u_ind <= u
-                num_local_mutations[u_ind] = u - 1
-                removed_k = start_index + u_ind - 1
-                k_range = model_spec.diagonal_W ? removed_k : (1:K+1)
-                for k = k_range
-                    for p = 1:size(new_relevant_pairs[removed_k, k])[2]
-                        i = new_relevant_pairs[removed_k, k][1,p]
-                        j = new_relevant_pairs[removed_k, k][2,p]
-                        component_latent_effects[u_ind][i,j] -= W[removed_k, k]
-                    end
-                    if k != removed_k
-                        for p = 1:size(new_relevant_pairs[k, removed_k])[2]
-                            i = new_relevant_pairs[k, removed_k][1,p]
-                            j = new_relevant_pairs[k, removed_k][2,p]
-                            component_latent_effects[u_ind][i,j] -= W[k, removed_k]
-                        end
-                    end
-                end
-            elseif u_ind == u+1
-                num_local_mutations[u_ind] = u
-            else
-                num_local_mutations[u_ind] = u + 1
-            end
-        end
-   
+#        component_latent_effects = Array(Array{Float64,2}, u+2)
+#        num_local_mutations = zeros(Int64, u+2)
+#        for u_ind = 1:u+2
+#            component_latent_effects[u_ind] = copy(latent_effects)
+#            if u_ind <= u
+#                num_local_mutations[u_ind] = u - 1
+#                removed_k = start_index + u_ind - 1
+#                k_range = model_spec.diagonal_W ? removed_k : (1:K+1)
+#                for k = k_range
+#                    for p = 1:size(new_relevant_pairs[removed_k, k])[2]
+#                        i = new_relevant_pairs[removed_k, k][1,p]
+#                        j = new_relevant_pairs[removed_k, k][2,p]
+#                        component_latent_effects[u_ind][i,j] -= W[removed_k, k]
+#                    end
+#                    if k != removed_k
+#                        for p = 1:size(new_relevant_pairs[k, removed_k])[2]
+#                            i = new_relevant_pairs[k, removed_k][1,p]
+#                            j = new_relevant_pairs[k, removed_k][2,p]
+#                            component_latent_effects[u_ind][i,j] -= W[k, removed_k]
+#                        end
+#                    end
+#                end
+#            elseif u_ind == u+1
+#         #       num_local_mutations[u_ind] = u
+#            else
+#         #       num_local_mutations[u_ind] = u + 1
+#                k_range = model_spec.diagonal_W ? new_k : (1:K+1)
+#                for k = k_range
+#                    for p = 1:size(new_relevant_pairs[new_k, k])[2]
+#                        i = new_relevant_pairs[new_k, k][1,p]
+#                        j = new_relevant_pairs[new_k, k][2,p]
+#                        component_latent_effects[u_ind][i,j] += W[new_k,k]
+#                    end
+#
+#                    if k != new_k
+#                        for p = 1:size(new_relevant_pairs[k, new_k])[2]
+#                            i = new_relevant_pairs[k, new_k][1,p]
+#                            j = new_relevant_pairs[k, new_k][2,p]
+#                            component_latent_effects[u_ind][i,j] += W[k, new_k]
+#                        end
+#                    end
+#
+#                end
+#            end
+#        end
+ 
+        component_latent_effects = compute_component_latent_effects(new_model, model_spec, 
+                                        latent_effects, new_relevant_pairs, u, 
+                                        start_index, end_index) 
+        w_column_is_auxiliary = Array(Array{Bool,1},0)
+ 
         # Construct w_is_auxiliary for each component
         w_is_auxiliary = Array(Array{Bool,2},0)
-        U = [ x <= u ? u-1 : x == u+1 ? u : u+1 for x = 1:u+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
+        num_local_mutations = [ x <= u ? u-1 : x == u+1 ? u : u+1 for x = 1:u+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
         for u_ind = 1:u
             k_ind = start_index + u_ind - 1
             push(w_is_auxiliary,[x == k_ind  || y == k_ind ||
                                  x == new_k || y == new_k
                                  for x = 1:K+1, y = 1:K+1] )
+
+            push(w_column_is_auxiliary, [x == k_ind || x == new_k for x = 1:K+1])
+            
         end
 
         push(w_is_auxiliary,[x === new_k || y == new_k for x = 1:K+1, y = 1:K+1] )
         push(w_is_auxiliary, zeros(Bool, (K+1,K+1)))
 
+        push(w_column_is_auxiliary,[x === new_k for x = 1:K+1] )
+        push(w_column_is_auxiliary, zeros(Bool, K+1))
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
 
         const_terms = compute_constant_terms(new_model, model_spec, data, 
                           new_relevant_pairs, component_latent_effects,
-                          observed_effects, U, W_index_pointers, node_index,
+                          observed_effects, num_local_mutations, W_index_pointers, node_index,
                           effective_lambda, current_model_logprob)
 
 
         if model_spec.debug
             const_terms2 = vardim_splits(new_model, model_spec, data, component_latent_effects,
-                              observed_effects, U, W_index_pointers, node_index,
+                              observed_effects, num_local_mutations, W_index_pointers, node_index,
                               effective_lambda, w_is_auxiliary)
 
             if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms))) > 10.0^-5
@@ -458,12 +493,12 @@ function sample_Z(model::ModelState,
 
 
         for iter = 1:num_W_sweeps
-            k1_range = model_spec.diagonal_W ? new_k : (1:K+1)
+            k1_range = model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
             for k1 = k1_range
                 if model_spec.diagonal_W
                     k2_range = k1
                 elseif k1 >= start_index && k1 <= end_index+1
-                    k2_range = 1:K+1
+                    k2_range = start_index:end_index+1 #1:K+1
                 else
                     k2_range = start_index:end_index+1
                 end
@@ -559,7 +594,7 @@ function sample_Z(model::ModelState,
 
         logprobs = const_terms
 #        logprobs = vardim_splits(new_model, model_spec, Y, component_latent_effects,
-#                                 observed_effects, U, W_index_pointers, node_index,
+#                                 observed_effects, num_local_mutations, W_index_pointers, node_index,
 #                                 effective_lambda, w_is_auxiliary)
 
 #        if norm(const_terms - logprobs) > 10.0^-5
@@ -570,26 +605,133 @@ function sample_Z(model::ModelState,
 
         sampled_component = randmult(exp_normalize(logprobs)) 
 
-        new_u = U[sampled_component]
+        new_u = num_local_mutations[sampled_component]
         new_K = K + new_u - u
         new_valid_indices = find(!w_is_auxiliary[sampled_component])
+
         new_W = reshape(copy(W[new_valid_indices]), (new_K, new_K)) 
-        old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
 
         oldW = copy(model.weights)
+        augW = copy(W)
 
-        model.weights = copy(new_W)
-        tree.nodes[node_index].state = new_u
+
+        proposed_model = copy(new_model)
+        proposed_model.tree.nodes[node_index].state = new_u
+        proposed_model.weights = copy(new_W)
+        proposed_model.augmented_weights = copy(new_model.augmented_weights)
+
+        new_valid_columns = find(!w_column_is_auxiliary[sampled_component])
+        invalid_columns = find(w_column_is_auxiliary[sampled_component])
+
+        permutation = [new_valid_columns, invalid_columns]
+        permute_rows_and_cols!(augW, permutation)
+        if augmented_K < K+1
+            proposed_model.augmented_weights = copy(augW)
+        else
+            proposed_model.augmented_weights[1:K+1,1:K+1] = augW
+        end
+
+        proposed_state_logprob = compute_unaugmented_prob(new_model, model_spec, 
+                                      new_relevant_pairs, component_latent_effects,
+                                      observed_effects, num_local_mutations, W_index_pointers,
+                                      node_index, effective_lambda, sampled_component,
+                                      logprobs[sampled_component])
+
+
+        if new_K == K #acceptance probability 1
+            model.weights = copy(proposed_model.weights)
+            model.tree = copy(proposed_model.tree)
+            model.augmented_weights = copy(proposed_model.augmented_weights)
+            old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
+            latent_effects = component_latent_effects[sampled_component]
+            current_model_logprob = proposed_state_logprob 
+        else
+            # For computing probabilities of moves from target state
+            reverse_model = copy(proposed_model)
+            reverse_end_index = start_index + new_u - 1
+            reverse_augmented_W = compute_augmented_weight_matrix(reverse_model, 
+                                      model_spec, reverse_end_index)
+            reverse_model.weights = reverse_augmented_W
+            if new_K < K
+                reverse_relevant_pairs = new_relevant_pairs
+
+
+            else
+            #    reverse_augmented_W = compute_augmented_weight_matrix(reverse_model, 
+            #                              model_spec, reverse_end_index)
+                reverse_relevant_pairs = compute_new_relevant_pairs(reverse_model,
+                                             model_spec, new_relevant_pairs, node_index,
+                                             start_index, reverse_end_index)
+            end
+
+            reverse_local_mutations = [ x <= new_u ? new_u-1 : x == new_u+1 ? new_u : new_u+1 for x = 1:new_u+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
+            reverse_W_index_pointers = weight_index_pointers(reverse_model.tree)
+            reverse_latent_effects = compute_component_latent_effects(reverse_model,
+                model_spec, component_latent_effects[sampled_component],
+                reverse_relevant_pairs, new_u, start_index, reverse_end_index)
+
+            reverse_logprobs = compute_constant_terms(reverse_model, model_spec, data, 
+                          reverse_relevant_pairs, reverse_latent_effects,
+                          observed_effects, reverse_local_mutations,
+                          reverse_W_index_pointers, node_index,
+                          effective_lambda, proposed_state_logprob)
+
+            # correct for the fact that logprobs and reverse_logprobs were computed assuming 
+            # different dimensional augmented weight spaces
+            initial_logprobs = logprobs
+            if new_K < K
+                tempW = new_model.weights
+                tempK = size(tempW)[1]
+                if !model_spec.diagonal_W
+                    range = [x < new_k ? x : x+1 for x = 1:tempK-1]
+                    augmented_weights = [tempW[:,new_k], tempW[new_k,range]']
+                else
+                    augmented_weights = tempW[new_k,new_k]
+                end
+                augmentation_contribution = sum(t_logpdf(augmented_weights, reverse_model.nu))
+                reverse_logprobs += augmentation_contribution
+            else
+                tempW = reverse_model.weights
+                tempK = size(tempW)[1]
+                if !model_spec.diagonal_W
+                    range = [x < new_k+1 ? x : x+1 for x = 1:tempK-1]
+                    augmented_weights = [tempW[:,new_k+1], tempW[new_k+1,range]']
+                else
+                    augmented_weights = tempW[new_k+1,new_k+1]
+                end
+
+                augmentation_contribution = sum(t_logpdf(augmented_weights, proposed_model.nu))
+                initial_logprobs += augmentation_contribution
+            end
+
+
+            #accept/reject
+            acceptance_prob = exp(logsumexp(initial_logprobs) - logsumexp(reverse_logprobs))
+            println("acceptance prob: ", acceptance_prob)
+            if acceptance_prob < 10.0^-20
+                println(logprobs)
+                println(reverse_logprobs)
+            end
+            if rand() < acceptance_prob
+                model.weights = copy(proposed_model.weights)
+                model.tree = copy(proposed_model.tree)
+                model.augmented_weights = copy(proposed_model.augmented_weights)
+                old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
+                latent_effects = component_latent_effects[sampled_component]
+                current_model_logprob = proposed_state_logprob 
+            end
+        end
+
+
 
 #        tree_prior = prior(model) 
 #        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
 #        println("new probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
-        latent_effects = component_latent_effects[sampled_component]
 
 #        println("new_u,weight_prob,new_weight_prob ", new_u, ",", sum(normal_logpdf(oldW, model.w_sigma )), ",", sum(normal_logpdf(new_W, model.w_sigma )))
 
-        println("K,eff_lambda,Delta_K: ", new_K, ",",effective_lambda, ",",new_u - u)
+        println("K,propK,eff_lambda,Delta_K: ", size(model.weights)[1],",",new_K, ",",effective_lambda, ",",new_u - u)
         println(logprobs)
 
 
@@ -604,7 +746,7 @@ function sample_Z(model::ModelState,
             full_probs = zeros(length(logprobs))
             for cmp = 1:length(logprobs)
 
-                new_uu = U[cmp]
+                new_uu = num_local_mutations[cmp]
                 new_K = K + new_uu - u
                 new_valid_indices = find(!w_is_auxiliary[cmp])
                 new_W = reshape(copy(W[new_valid_indices]), (new_K, new_K)) 
@@ -656,11 +798,6 @@ function sample_Z(model::ModelState,
             tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
         end
 
-        current_model_logprob = compute_unaugmented_prob(new_model, model_spec, 
-                                    new_relevant_pairs, component_latent_effects,
-                                    observed_effects, U, W_index_pointers,
-                                    node_index, effective_lambda, sampled_component,
-                                    logprobs[sampled_component])
 
 
         if model_spec.debug && new_u - u > 0

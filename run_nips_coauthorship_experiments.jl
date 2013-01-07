@@ -28,4 +28,4 @@ Ytest[y_train_inds] = -1
 
 data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
 
-model = mcmc(data, 1.0, 0.5, model_spec, 50)
+model = mcmc(data, 0.01, 0.5, model_spec, 200)

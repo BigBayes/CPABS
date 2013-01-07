@@ -633,7 +633,7 @@ function vardim_logpdf(model::ModelState,
     end
 
     LL = logprob
-    println("LL: ", LL)
+    #println("LL: ", LL)
 
     W = model.weights
     (K,K) = size(W)
@@ -651,7 +651,7 @@ function vardim_logpdf(model::ModelState,
             end
         end
     end
-    println("prior: ", logprob - LL)
+    #println("prior: ", logprob - LL)
 
 #    for k = find(w_is_auxiliary)
 #        logprob += t_logpdf(W[k], nu)
@@ -710,10 +710,6 @@ function compute_constant_terms(model::ModelState,
     end_index = start_index + model.tree.nodes[node_index].state - 1
     new_index = end_index + 1
 
-    # Assume that new weights will be zero when passed to this function
-    # since we only need to call it before sampling begins
-    assert(W[new_index,new_index] == 0.0)
-    assert(sum(W[:,new_index]) + sum(W[new_index,:]) == 0.0)
 
     for u_ind = 1:length(U)
         u = U[u_ind]
@@ -742,6 +738,17 @@ function compute_constant_terms(model::ModelState,
                 prior_terms += t_logpdf(W[new_index,new_index], model.nu)
             else
                 prior_terms += normal_logpdf(W[new_index,new_index], model.w_sigma)
+                rpairs = relevant_pairs[new_index, new_index]
+                for p = 1:size(rpairs)[2]
+                    i = rpairs[1,p]
+                    j = rpairs[2,p]
+
+                    le = latent_effects[u_ind][i,j]
+                    oe = observed_effects[i,j]
+                    old_le = latent_effects[current_ind][i,j]
+                    likelihood_terms += log_logit(le + oe, Y[i,j])
+                    likelihood_terms -= log_logit(old_le + oe, Y[i,j]) 
+                end 
             end
         else
             for k1 = 1:K # start_index:new_index
@@ -755,10 +762,11 @@ function compute_constant_terms(model::ModelState,
                 end
             end
 
-            if u < current_u
-                removed_ind = start_index + u_ind - 1
+            current_k = u < current_u ? start_index + u_ind - 1 : new_index
+            
+            if u < current_u || u > current_u
                 for k1 = 1:K
-                    k2_range = k1 == removed_ind ? (1:K) : removed_ind 
+                    k2_range = k1 == current_k ? (1:K) : current_k 
                     for k2 = k2_range
 
                         if k1 != new_index && k2 != new_index
@@ -782,13 +790,129 @@ function compute_constant_terms(model::ModelState,
             end
         end
 
-        println("likelihood_terms: ", likelihood_terms)
-        println("prior_terms: ", prior_terms)
+        #println("likelihood_terms: ", likelihood_terms)
+        #println("prior_terms: ", prior_terms)
         logprobs[u_ind] += prior_terms + likelihood_terms
         logprobs[u_ind] += poisson_logpdf(u,effective_lambda) - 
                            poisson_logpdf(current_u,effective_lambda)
     end 
     logprobs
+end
+
+function compute_component_latent_effects(model::ModelState,
+                                          model_spec::ModelSpecification,
+                                          latent_effects::Array{Float64,2},
+                                          relevant_pairs::Array{Array{Int64,2},2},
+                                          u::Int,
+                                          start_index::Int,
+                                          end_index::Int)
+
+    W = model.weights
+    (K,K) = size(W)
+    new_k = end_index + 1
+    component_latent_effects = Array(Array{Float64,2}, u+2)
+
+
+    for u_ind = 1:u+2
+        component_latent_effects[u_ind] = copy(latent_effects)
+        if u_ind <= u
+            removed_k = start_index + u_ind - 1
+            assert(removed_k <= K)
+            k_range = model_spec.diagonal_W ? removed_k : (1:K)
+            for k = k_range
+                for p = 1:size(relevant_pairs[removed_k, k])[2]
+                    i = relevant_pairs[removed_k, k][1,p]
+                    j = relevant_pairs[removed_k, k][2,p]
+                    component_latent_effects[u_ind][i,j] -= W[removed_k, k]
+                end
+                if k != removed_k
+                    for p = 1:size(relevant_pairs[k, removed_k])[2]
+                        i = relevant_pairs[k, removed_k][1,p]
+                        j = relevant_pairs[k, removed_k][2,p]
+                        component_latent_effects[u_ind][i,j] -= W[k, removed_k]
+                    end
+                end
+            end
+        elseif u_ind == u+2
+            k_range = model_spec.diagonal_W ? new_k : (1:K)
+            assert(new_k <= K)
+            for k = k_range
+                for p = 1:size(relevant_pairs[new_k, k])[2]
+                    i = relevant_pairs[new_k, k][1,p]
+                    j = relevant_pairs[new_k, k][2,p]
+                    component_latent_effects[u_ind][i,j] += W[new_k,k]
+                end
+
+                if k != new_k
+                    for p = 1:size(relevant_pairs[k, new_k])[2]
+                        i = relevant_pairs[k, new_k][1,p]
+                        j = relevant_pairs[k, new_k][2,p]
+                        component_latent_effects[u_ind][i,j] += W[k, new_k]
+                    end
+                end
+
+            end
+        end
+    end
+
+    component_latent_effects
+end
+
+# Moves the K+1st column of the augmented weight matrix into the correct spot
+# for the new feature we are considering.
+function compute_augmented_weight_matrix(model::ModelState,
+                                         model_spec::ModelSpecification,
+                                         end_index::Int)
+    new_k = end_index + 1
+    (K,K) = size(model.weights)
+    augmented_K = min(K+1, size(model.augmented_weights)[1])
+    augW = zeros(Float64, (K+1,K+1))
+    augW[1:augmented_K,1:augmented_K] = 
+        copy(model.augmented_weights[1:augmented_K, 1:augmented_K])
+    aug_permutation = [x <= end_index ? x : (x == new_k ? K+1 : x-1) for x in 1:K+1]
+    permute_rows_and_cols!(augW, aug_permutation)
+    augW
+end
+
+# Compute relevant pairs for newly introduced weight parameters
+# should be called with augmented weight matrix present in model.weights,
+# but without changing model.tree from the original
+function compute_new_relevant_pairs(model::ModelState,
+                                    model_spec::ModelSpecification,
+                                    relevant_pairs::Array{Array{Int64,2},2},
+                                    node_index::Int,
+                                    start_index::Int,
+                                    end_index::Int)
+    (K,K) = size(model.weights)
+    N::Int = (length(model.tree.nodes)+1)/2
+    new_k = end_index + 1
+
+    tree = model.tree
+    Z = ConstructZ(tree)
+    # construct new Z col
+    #println("construct Znew")
+    leaves = GetLeaves(tree, node_index)
+    Zk = zeros(Int64, N)
+    Zk[leaves] = 1
+
+    Znew = zeros(Int64, (N, K))
+    Znew[:,1:end_index] = Z[:,1:end_index]
+    Znew[:,end_index+1] = Zk
+    Znew[:,end_index+2:end] = Z[:,end_index+1:end]        
+    Znew = sparse(Znew)
+
+    new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
+    nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K-1]
+
+
+    new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(relevant_pairs)
+    k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K)
+    for k1 = k1_range
+        k2 = new_k
+        new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
+        new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
+    end
+    new_relevant_pairs
 end
 
 function compute_unaugmented_prob(model::ModelState,

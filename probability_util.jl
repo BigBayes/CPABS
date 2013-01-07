@@ -10,7 +10,8 @@ end
 
 # Must be normalized for use in expanding dimensions for variable dimension slice sampling
 function t_logpdf(x, nu)
-    lgamma(0.5*(nu+1)) - lgamma(0.5nu) - 0.5*log(nu*pi) - 0.5*(nu+1)*log(1+x*x/nu)
+    -x.*x/(2nu*nu) - 0.5log(2pi) - log(nu)
+    #lgamma(0.5*(nu+1)) - lgamma(0.5nu) - 0.5*log(nu*pi) - 0.5*(nu+1)*log(1+x*x/nu)
 end
 
 # Sigma = I

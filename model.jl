@@ -8,6 +8,7 @@ type ModelState
     nu::Float64
     tree::Tree{Int64}
     weights::Array{Float64,2}
+    augmented_weights::Array{Float64,2}
     beta::Array{Float64,1}
     beta_p::Array{Float64,1}
     beta_c::Array{Float64,1}
@@ -19,7 +20,8 @@ end
 function copy(model::ModelState)
     ModelState(model.lambda, model.gamma, model.w_sigma, model.b_sigma, 
                model.nu, copy(model.tree), copy(model.weights),
-               copy(model.beta), copy(model.beta_p), copy(model.beta_c), 
+               copy(model.augmented_weights), copy(model.beta), 
+               copy(model.beta_p), copy(model.beta_c), 
                copy(model.a), copy(model.b), model.c)
 end
 
