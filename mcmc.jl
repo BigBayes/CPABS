@@ -4,7 +4,7 @@ load("probability_util.jl")
 load("pdf.jl")
 load("slicesampler.jl")
 
-@profile begin
+#@profile begin
 function mcmc(data::DataState,
               lambda::Float64,
               gamma::Float64,
@@ -994,4 +994,4 @@ function sample_time(f::Function,
     return x
 end
 
-end #end profile
+#end #end profile

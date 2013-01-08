@@ -1,7 +1,7 @@
 load("model.jl")
 load("tree.jl")
 load("probability_util.jl")
-load("profile.jl")
+#load("profile.jl")
 #Global pdf
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
@@ -515,7 +515,7 @@ end
 ###################################
 ###### pdfs for vardim updates ####
 ###################################
-@profile begin
+#@profile begin
 function vardim_local_logpdf(model::ModelState,
                              data::DataState,
                              relevant_pairs::Array{Int64, 2},
@@ -683,7 +683,7 @@ function vardim_splits(model::ModelState,
     logprobs
 end
 
-end #profile
+#end #profile
 # Utility Functions
 
 function compute_constant_terms(model::ModelState,
