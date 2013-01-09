@@ -36,6 +36,7 @@ type ModelSpecification
     global_move_probability::Float64
 
     debug::Bool
+    verbose::Bool
 end
 
 # Data container

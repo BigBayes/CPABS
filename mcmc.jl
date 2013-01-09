@@ -115,6 +115,8 @@ function mcmc(data::DataState,
     diagonal = model_spec.diagonal_W
     model_spec.diagonal_W = true
 
+    avg_test_likelihoods = [zeros(Float64, 0) for x in 1:N, y in 1:N]
+
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
@@ -126,7 +128,31 @@ function mcmc(data::DataState,
         if iter == 1
             model_spec.diagonal_W = diagonal
         end
+
         mcmc_sweep(model, model_spec, data)
+
+        if iter > 50
+            Z = ConstructZ(model.tree) 
+            testI, testJ = findn(data.Ytest .>= 0)
+            total_LL = 0.0
+
+            for p = 1:length(testI)
+                i = testI[p]
+                j = testJ[p]
+                println
+                testLL = test_likelihood_ij(model,model_spec,data,Z,i,j)
+                push(avg_test_likelihoods[i,j], testLL)
+
+                total_LL += logsumexp(avg_test_likelihoods[i,j]) - log(length(avg_test_likelihoods[i,j]))
+
+            end
+
+            println("Average Test LL: ", total_LL / (length(testI)) )
+            println("Total Test LL: ", total_LL  )
+
+        end
+
+ 
     end
 
     model
@@ -306,6 +332,7 @@ function sample_Z(model::ModelState,
                   observed_effects::Array{Float64,2},
                   model_logprob::Float64)
 
+    println("Sample Z")
     Y = data.Ytrain
     (N,N) = size(Y)
     tree = model.tree
@@ -316,13 +343,12 @@ function sample_Z(model::ModelState,
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
     root_to_leaf = reverse(leaf_to_root)
 
-    println("constuctZ")
     Z = ConstructZ(tree)
     (K, K) = size(model.weights)
     #Array(Array{Int64, 2}, (K,K))
     old_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
 
-    println("construct relevant pairs")
+    
     for k1 = 1:K
         k2_range = model_spec.diagonal_W ? k1 : (1:K)
         for k2 = k2_range
@@ -332,15 +358,18 @@ function sample_Z(model::ModelState,
 
     current_model_logprob = model_logprob 
 
-    for node_index = root_to_leaf
+    for rtl_index = 1:length(root_to_leaf)
 
+        node_index = root_to_leaf[rtl_index]
 #        if rand() < .9
 #            continue
 #        end
 
         old_model_logprob = current_model_logprob
 
-        println("vardim sampling node_index: ", node_index)
+        if model_spec.verbose
+            println("vardim sampling node_index: ", node_index)
+        end
         u = tree.nodes[node_index].state
         effective_lambda = model.lambda * (1 - model.gamma) * model.gamma^(tree.nodes[node_index].num_ancestors - 1)
 
@@ -486,7 +515,7 @@ function sample_Z(model::ModelState,
         end
 
 
-        if model_spec.debug
+        if model_spec.debug && model_spec.verbose
             println("W[start,start]: ", new_model.weights[start_index,start_index])
             println("slice sample")
         end
@@ -707,11 +736,15 @@ function sample_Z(model::ModelState,
 
             #accept/reject
             acceptance_prob = exp(logsumexp(initial_logprobs) - logsumexp(reverse_logprobs))
-            println("acceptance prob: ", acceptance_prob)
-            if acceptance_prob < 10.0^-20
-                println(logprobs)
-                println(reverse_logprobs)
+
+            if model_spec.verbose
+                println("acceptance prob: ", acceptance_prob)
+                if acceptance_prob < 10.0^-20
+                    println(logprobs)
+                    println(reverse_logprobs)
+                end
             end
+
             if rand() < acceptance_prob
                 model.weights = copy(proposed_model.weights)
                 model.tree = copy(proposed_model.tree)
@@ -731,8 +764,15 @@ function sample_Z(model::ModelState,
 
 #        println("new_u,weight_prob,new_weight_prob ", new_u, ",", sum(normal_logpdf(oldW, model.w_sigma )), ",", sum(normal_logpdf(new_W, model.w_sigma )))
 
-        println("K,propK,eff_lambda,Delta_K: ", size(model.weights)[1],",",new_K, ",",effective_lambda, ",",new_u - u)
-        println(logprobs)
+        if model_spec.verbose
+            println("K,propK,eff_lambda,Delta_K: ", size(model.weights)[1],",",new_K, ",",effective_lambda, ",",new_u - u)
+            println(logprobs)
+        end
+
+        if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
+            percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
+            println(" ",percent , "% ")
+        end
 
 
         if model_spec.debug && false

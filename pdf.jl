@@ -76,6 +76,30 @@ function likelihood(model::ModelState,
     (total_prob, total_test_prob)
 end
 
+function test_likelihood_ij(model::ModelState,
+                            model_spec::ModelSpecification,
+                            data::DataState,
+                            Z, #sparse or full binary matrix
+                            i::Int,
+                            j::Int)
+
+    Ytest = data.Ytest
+    (N,N) = size(Y)
+    tree = model.tree
+    W = model.weights
+    beta = model.beta
+    beta_p = model.beta_p
+    beta_c = model.beta_c
+ 
+    total_prob = 0.0
+    total_test_prob = 0.0
+  
+    oe = compute_observed_effects(model, model_spec, data, i, j)
+    logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
+    log_logit(logit_arg, Ytest[i,j]) 
+
+end
+
 # Local pdfs for sampling
 
 ###################################
