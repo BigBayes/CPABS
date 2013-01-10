@@ -337,7 +337,7 @@ function sample_Z(model::ModelState,
     (N,N) = size(Y)
     tree = model.tree
     num_W_sweeps = 3
-    num_W_slice_steps = 3
+    num_W_slice_steps = 1
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
@@ -361,9 +361,15 @@ function sample_Z(model::ModelState,
     for rtl_index = 1:length(root_to_leaf)
 
         node_index = root_to_leaf[rtl_index]
-#        if rand() < .9
-#            continue
-#        end
+
+        if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
+            percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
+            println(" ",percent , "% ")
+        end
+
+        if rand() > model_spec.Z_sample_branch_prob
+            continue
+        end
 
         old_model_logprob = current_model_logprob
 
@@ -522,15 +528,19 @@ function sample_Z(model::ModelState,
 
 
         for iter = 1:num_W_sweeps
-            k1_range = model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
+            k1_range = 1:K+1 #model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
             for k1 = k1_range
                 if model_spec.diagonal_W
                     k2_range = k1
-                elseif k1 >= start_index && k1 <= end_index+1
-                    k2_range = start_index:end_index+1 #1:K+1
                 else
-                    k2_range = start_index:end_index+1
+                    k2_range = 1:K+1
                 end
+
+#                elseif k1 >= start_index && k1 <= end_index+1
+#                    k2_range = start_index:end_index+1 #1:K+1
+#                else
+#                    k2_range = start_index:end_index+1
+#                end
                 #k2_range = 1:K+1
                 for k2 = k2_range
 
@@ -767,11 +777,6 @@ function sample_Z(model::ModelState,
         if model_spec.verbose
             println("K,propK,eff_lambda,Delta_K: ", size(model.weights)[1],",",new_K, ",",effective_lambda, ",",new_u - u)
             println(logprobs)
-        end
-
-        if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
-            percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
-            println(" ",percent , "% ")
         end
 
 

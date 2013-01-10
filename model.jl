@@ -34,6 +34,7 @@ type ModelSpecification
     diagonal_W::Bool
 
     global_move_probability::Float64
+    Z_sample_branch_prob::Float64
 
     debug::Bool
     verbose::Bool

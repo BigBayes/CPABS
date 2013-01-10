@@ -2,7 +2,7 @@ load("mcmc.jl")
 load("read_nips_data.jl")
 load("profile.jl")
 
-model_spec = ModelSpecification(false, false, false, true, false, 0.2, false, false)
+model_spec = ModelSpecification(false, false, false, true, false, 0.2, 0.2, false, false)
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
@@ -28,4 +28,4 @@ Ytest[y_train_inds] = -1
 
 data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
 
-model = mcmc(data, 0.01, 0.5, model_spec, 200)
+model = mcmc(data, 0.01, 0.5, model_spec, 500)
