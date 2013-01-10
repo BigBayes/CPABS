@@ -424,52 +424,6 @@ function sample_Z(model::ModelState,
         new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
                                  old_relevant_pairs, node_index, start_index, end_index)
 
-        #println("construct component_latent_effects")
-#        component_latent_effects = Array(Array{Float64,2}, u+2)
-#        num_local_mutations = zeros(Int64, u+2)
-#        for u_ind = 1:u+2
-#            component_latent_effects[u_ind] = copy(latent_effects)
-#            if u_ind <= u
-#                num_local_mutations[u_ind] = u - 1
-#                removed_k = start_index + u_ind - 1
-#                k_range = model_spec.diagonal_W ? removed_k : (1:K+1)
-#                for k = k_range
-#                    for p = 1:size(new_relevant_pairs[removed_k, k])[2]
-#                        i = new_relevant_pairs[removed_k, k][1,p]
-#                        j = new_relevant_pairs[removed_k, k][2,p]
-#                        component_latent_effects[u_ind][i,j] -= W[removed_k, k]
-#                    end
-#                    if k != removed_k
-#                        for p = 1:size(new_relevant_pairs[k, removed_k])[2]
-#                            i = new_relevant_pairs[k, removed_k][1,p]
-#                            j = new_relevant_pairs[k, removed_k][2,p]
-#                            component_latent_effects[u_ind][i,j] -= W[k, removed_k]
-#                        end
-#                    end
-#                end
-#            elseif u_ind == u+1
-#         #       num_local_mutations[u_ind] = u
-#            else
-#         #       num_local_mutations[u_ind] = u + 1
-#                k_range = model_spec.diagonal_W ? new_k : (1:K+1)
-#                for k = k_range
-#                    for p = 1:size(new_relevant_pairs[new_k, k])[2]
-#                        i = new_relevant_pairs[new_k, k][1,p]
-#                        j = new_relevant_pairs[new_k, k][2,p]
-#                        component_latent_effects[u_ind][i,j] += W[new_k,k]
-#                    end
-#
-#                    if k != new_k
-#                        for p = 1:size(new_relevant_pairs[k, new_k])[2]
-#                            i = new_relevant_pairs[k, new_k][1,p]
-#                            j = new_relevant_pairs[k, new_k][2,p]
-#                            component_latent_effects[u_ind][i,j] += W[k, new_k]
-#                        end
-#                    end
-#
-#                end
-#            end
-#        end
  
         component_latent_effects = compute_component_latent_effects(new_model, model_spec, 
                                         latent_effects, new_relevant_pairs, u, 
@@ -528,12 +482,12 @@ function sample_Z(model::ModelState,
 
 
         for iter = 1:num_W_sweeps
-            k1_range = 1:K+1 #model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
+            k1_range = start_index:end_index+1 #model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
             for k1 = k1_range
                 if model_spec.diagonal_W
                     k2_range = k1
                 else
-                    k2_range = 1:K+1
+                    k2_range = start_index:end_index+1
                 end
 
 #                elseif k1 >= start_index && k1 <= end_index+1
