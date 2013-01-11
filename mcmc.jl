@@ -116,7 +116,11 @@ function mcmc(data::DataState,
     model_spec.diagonal_W = true
 
     avg_test_likelihoods = [zeros(Float64, 0) for x in 1:N, y in 1:N]
+    testLLs = Float64[]
+    trainLLs = Float64[]
 
+    models = Array(ModelState,0)
+    
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
@@ -131,7 +135,7 @@ function mcmc(data::DataState,
 
         mcmc_sweep(model, model_spec, data)
 
-        if iter > 50
+        if iter > 200
             Z = ConstructZ(model.tree) 
             testI, testJ = findn(data.Ytest .>= 0)
             total_LL = 0.0
@@ -152,10 +156,12 @@ function mcmc(data::DataState,
 
         end
 
- 
+        push(models,copy(model)) 
+        push(trainLLs, tree_LL)
+        push(testLLs, test_LL)
     end
 
-    model
+    (models, trainLLs, testLLs)
 end
 
 
