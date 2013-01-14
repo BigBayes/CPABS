@@ -318,9 +318,6 @@ function move_features(augmented_matrix,
 
     for el = reverse(els)
         numf = num_features[target_index]
-        println(length(target_pointers))
-        println(numf)
-        println(el)
         insert(target_pointers, numf+1, el)
         num_features[target_index] += 1
     end

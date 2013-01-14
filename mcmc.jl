@@ -677,7 +677,6 @@ function sample_Z(model::ModelState,
         elseif new_K > K
             activate_feature(proposed_model.augmented_weights,
                              node_index)
-            println("proposed_state: ", proposed_model.tree.nodes[node_index].state)
         end
 
 
@@ -794,8 +793,6 @@ function sample_Z(model::ModelState,
                 old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
                 latent_effects = component_latent_effects[sampled_component]
                 current_model_logprob = proposed_state_logprob 
-
-                println("model_state: ", model.tree.nodes[node_index].state)
 
             end
         end
