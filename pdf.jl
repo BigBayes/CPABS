@@ -154,7 +154,7 @@ function psi_infsites_logpdf(model::ModelState,
     for i = indices
         cur = tree.nodes[i]
 
-        if i == 1 #leaf node
+        if i <= N #leaf node
             poisson_mean_before = model.lambda * gam^(cur.num_ancestors)
         else
             poisson_mean_before = model.lambda * (1 - gam) * gam^(cur.num_ancestors - 1)
@@ -165,7 +165,7 @@ function psi_infsites_logpdf(model::ModelState,
                                        poisson_logpdf(cur.state, poisson_mean_before)
 
         child_mutation_contributions = 0.0
-        if i > 1
+        if i > N
             for j = 1:2
                 child = cur.children[j]
                 if child != Nil()
@@ -880,22 +880,6 @@ function compute_component_latent_effects(model::ModelState,
     end
 
     component_latent_effects
-end
-
-# Moves the K+1st column of the augmented weight matrix into the correct spot
-# for the new feature we are considering.
-function compute_augmented_weight_matrix(model::ModelState,
-                                         model_spec::ModelSpecification,
-                                         end_index::Int)
-    new_k = end_index + 1
-    (K,K) = size(model.weights)
-    augmented_K = min(K+1, size(model.augmented_weights)[1])
-    augW = zeros(Float64, (K+1,K+1))
-    augW[1:augmented_K,1:augmented_K] = 
-        copy(model.augmented_weights[1:augmented_K, 1:augmented_K])
-    aug_permutation = [x <= end_index ? x : (x == new_k ? K+1 : x-1) for x in 1:K+1]
-    permute_rows_and_cols!(augW, aug_permutation)
-    augW
 end
 
 # Compute relevant pairs for newly introduced weight parameters

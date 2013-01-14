@@ -35,8 +35,9 @@ function mcmc(data::DataState,
 
     U = zeros(Int64,2N-1)
     W = randn(0,0)
+    Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
-    model = ModelState(lambda,gamma,1.0,1.0,1.0,tree,W,copy(W),[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
+    model = ModelState(lambda,gamma,1.0,1.0,1.0,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
     for i = 1:2N-1
         num_ancestors = tree.nodes[i].num_ancestors
@@ -56,7 +57,9 @@ function mcmc(data::DataState,
         W = randn(sU,sU)
     end
     model.weights = W
-    model.augmented_weights = copy(W)
+    model.augmented_weights = AugmentedMatrix(2N-1, W, U)
+
+
     #perform some unit tests
   
 #    W_copy = copy(W) 
@@ -328,7 +331,9 @@ function sample_W(model::ModelState,
  
     end
 
-    model.augmented_weights[1:K,1:K] = W
+    inds = get_augmented_submatrix_indices(model.augmented_weights, 1, 0)
+    model.augmented_weights[inds,inds] = W
+
 end
 
 function sample_Z(model::ModelState,
@@ -365,7 +370,7 @@ function sample_Z(model::ModelState,
     current_model_logprob = model_logprob 
 
     for rtl_index = 1:length(root_to_leaf)
-
+        tree = model.tree #make sure after copies to model we have the right tree ref
         node_index = root_to_leaf[rtl_index]
 
         if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
@@ -383,6 +388,22 @@ function sample_Z(model::ModelState,
             println("vardim sampling node_index: ", node_index)
         end
         u = tree.nodes[node_index].state
+
+        tU = [tree.nodes[i].state for i = 1:2N-1]
+
+        if !all(model.augmented_weights.num_active_features .== tU)
+            fail_inds = find( model.augmented_weights.num_active_features .!= tU)
+            println(fail_inds)
+            println(model.augmented_weights.num_active_features[fail_inds])
+            println(tU[fail_inds])
+
+            println(model.augmented_weights.num_active_features[end-20:end])
+            println(tU[end-20:end])
+            println(sum(model.augmented_weights.num_active_features))
+            println(sum(tU))
+        end
+        assert(all(model.augmented_weights.num_active_features .== tU))
+
         effective_lambda = model.lambda * (1 - model.gamma) * model.gamma^(tree.nodes[node_index].num_ancestors - 1)
 
         (K, K) = size(model.weights)
@@ -409,15 +430,30 @@ function sample_Z(model::ModelState,
 #        new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K+1, y = 1:K+1]
         # Leave space for new feature's weights
         #println("construct newmodel weights")
-        assert(all(model.weights[1:K,1:K] .== model.augmented_weights[1:K,1:K]))
-        new_model = copy(model)
-        augmented_K = min(K+1, size(model.augmented_weights)[1])
 
-        new_model.weights = compute_augmented_weight_matrix(new_model, model_spec, end_index)
+        inds = get_augmented_submatrix_indices(model.augmented_weights, 1, 0)
+        augW = model.augmented_weights[inds,inds] 
+
+        if !all(model.weights[1:K,1:K] .== augW)
+            println("model_inds: ", inds)
+            println(model.weights[1:K,1:K])
+            println(augW)
+            println(model.augmented_weights.matrix)
+        end
+
+        assert(all(model.weights[1:K,1:K] .== augW))
+
+
+        new_model = copy(model)
+
+        new_model_inds = 
+            get_augmented_submatrix_indices(model.augmented_weights, node_index, 1)
+        new_model.weights = model.augmented_weights[new_model_inds, new_model_inds] 
        
         nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K]
 #        new_model.weights[nonzero_element_indices, nonzero_element_indices] = copy(model.weights)
         W = new_model.weights
+
 #        new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(old_relevant_pairs)
 #
 #        k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K+1)
@@ -617,18 +653,51 @@ function sample_Z(model::ModelState,
         proposed_model = copy(new_model)
         proposed_model.tree.nodes[node_index].state = new_u
         proposed_model.weights = copy(new_W)
-        proposed_model.augmented_weights = copy(new_model.augmented_weights)
 
-        new_valid_columns = find(!w_column_is_auxiliary[sampled_component])
-        invalid_columns = find(w_column_is_auxiliary[sampled_component])
 
-        permutation = [new_valid_columns, invalid_columns]
-        permute_rows_and_cols!(augW, permutation)
-        if augmented_K < K+1
-            proposed_model.augmented_weights = copy(augW)
-        else
-            proposed_model.augmented_weights[1:K+1,1:K+1] = augW
+        proposed_model_inds = 
+            get_augmented_submatrix_indices(proposed_model.augmented_weights,
+                                            node_index,
+                                            1)
+#        println(new_valid_indices)
+#        println("sampled_component: ", sampled_component)
+#        println(w_is_auxiliary[sampled_component])
+#        println("proposed_inds: ", proposed_model_inds)
+#        println(W)
+#        println(new_W)
+
+        proposed_model.augmented_weights[proposed_model_inds, proposed_model_inds] =
+            augW 
+
+
+        if new_K < K
+            deactivate_feature(proposed_model.augmented_weights,
+                               node_index,
+                               sampled_component)
+        elseif new_K > K
+            activate_feature(proposed_model.augmented_weights,
+                             node_index)
+            println("proposed_state: ", proposed_model.tree.nodes[node_index].state)
         end
+
+
+#        permutation = [new_valid_columns, invalid_columns]
+#        permute_rows_and_cols!(augW, permutation)
+#        permute_rows_and_cols!(proposed_model.augmented_weights, permutation)
+#        if augmented_K < K+1
+#            proposed_model.augmented_weights = [zeros(2N-1) for k1 = 1:K+1, k2 = 1:K+1]
+#        else
+#            proposed_model.augmented_weights[1:K+1,1:K+1] = augW
+#        end
+#
+#
+#        for k1 = 1:new_K
+#            for k2 = 1:new_K
+#                proposed_model.augmented_weights[k1,k2][:] = proposed_model.weights[k1,k2]
+#            end
+#        end
+
+
 
         proposed_state_logprob = compute_unaugmented_prob(new_model, model_spec, 
                                       new_relevant_pairs, component_latent_effects,
@@ -644,20 +713,22 @@ function sample_Z(model::ModelState,
             old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
             latent_effects = component_latent_effects[sampled_component]
             current_model_logprob = proposed_state_logprob 
+
         else
             # For computing probabilities of moves from target state
             reverse_model = copy(proposed_model)
             reverse_end_index = start_index + new_u - 1
-            reverse_augmented_W = compute_augmented_weight_matrix(reverse_model, 
-                                      model_spec, reverse_end_index)
-            reverse_model.weights = reverse_augmented_W
+
+            reverse_model_inds = 
+                get_augmented_submatrix_indices(reverse_model.augmented_weights, 
+                                                node_index,
+                                                1)
+            reverse_model.weights = 
+                reverse_model.augmented_weights[reverse_model_inds,reverse_model_inds]
+
             if new_K < K
                 reverse_relevant_pairs = new_relevant_pairs
-
-
             else
-            #    reverse_augmented_W = compute_augmented_weight_matrix(reverse_model, 
-            #                              model_spec, reverse_end_index)
                 reverse_relevant_pairs = compute_new_relevant_pairs(reverse_model,
                                              model_spec, new_relevant_pairs, node_index,
                                              start_index, reverse_end_index)
@@ -719,9 +790,13 @@ function sample_Z(model::ModelState,
                 model.weights = copy(proposed_model.weights)
                 model.tree = copy(proposed_model.tree)
                 model.augmented_weights = copy(proposed_model.augmented_weights)
+
                 old_relevant_pairs = reshape(new_relevant_pairs[new_valid_indices], (new_K, new_K))
                 latent_effects = component_latent_effects[sampled_component]
                 current_model_logprob = proposed_state_logprob 
+
+                println("model_state: ", model.tree.nodes[node_index].state)
+
             end
         end
 
