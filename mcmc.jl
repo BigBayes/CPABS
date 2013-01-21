@@ -752,7 +752,7 @@ function sample_Z(model::ModelState,
                 tempW = new_model.weights
                 tempK = size(tempW)[1]
                 if !model_spec.diagonal_W
-                    range = [x < new_k ? x : x+1 for x = 1:tempK-1]
+                    range = [1:new_k-1, new_k+1:tempK]
                     augmented_weights = [tempW[:,new_k], tempW[new_k,range]']
                 else
                     augmented_weights = tempW[new_k,new_k]
@@ -763,7 +763,7 @@ function sample_Z(model::ModelState,
                 tempW = reverse_model.weights
                 tempK = size(tempW)[1]
                 if !model_spec.diagonal_W
-                    range = [x < new_k+1 ? x : x+1 for x = 1:tempK-1]
+                    range = [1:new_k, new_k+2:tempK] 
                     augmented_weights = [tempW[:,new_k+1], tempW[new_k+1,range]']
                 else
                     augmented_weights = tempW[new_k+1,new_k+1]
