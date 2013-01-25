@@ -70,6 +70,8 @@ type ModelSpecification
     symmetric_W::Bool
     diagonal_W::Bool
 
+    # Inference Params
+    rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
     global_move_probability::Float64
     Z_sample_branch_prob::Float64
 

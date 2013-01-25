@@ -2,7 +2,7 @@ load("mcmc.jl")
 load("read_nips_data.jl")
 load("profile.jl")
 
-model_spec = ModelSpecification(false, false, false, true, true, 0.2, 1.0, false, true)
+model_spec = ModelSpecification(false, false, false, true, true, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
