@@ -651,17 +651,38 @@ function vardim_logpdf(model::ModelState,
     Y = data.Ytrain
     (N,N) = size(Y)
 
+    b_sigma = model.b_sigma
     logprob = 0.0
+
+
+    logprob += sum(normal_logpdf(model.beta, b_sigma))
+    logprob += sum(normal_logpdf(model.beta_p, b_sigma))
+    logprob += sum(normal_logpdf(model.beta_c, b_sigma))
+    logprob += sum(normal_logpdf(model.a, b_sigma))
+    logprob += sum(normal_logpdf(model.b, b_sigma))
+    logprob += normal_logpdf(model.c, b_sigma)
+
+    gam = model.gamma
+    lambda = model.lambda
+    tree = model.tree
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
+    logprob += sum(log(1:N))
+    for i = 1:length(tree.nodes)
+        logprob -= log(tree.nodes[i].num_leaves)
+        segment_length = (1-gam)*gam^(tree.nodes[i].num_ancestors-1)
+        logprob += poisson_logpdf(tree.nodes[i].state, lambda * segment_length)
+    end
+
+    likelihood_terms = 0.0
+    aug_terms = 0.0
     for i = 1:N
         for j = 1:N
             le = latent_effects[i,j]
             oe = observed_effects[i,j]
-            logprob += log_logit(le + oe, Y[i,j])   
+            likelihood_terms += log_logit(le + oe, Y[i,j])   
         end
     end
-
-    LL = logprob
-    #println("LL: ", LL)
 
     W = model.weights
     (K,K) = size(W)
@@ -673,7 +694,7 @@ function vardim_logpdf(model::ModelState,
 
         for k2 = k2_range
             if w_is_auxiliary[k1,k2]
-                logprob += t_logpdf(W[k1,k2], nu)
+                aug_terms += t_logpdf(W[k1,k2], nu)
             else
                 logprob += normal_logpdf(W[k1,k2], sigma)
             end
@@ -689,8 +710,14 @@ function vardim_logpdf(model::ModelState,
 #        logprob += normal_logpdf(W[k], sigma)
 #    end
 #
-    logprob + poisson_logpdf(u, effective_lambda)
+    logprob += poisson_logpdf(u, effective_lambda)
+#    if model_spec.debug
+#        println("u, prob_tuple: ", (u, (logprob, likelihood_terms, aug_terms)))
+#    end
+
+    return logprob + aug_terms + likelihood_terms
 end
+
 function vardim_splits(model::ModelState,
                        model_spec::ModelSpecification,
                        data::DataState,
@@ -771,6 +798,10 @@ function compute_constant_terms(model::ModelState,
 
 
         logprobs[u_ind] += sum(prob_tuple)
+#        if model_spec.debug
+#            println("u_ind, prob_tuple: ", (u_ind, prob_tuple))
+#            println("u_ind, u, current_u, aug_k: ", (u_ind, u, current_u, aug_k))
+#        end
     end 
     logprobs
 end
@@ -856,7 +887,10 @@ function adjust_model_logprob(model::ModelState,
             end
         end
 
+        c_latent_effects = copy(current_latent_effects)
+
         if L < u || L > u
+            assert( L < u || aug_k == new_index)
             for k1 = 1:K
                 k2_range = k1 == aug_k ? (1:K) : aug_k 
                 for k2 = k2_range
@@ -872,7 +906,10 @@ function adjust_model_logprob(model::ModelState,
 
                         le = latent_effects[i,j]
                         oe = observed_effects[i,j]
-                        old_le = current_latent_effects[i,j]
+                        old_le = c_latent_effects[i,j]
+                        # dirty hack to prevent double counting (ie from visiting the same
+                        # pair more than once)
+                        c_latent_effects[i,j] = le
                         likelihood_terms += log_logit(le + oe, Y[i,j])
                         likelihood_terms -= log_logit(old_le + oe, Y[i,j])
                     end
@@ -993,11 +1030,18 @@ function adjust_latent_effects(model::ModelState,
     (K,K) = size(relevant_pairs)
 
     assert(aug_k <= K)
+    assert(new_k <= K)
     new_latent_effects = copy(latent_effects)
     if L == u - 1
         removed_k = aug_k
         # latent effects assumes new dimensions haven't been added, so don't remove them!
-        k_range = model_spec.diagonal_W ? removed_k : del(linspace(1,K,K), new_k)
+        if new_k == 0 # sometimes there is no new dimension to worry about
+            k_range0 = linspace(1,K,K)
+        else
+            k_range0 = del(linspace(1,K,K), new_k)
+        end
+
+        k_range = model_spec.diagonal_W ? removed_k : k_range0
 
         for k = k_range
             for p = 1:size(relevant_pairs[k, removed_k])[2]

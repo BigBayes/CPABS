@@ -487,7 +487,7 @@ function sample_Z(model::ModelState,
 
             latent_effects = adjust_latent_effects(model, model_spec,
                                  latent_effects, old_relevant_pairs, u, L, aug_k, 
-                                 end_ind + 1)
+                                 0)
 
             aug_k = new_W_index_pointers[node_index] + aug_u - 1
         elseif L == u
@@ -510,14 +510,13 @@ function sample_Z(model::ModelState,
 
         if model_spec.debug
 
+            println("starting model_logprob: ", current_model_logprob)
             tmodel = copy(model)
             tmodel.tree.nodes[node_index].state = L
             Z = ConstructZ(tmodel.tree)
 
             verify_relevant_pairs = compute_all_relevant_pairs(model_spec, K, Z)
 
-            println(verify_relevant_pairs[1,1])
-            println(new_relevant_pairs[1,1])
             assert( verify_relevant_pairs == new_relevant_pairs)
 
 
@@ -584,8 +583,8 @@ function sample_Z(model::ModelState,
 
 
         component_latent_effects = adjust_component_latent_effects(new_model, model_spec, 
-                                        latent_effects, new_relevant_pairs, L, 
-                                        start_index, end_index)
+                                       latent_effects, new_relevant_pairs, L, 
+                                       start_index, end_index)
 
         k_is_auxiliary = Array(Array{Bool,1},0)
  
@@ -597,45 +596,42 @@ function sample_Z(model::ModelState,
         if model_spec.debug
             verify_latent_effects = compute_component_latent_effects(new_model,
                                         model_spec, L, start_index, end_index, node_index)
-            bad_uinds = verify_latent_effects .!= component_latent_effects
-            println(num_local_mutations)
-            println(bad_uinds)
 
 
             le_diffs = verify_latent_effects .- component_latent_effects
 
             maxabss = [ max(abs(le_diffs[x])) for x = 1:length(le_diffs)]
-            println(maxabss )
-            println(maxabss .< 10.0^-5)
-
-            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
-
-            tmodel = copy(new_model)
-            tmodel.tree.nodes[node_index].state = L+1
-            ZZ = ConstructZ(tmodel.tree)
-            if length(I) > 0
-                println(size(ZZ))
-                println(I[1])
-                println(J[1])
-            
-
-                println(new_model.weights)
-                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
-                println("original: ", latent_effects[maxi[1],maxj[1]])
-                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
-                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
-
-
-                k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)
-                println("k_common: ", k_common)
-                println(W[k_common, k_common])
-
-                k1 = k_common[1]
-                k2 = k_common[2]
-                II = find( new_relevant_pairs[k1,k2][1,:] .== I[1])
-                println(II)
-                println(new_relevant_pairs[k1,k2][:,II])
-            end
+#            println(maxabss )
+#            println(maxabss .< 10.0^-5)
+#
+#            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
+#
+#            tmodel = copy(new_model)
+#            tmodel.tree.nodes[node_index].state = L+1
+#            ZZ = ConstructZ(tmodel.tree)
+#            if length(I) > 0
+#                println(size(ZZ))
+#                println(I[1])
+#                println(J[1])
+#            
+#
+#                println(new_model.weights)
+#                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
+#                println("original: ", latent_effects[maxi[1],maxj[1]])
+#                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
+#                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
+#
+#
+#                k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)
+#                println("k_common: ", k_common)
+#                println(W[k_common, k_common])
+#
+#                k1 = k_common[1]
+#                k2 = k_common[2]
+#                II = find( new_relevant_pairs[k1,k2][1,:] .== I[1])
+#                println(II)
+#                println(new_relevant_pairs[k1,k2][:,II])
+#            end
 
             assert(all(maxabss .< 10.0^-5))
 
@@ -672,13 +668,16 @@ function sample_Z(model::ModelState,
 
             const_terms3 = const_terms + 
                 vardim_multiplier_terms(model_spec, num_local_mutations)
-            if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms3))) > 10.0^-5
+
+            println("adjusted const terms:")
+            println(const_terms3)
+            println("vardim_splits const terms:")
+            println(const_terms2)
+            if abs(max(abs(const_terms2 - const_terms3))) > 0.1
                 println("SLDKJF")
                 println(current_model_logprob)
                 println(exp_normalize(const_terms3))
                 println(exp_normalize(const_terms2))
-                println(const_terms3)
-                println(const_terms2)
                 println(const_terms3 - max(const_terms3))
                 println(const_terms2 - max(const_terms2))
             end
