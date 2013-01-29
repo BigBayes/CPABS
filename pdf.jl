@@ -730,6 +730,7 @@ end
 #end #profile
 # Utility Functions
 
+# Assumes model.augmented_weights is up to date!
 function compute_constant_terms(model::ModelState,
                                 model_spec::ModelSpecification,
                                 data::DataState,
@@ -775,6 +776,7 @@ function compute_constant_terms(model::ModelState,
 end
 
 # Adjust model_logprob when L != u
+# Assumes model.augmented_weights is up to date!
 function adjust_model_logprob(model::ModelState,
                               model_spec::ModelSpecification,
                               data::DataState,
@@ -854,12 +856,10 @@ function adjust_model_logprob(model::ModelState,
             end
         end
 
-        
         if L < u || L > u
             for k1 = 1:K
                 k2_range = k1 == aug_k ? (1:K) : aug_k 
                 for k2 = k2_range
-
                     if k1 != new_index && k2 != new_index
                         aug_terms += t_logpdf(W[k1,k2], model.nu)
                         prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
@@ -889,13 +889,13 @@ end
 
 
 
-function compute_component_latent_effects(model::ModelState,
-                                          model_spec::ModelSpecification,
-                                          latent_effects::Array{Float64,2},
-                                          relevant_pairs::Array{Array{Int64,2},2},
-                                          u::Int,
-                                          start_index::Int,
-                                          end_index::Int)
+function adjust_component_latent_effects(model::ModelState,
+                                         model_spec::ModelSpecification,
+                                         latent_effects::Array{Float64,2},
+                                         relevant_pairs::Array{Array{Int64,2},2},
+                                         u::Int,
+                                         start_index::Int,
+                                         end_index::Int)
 
     if u < 0
         component_latent_effects = Array(Array{Float64,2}, 1)
@@ -921,19 +921,63 @@ function compute_component_latent_effects(model::ModelState,
 
             component_latent_effects[u_ind] =
                 adjust_latent_effects(model, model_spec, latent_effects, relevant_pairs,
-                                      u, u-1, removed_k)
+                                      u, u-1, removed_k,new_k)
         elseif u_ind == u+1
             component_latent_effects[u_ind] = copy(latent_effects)
         elseif u_ind == u+2
             assert(new_k <= K)
             component_latent_effects[u_ind] =
                 adjust_latent_effects(model, model_spec, latent_effects, relevant_pairs,
-                                      u, u+1, new_k)
+                                      u, u+1, new_k, new_k)
         end
     end
 
     component_latent_effects
 end
+
+function compute_component_latent_effects(model::ModelState,
+                                          model_spec::ModelSpecification,
+                                          u::Int,
+                                          start_index::Int,
+                                          end_index::Int,
+                                          node_index::Int)
+
+    if u < 0
+        component_latent_effects = Array(Array{Float64,2}, 1)
+        component_latent_effects[1] = latent_effects
+        return component_latent_effects
+    end
+
+    W = model.weights
+    (K,K) = size(W)
+
+    new_k = end_index + 1
+    component_latent_effects = Array(Array{Float64,2}, u+2)
+
+
+    for u_ind = 1:u+2
+        if u_ind <= u
+            removed_k = start_index + u_ind - 1
+            assert(removed_k <= K)
+
+            component_latent_effects[u_ind] =
+                compute_latent_effects(model, model_spec, 
+                                      u, u-1, removed_k, node_index)
+        elseif u_ind == u+1
+            component_latent_effects[u_ind] = 
+                compute_latent_effects(model, model_spec, 
+                                       u, u, 0, node_index)
+        elseif u_ind == u+2
+            assert(new_k <= K)
+            component_latent_effects[u_ind] =
+                compute_latent_effects(model, model_spec, 
+                                      u, u+1, new_k, node_index)
+        end
+    end
+
+    component_latent_effects
+end
+
 
 # adjusts latent effects when L != u 
 function adjust_latent_effects(model::ModelState,
@@ -942,17 +986,18 @@ function adjust_latent_effects(model::ModelState,
                                relevant_pairs::Array{Array{Int64,2},2},
                                u::Int,
                                L::Int,
-                               aug_k::Int)
+                               aug_k::Int,
+                               new_k::Int)
 
     W = model.weights
-    (K,K) = size(W)
+    (K,K) = size(relevant_pairs)
 
     assert(aug_k <= K)
-
     new_latent_effects = copy(latent_effects)
     if L == u - 1
         removed_k = aug_k
-        k_range = model_spec.diagonal_W ? removed_k : (1:K)
+        # latent effects assumes new dimensions haven't been added, so don't remove them!
+        k_range = model_spec.diagonal_W ? removed_k : del(linspace(1,K,K), new_k)
 
         for k = k_range
             for p = 1:size(relevant_pairs[k, removed_k])[2]
@@ -973,19 +1018,18 @@ function adjust_latent_effects(model::ModelState,
     elseif L == u + 1
         new_k = aug_k
         k_range = model_spec.diagonal_W ? new_k : (1:K)
-
+        
         for k = k_range
             for p = 1:size(relevant_pairs[k, new_k])[2]
                 i = relevant_pairs[k, new_k][1,p]
                 j = relevant_pairs[k, new_k][2,p]
                 new_latent_effects[i,j] += W[k, new_k]
-
             end
             if k != new_k
                 for p = 1:size(relevant_pairs[new_k, k])[2]
                     i = relevant_pairs[new_k, k][1,p]
                     j = relevant_pairs[new_k, k][2,p]
-                    new_latent_effects[i,j] -= W[new_k, k]
+                    new_latent_effects[i,j] += W[new_k, k]
                 end
             end
         end
@@ -993,6 +1037,50 @@ function adjust_latent_effects(model::ModelState,
     end
 
     new_latent_effects
+end
+
+# compute latent effects from scratch
+function compute_latent_effects(model::ModelState,
+                                model_spec::ModelSpecification,
+                                u::Int,
+                                L::Int,
+                                aug_k::Int,
+                                node_index::Int)
+
+    tmodel = copy(model)
+    tmodel.tree.nodes[node_index].state = L
+    Z = ConstructZ(tmodel.tree)
+    w_index_pointers = weight_index_pointers(model.tree)
+    start_index = w_index_pointers[node_index]
+    new_index = start_index + u 
+    if L < u
+        assert( aug_k < new_index)
+        W = delete_row_and_col(model.weights, new_index)
+        W = delete_row_and_col(W, aug_k)
+    elseif L == u
+        W = delete_row_and_col(model.weights, new_index)
+    elseif L > u
+        assert(aug_k == new_index)
+        W = model.weights
+    end
+
+    Z*W*Z' 
+end
+
+function compute_all_relevant_pairs(model_spec::ModelSpecification,
+                                    K::Int,
+                                    Z)
+
+    relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
+
+    for k1 = 1:K
+        k2_range = model_spec.diagonal_W ? k1 : (1:K)
+        for k2 = k2_range
+            relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
+        end
+    end 
+
+    return relevant_pairs
 end
 
 # Compute relevant pairs for newly introduced weight parameters

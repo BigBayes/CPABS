@@ -123,13 +123,16 @@ function mcmc(data::DataState,
     trainLLs = Float64[]
 
     models = Array(ModelState,0)
-    
+    debug = model_spec.debug 
+    model_spec.debug = false
+
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
         tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
-        if iter == 2 && false 
+
+        if iter == 2 && debug
             model_spec.debug = true
         end
         if iter == 1
@@ -357,15 +360,8 @@ function sample_Z(model::ModelState,
     Z = ConstructZ(tree)
     (K, K) = size(model.weights)
     #Array(Array{Int64, 2}, (K,K))
-    old_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
 
-    
-    for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : (1:K)
-        for k2 = k2_range
-            old_relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
-        end
-    end 
+    old_relevant_pairs = compute_all_relevant_pairs(model_spec, K, Z)
 
     current_model_logprob = model_logprob
 
@@ -433,6 +429,15 @@ function sample_Z(model::ModelState,
             continue
         end
 
+        if model_spec.debug
+            Z = ConstructZ(model.tree)
+            verify_latent_effects = Z*model.weights*Z' 
+            println(verify_latent_effects[1:10])
+            println(latent_effects[1:10])
+            assert(max(abs(verify_latent_effects - latent_effects)) < 10.0^-5)
+
+        end
+
         oldK = K
         K = K + L - u
 
@@ -454,9 +459,15 @@ function sample_Z(model::ModelState,
         aug_k = 0
         # pick one feature to remove to be the auxiliary for
         # s_{u-1}'s k term
+
+        st_ind = old_W_index_pointers[node_index]
+        end_ind = st_ind + u - 1
+
+        adj_relevant_pairs = compute_new_relevant_pairs(model,model_spec,
+                             old_relevant_pairs, node_index, st_ind, end_ind)
+
         if L == u-1
             new_relevant_pairs = copy(old_relevant_pairs)
-            adj_relevant_pairs = copy(old_relevant_pairs)
 
             aug_u = randi(u)
             deactivate_feature(new_model.augmented_weights,
@@ -475,40 +486,81 @@ function sample_Z(model::ModelState,
             new_relevant_pairs = delete_row_and_col(new_relevant_pairs, aug_new_k)
 
             latent_effects = adjust_latent_effects(model, model_spec,
-                                 latent_effects, old_relevant_pairs, u, L, aug_k)
+                                 latent_effects, old_relevant_pairs, u, L, aug_k, 
+                                 end_ind + 1)
 
             aug_k = new_W_index_pointers[node_index] + aug_u - 1
         elseif L == u
             new_relevant_pairs = copy(old_relevant_pairs)
-            adj_relevant_pairs = copy(old_relevant_pairs)
         elseif L == u+1
-            st_ind = old_W_index_pointers[node_index]
-            end_ind = st_ind + u - 1
-            
-            new_model.tree.nodes[node_index].state = L-1
-            new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
-                                 old_relevant_pairs, node_index, st_ind, end_ind)
-
-            new_model.tree.nodes[node_index].state = L
+            new_relevant_pairs = copy(adj_relevant_pairs)  
         
             activate_feature(new_model.augmented_weights,
                              node_index) 
 
             new_model_inds = 
-                get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
+                get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 0)
             new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
             aug_k = end_ind + 1 
             latent_effects = adjust_latent_effects(new_model, model_spec, latent_effects,
-                                 new_relevant_pairs, u, L, aug_k)
+                                 new_relevant_pairs, u, L, aug_k, aug_k)
            
-            aug_k = new_W_index_pointers[node_index] + u
+        end
 
-            adj_relevant_pairs = copy(new_relevant_pairs)
+
+        if model_spec.debug
+
+            tmodel = copy(model)
+            tmodel.tree.nodes[node_index].state = L
+            Z = ConstructZ(tmodel.tree)
+
+            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, K, Z)
+
+            println(verify_relevant_pairs[1,1])
+            println(new_relevant_pairs[1,1])
+            assert( verify_relevant_pairs == new_relevant_pairs)
+
+
+            WWinds = 
+                get_augmented_submatrix_indices(model.augmented_weights, node_index, 1)
+            WW = model.augmented_weights[WWinds,WWinds]
+            tmodel = copy(model)
+            tmodel.weights = WW
+            verify_latent_effects = compute_latent_effects(tmodel, model_spec, u, L,
+                                        aug_k, node_index)
+
+            (s,permutation) = sortperm( abs(latent_effects - verify_latent_effects)[:])
+            rev = reverse(permutation)
+            maxinds = rev[1:10]
+          
+#            println("Latent Effects:")
+#            println(ind2sub(size(latent_effects), maxinds) )
+#            println(latent_effects[maxinds])
+#            println(verify_latent_effects[maxinds])
+#            println(latent_effects[maxinds] - verify_latent_effects[maxinds])
+#            println(latent_effects[1:10] - verify_latent_effects[1:10])
+
+            println("L,u,aug_k: ", (L,u,aug_k)) 
+            assert(max(abs(latent_effects - verify_latent_effects)) < 10.0^-5)
         end
 
         new_model_inds = 
             get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
         new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds] 
+
+        new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
+                                 new_relevant_pairs, node_index, start_index, end_index)
+
+
+        if model_spec.debug
+            tmodel = copy(model)
+            tmodel.tree.nodes[node_index].state = L+1
+            Z = ConstructZ(tmodel.tree)
+
+            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, K+1, Z)
+            assert( verify_relevant_pairs == new_relevant_pairs)
+
+        end
 
         # adjust model probability
         adjust_terms = adjust_model_logprob(model, model_spec, data, adj_relevant_pairs,
@@ -527,12 +579,14 @@ function sample_Z(model::ModelState,
 #        println("size(new_relevant_pairs): ", size(new_relevant_pairs))
 #        UU = [new_model.tree.nodes[x].state for x = 1:length(new_model.tree.nodes)]
 #        println("sumU: ",sum(UU))
-        new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
-                                 new_relevant_pairs, node_index, start_index, end_index)
 
-        component_latent_effects = compute_component_latent_effects(new_model, model_spec, 
+
+
+
+        component_latent_effects = adjust_component_latent_effects(new_model, model_spec, 
                                         latent_effects, new_relevant_pairs, L, 
-                                        start_index, end_index) 
+                                        start_index, end_index)
+
         k_is_auxiliary = Array(Array{Bool,1},0)
  
         # Construct w_is_auxiliary for each component
@@ -540,6 +594,53 @@ function sample_Z(model::ModelState,
 
         num_local_mutations = [ x <= L ? L-1 : x == L+1 ? L : L+1 for x = 1:L+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
 
+        if model_spec.debug
+            verify_latent_effects = compute_component_latent_effects(new_model,
+                                        model_spec, L, start_index, end_index, node_index)
+            bad_uinds = verify_latent_effects .!= component_latent_effects
+            println(num_local_mutations)
+            println(bad_uinds)
+
+
+            le_diffs = verify_latent_effects .- component_latent_effects
+
+            maxabss = [ max(abs(le_diffs[x])) for x = 1:length(le_diffs)]
+            println(maxabss )
+            println(maxabss .< 10.0^-5)
+
+            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
+
+            tmodel = copy(new_model)
+            tmodel.tree.nodes[node_index].state = L+1
+            ZZ = ConstructZ(tmodel.tree)
+            if length(I) > 0
+                println(size(ZZ))
+                println(I[1])
+                println(J[1])
+            
+
+                println(new_model.weights)
+                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
+                println("original: ", latent_effects[maxi[1],maxj[1]])
+                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
+                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
+
+
+                k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)
+                println("k_common: ", k_common)
+                println(W[k_common, k_common])
+
+                k1 = k_common[1]
+                k2 = k_common[2]
+                II = find( new_relevant_pairs[k1,k2][1,:] .== I[1])
+                println(II)
+                println(new_relevant_pairs[k1,k2][:,II])
+            end
+
+            assert(all(maxabss .< 10.0^-5))
+
+        end
+ 
         for u_ind = 1:L
             k_ind = start_index + u_ind - 1
             push(w_is_auxiliary,[x == k_ind  || y == k_ind ||
@@ -558,7 +659,6 @@ function sample_Z(model::ModelState,
 
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
-
         const_terms = compute_constant_terms(new_model, model_spec, data, 
                           new_relevant_pairs, component_latent_effects,
                           observed_effects, num_local_mutations, new_W_index_pointers,
@@ -570,14 +670,16 @@ function sample_Z(model::ModelState,
                               observed_effects, num_local_mutations, new_W_index_pointers, node_index,
                               effective_lambda, w_is_auxiliary)
 
-            if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms))) > 10.0^-5
+            const_terms3 = const_terms + 
+                vardim_multiplier_terms(model_spec, num_local_mutations)
+            if abs(norm(exp_normalize(const_terms2) - exp_normalize(const_terms3))) > 10.0^-5
                 println("SLDKJF")
                 println(current_model_logprob)
-                println(exp_normalize(const_terms))
+                println(exp_normalize(const_terms3))
                 println(exp_normalize(const_terms2))
-                println(const_terms)
+                println(const_terms3)
                 println(const_terms2)
-                println(const_terms - max(const_terms))
+                println(const_terms3 - max(const_terms3))
                 println(const_terms2 - max(const_terms2))
             end
             curind = length(const_terms)-1
@@ -590,8 +692,8 @@ function sample_Z(model::ModelState,
                                           new_W_index_pointers, node_index,
                                           effective_lambda, curind,
                                           unscaled[curind])
-            if verify_state_logprob != current_model_logprob
-                println("WWWTFFFFF")
+            if abs(verify_state_logprob - current_model_logprob) > 10.0^-5
+                println("verify prob is off")
                 println(verify_state_logprob)
                 println(current_model_logprob)
             end
@@ -711,14 +813,17 @@ function sample_Z(model::ModelState,
 
         logprobs = const_terms
 
+        scaled_logprobs = 
+            logprobs + vardim_multiplier_terms(model_spec, num_local_mutations)
+
         if model_spec.debug
             logprobs2 = vardim_splits(new_model, model_spec, data, component_latent_effects,
                                      observed_effects, num_local_mutations, new_W_index_pointers, node_index,
                                      effective_lambda, w_is_auxiliary)
 
-            if norm(exp_normalize(const_terms) - exp_normalize(logprobs2)) > 10.0^-5
+            if norm(exp_normalize(scaled_logprobs) - exp_normalize(logprobs2)) > 10.0^-5
                 println("BLAH")
-                println(const_terms)
+                println(scaled_logprobs)
                 println(logprobs2)
             end
 
@@ -727,10 +832,6 @@ function sample_Z(model::ModelState,
             println("old_const_terms: ")
             println(old_const_terms)
         end
-
-
-        scaled_logprobs = 
-            logprobs + vardim_multiplier_terms(model_spec, num_local_mutations)
 
         sampled_component = randmult(exp_normalize(scaled_logprobs)) 
 
@@ -770,6 +871,7 @@ function sample_Z(model::ModelState,
         proposed_model.augmented_weights[proposed_model_inds, proposed_model_inds] =
             augW 
 
+        
 
         if new_K < K
             deactivate_feature(proposed_model.augmented_weights,
@@ -780,7 +882,12 @@ function sample_Z(model::ModelState,
                              node_index)
         end
 
-
+        next_inds = get_augmented_submatrix_indices(proposed_model.augmented_weights,
+                                                    node_index,
+                                                    0)
+        if model_spec.debug
+            assert(proposed_model.augmented_weights[next_inds,next_inds] == new_W)
+        end
 #        permutation = [new_valid_columns, invalid_columns]
 #        permute_rows_and_cols!(augW, permutation)
 #        permute_rows_and_cols!(proposed_model.augmented_weights, permutation)
@@ -845,12 +952,11 @@ function sample_Z(model::ModelState,
 #        println("new_u,weight_prob,new_weight_prob ", new_u, ",", sum(normal_logpdf(oldW, model.w_sigma )), ",", sum(normal_logpdf(new_W, model.w_sigma )))
 
         if model_spec.verbose
-            println("oldK,newK,L,eff_lambda,Delta_K: ", oldK,",",new_K, ",",L,",", effective_lambda, ",",new_K - oldK)
+            println("oldK,newK,L,u,eff_lambda,Delta_K: ", oldK,",",new_K, ",",L,",",u,",", effective_lambda, ",",new_K - oldK)
             println(logprobs)
             println(scaled_logprobs)
             println(num_local_mutations)
             println("model_logprob: ", proposed_state_logprob)
-            println(w_is_auxiliary)
         end
 
 
