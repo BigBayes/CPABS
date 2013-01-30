@@ -43,14 +43,20 @@ function run_batch(model_spec::ModelSpecification,
     result_refs = Array(Any, num_trials)
     results = Array(Any, num_trials)
 
-#    datas = [copy(data) for i = 1:num_trials]
-#    lambdas = lambda*ones(num_trials)
-#    gammas = gamma*ones(num_trials)
-#    model_specs = [copy(model_spec) for i = 1:num_trials]
-#    num_iterses = num_iterations*ones(Int, num_trials)
-#    burn_iterses = burnin_iterations*ones(Int, num_trials)
-#
-#    results = pmap(mcmc, datas, lambdas, gammas, model_specs, num_iterses, burn_iterses)
+    result_paths = [copy(result_path) for i = 1:num_trials]
+    id_strings = [copy(id_string) for i = 1:num_trials]
+    train_pcts = train_pct * ones(num_trials)
+    trials = linspace(1,num_trials,num_trials)
+
+    datas = [copy(data) for i = 1:num_trials]
+    lambdas = lambda*ones(num_trials)
+    gammas = gamma*ones(num_trials)
+    model_specs = [copy(model_spec) for i = 1:num_trials]
+    num_iterses = num_iterations*ones(Int, num_trials)
+    burn_iterses = burnin_iterations*ones(Int, num_trials)
+
+    pmap(run_and_save, result_paths, id_strings, train_pcts, trials, datas, 
+         lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
 #    for trial = 1:num_trials
 #        result_refs[trial] = @spawn mcmc(data, lambda, gamma, model_spec,
@@ -58,10 +64,10 @@ function run_batch(model_spec::ModelSpecification,
 #        println(result_refs[trial]) 
 #    end
 
-    for trial = 1:num_trials
-        @spawn run_and_save(result_path, id_string, train_pct, trial,
-                   data, lambda, gamma, model_spec, num_iterations, burnin_iterations)
-    end
+#    @parallel for trial = 1:num_trials
+#        run_and_save(result_path, id_string, train_pct, trial,
+#                   datas[trial], lambda, gamma, model_spec, num_iterations, burnin_iterations)
+#    end
 #    for trial = 1:num_trials
 #        trial_string = "$(id_string)_$(train_pct)_$(trial)"
 #        results[trial] = fetch(result_refs[trial])
