@@ -79,6 +79,6 @@ function run_and_save(result_path, id_string, train_pct, trial, mcmc_args...)
     trial_string = "$(id_string)_$(train_pct)_$(trial)"
     models = results[end]
     model = models[end]
-    save("$result_path/metrics_$trial_string.jla", results[trial][1:end-1])
+    save("$result_path/metrics_$trial_string.jla", results[1:end-1])
     save("$result_path/model_$trial_string.jla", model2array(model))
 end

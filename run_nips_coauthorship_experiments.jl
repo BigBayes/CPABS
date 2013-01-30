@@ -9,7 +9,7 @@ X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
 
-run_batch(model_spec, YY, 0.8, 0.01, 0.5, 3, 2, 2, "NIPS_test", "../results")
+run_batch(model_spec, YY, 0.8, 0.01, 0.5, 5, 2, 10, "NIPS_test", "../results")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
