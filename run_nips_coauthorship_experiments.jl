@@ -2,7 +2,7 @@
 @everywhere load("data_utils.jl")
 load("read_nips_data.jl")
 load("profile.jl")
-load("experiment_utils.jl")
+@everywhere load("experiment_utils.jl")
 
 model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))

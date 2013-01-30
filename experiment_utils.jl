@@ -52,20 +52,33 @@ function run_batch(model_spec::ModelSpecification,
 #
 #    results = pmap(mcmc, datas, lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
-    for trial = 1:num_trials
-        result_refs[trial] = @spawn mcmc(data, lambda, gamma, model_spec,
-                                         num_iterations, burnin_iterations)
-        println(result_refs[trial]) 
-    end
+#    for trial = 1:num_trials
+#        result_refs[trial] = @spawn mcmc(data, lambda, gamma, model_spec,
+#                                         num_iterations, burnin_iterations)
+#        println(result_refs[trial]) 
+#    end
 
     for trial = 1:num_trials
-        trial_string = "$(id_string)_$(train_pct)_$(trial)"
-        results[trial] = fetch(result_refs[trial])
-        println(results[trial][1:end-1])
-        models = results[trial][end]
-        model = models[end]
-        save("$result_path/metrics_$trial_string.jla", results[trial][1:end-1])
-        save("$result_path/model_$trial_string.jla", model2array(model))
+        @spawn run_and_save(result_path, id_string, train_pct, trial,
+                   data, lambda, gamma, model_spec, num_iterations, burnin_iterations)
     end
+#    for trial = 1:num_trials
+#        trial_string = "$(id_string)_$(train_pct)_$(trial)"
+#        results[trial] = fetch(result_refs[trial])
+#        println(results[trial][1:end-1])
+#        models = results[trial][end]
+#        model = models[end]
+#        save("$result_path/metrics_$trial_string.jla", results[trial][1:end-1])
+#        save("$result_path/model_$trial_string.jla", model2array(model))
+#    end
 
+end
+
+function run_and_save(result_path, id_string, train_pct, trial, mcmc_args...)
+    results = mcmc(mcmc_args...)
+    trial_string = "$(id_string)_$(train_pct)_$(trial)"
+    models = results[end]
+    model = models[end]
+    save("$result_path/metrics_$trial_string.jla", results[trial][1:end-1])
+    save("$result_path/model_$trial_string.jla", model2array(model))
 end
