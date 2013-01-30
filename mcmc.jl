@@ -119,12 +119,23 @@ function mcmc(data::DataState,
     model_spec.diagonal_W = true
 
     avg_test_likelihoods = [zeros(Float64, 0) for x in 1:N, y in 1:N]
+    logit_args = [zeros(Float64, 0) for x = 1:N, y = 1:N]
+
     testLLs = Float64[]
     trainLLs = Float64[]
+    Ks = Int[]
+
+    train_errors = Float64[]
+    test_errors = Float64[]
+    avg_test_LLs = Float64[]
+    aucs = Float64[]
+
+    iters = Int[]
 
     models = Array(ModelState,0)
     debug = model_spec.debug 
     model_spec.debug = false
+    burnin_iteration = 2
 
     for iter = 1:iterations
         println("Iteration: ", iter)
@@ -141,20 +152,22 @@ function mcmc(data::DataState,
 
         mcmc_sweep(model, model_spec, data)
 
-        if iter > 200
+
+        if iter > burnin_iteration
             Z = ConstructZ(model.tree) 
             testI, testJ = findn(data.Ytest .>= 0)
             total_LL = 0.0
 
-            for p = 1:length(testI)
-                i = testI[p]
-                j = testJ[p]
-                println
-                testLL = test_likelihood_ij(model,model_spec,data,Z,i,j)
-                push(avg_test_likelihoods[i,j], testLL)
+            for i = 1:N
+                for j = 1:N
+                    testLL,logit_arg = test_likelihood_ij(model,model_spec,data,Z,i,j)
+                    push(logit_args[i,j], logit_arg)
 
-                total_LL += logsumexp(avg_test_likelihoods[i,j]) - log(length(avg_test_likelihoods[i,j]))
-
+                    if data.Ytest[i,j] >= 0
+                        push(avg_test_likelihoods[i,j], testLL)
+                        total_LL += logsumexp(avg_test_likelihoods[i,j]) - log(length(avg_test_likelihoods[i,j]))
+                    end
+                end
             end
 
             println("Average Test LL: ", total_LL / (length(testI)) )
@@ -162,12 +175,25 @@ function mcmc(data::DataState,
 
         end
 
-        push(models,copy(model)) 
+        if mod(iter, 10) == 0 || iter == iterations
+            push(models,copy(model))
+            push(iters, iter)
+            if iter > burnin_iteration
+                (train_error, test_error, auc) = error_and_auc(logit_args, data)
+                println("Train, Test, AUC: ", (train_error, test_error, auc))
+
+                push(train_errors, train_error)
+                push(test_errors, test_error)
+                push(avg_test_LLs, total_LL)
+                push(aucs, auc)
+            end
+        end
         push(trainLLs, tree_LL)
         push(testLLs, test_LL)
+        push(Ks, size(model.weights)[1])
     end
 
-    (models, trainLLs, testLLs)
+    (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, models )
 end
 
 
@@ -1192,6 +1218,7 @@ function construct_effects(model::ModelState,
     (latent_effects, observed_effects)
 
 end
+
 
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)

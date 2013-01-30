@@ -96,8 +96,8 @@ function test_likelihood_ij(model::ModelState,
   
     oe = compute_observed_effects(model, model_spec, data, i, j)
     logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
-    log_logit(logit_arg, Ytest[i,j]) 
-
+    LL = log_logit(logit_arg, Ytest[i,j]) 
+    (LL,logit_arg)
 end
 
 # Local pdfs for sampling

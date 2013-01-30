@@ -28,4 +28,7 @@ Ytest[y_train_inds] = -1
 
 data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
 
-models = mcmc(data, 0.01, 0.5, model_spec, 500)
+results = mcmc(data, 0.01, 0.5, model_spec, 11)
+
+# can't save models...
+save("testfile.jlz", results[1:end-1])
