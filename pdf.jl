@@ -84,7 +84,7 @@ function test_likelihood_ij(model::ModelState,
                             j::Int)
 
     Ytest = data.Ytest
-    (N,N) = size(Y)
+    (N,N) = size(Ytest)
     tree = model.tree
     W = model.weights
     beta = model.beta
@@ -109,9 +109,10 @@ end
 #@profile begin
 #pdf for updating psi, the tree structure, assumes tree is already pruned at prune_index
 function psi_infsites_logpdf(model::ModelState,
+                             data::DataState,
                              pruned_index::Int64,
                              path::Array{Int64,1})
-    (N,N) = size(Y)
+    (N,N) = size(data.Ytrain)
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda

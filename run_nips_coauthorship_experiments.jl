@@ -1,37 +1,25 @@
-load("mcmc.jl")
+@everywhere load("mcmc.jl")
+@everywhere load("data_utils.jl")
 load("read_nips_data.jl")
 load("profile.jl")
-load("data_utils.jl")
+load("experiment_utils.jl")
 
 model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
 
-trainmask = zeros(Int64, size(Y234))
+run_batch(model_spec, YY, 0.8, 0.01, 0.5, 3, 2, 2, "NIPS_test", "../results")
 
 # split into train/test
-y_inds = linspace(1,length(Y234),length(Y234))
-shuffle!(y_inds)
-train_end = ifloor(.8 * length(Y234))
-
-y_train_inds = y_inds[1:train_end]
-y_test_inds = y_inds[train_end+1:end]
-
-y_ind_nnz = find(Y234) 
-Ytrain = copy(Y234)
-Ytrain[y_ind_nnz] = 1
-Ytest = copy(Ytrain)
-
-Ytrain[y_test_inds] = -1
-Ytest[y_train_inds] = -1
-
-
-data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
-
-results = mcmc(data, 0.01, 0.5, model_spec, 5)
-models = results[end]
-model = models[end]
-# can't save models directly
-save("testfile.jlz", results[1:end-1])
-save("testmodel.jlz", model2array(model)
+#Ytrain, Ytest = train_test_split(YY, .8)
+#
+#
+#data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
+#
+#results = mcmc(data, 0.01, 0.5, model_spec, 5)
+#models = results[end]
+#model = models[end]
+## can't save models directly
+#save("testfile.jlz", results[1:end-1])
+#save("testmodel.jlz", model2array(model)

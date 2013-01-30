@@ -18,3 +18,8 @@ perm = reverse(perm)
 top234 = perm[1:234]
 
 Y234 = convert(Array{Int64}, Y[top234, top234])
+y_ind_nnz = find(Y234) 
+YY = copy(Y234)
+YY[y_ind_nnz] = 1
+
+

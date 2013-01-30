@@ -9,7 +9,8 @@ function mcmc(data::DataState,
               lambda::Float64,
               gamma::Float64,
               model_spec::ModelSpecification,
-              iterations::Int64)
+              iterations::Int64,
+              burnin_iterations::Int64)
 
     Y = data.Ytrain
     X_r = data.X_r
@@ -135,7 +136,6 @@ function mcmc(data::DataState,
     models = Array(ModelState,0)
     debug = model_spec.debug 
     model_spec.debug = false
-    burnin_iteration = 2
 
     for iter = 1:iterations
         println("Iteration: ", iter)
@@ -153,7 +153,7 @@ function mcmc(data::DataState,
         mcmc_sweep(model, model_spec, data)
 
 
-        if iter > burnin_iteration
+        if iter > burnin_iterations
             Z = ConstructZ(model.tree) 
             testI, testJ = findn(data.Ytest .>= 0)
             total_LL = 0.0
@@ -178,7 +178,7 @@ function mcmc(data::DataState,
         if mod(iter, 10) == 0 || iter == iterations
             push(models,copy(model))
             push(iters, iter)
-            if iter > burnin_iteration
+            if iter > burnin_iterations
                 (train_error, test_error, auc) = error_and_auc(logit_args, data)
                 println("Train, Test, AUC: ", (train_error, test_error, auc))
 
@@ -1130,7 +1130,7 @@ function sample_psi(model::ModelState,
 
         sibling_path_index = find(path .== original_sibling.index)
 
-        (priors, pstates) = psi_infsites_logpdf(model, prune_index, path)
+        (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_likelihood_logpdf(model, model_spec, data, prune_index, path)
 
         logprobs = priors + likelihoods

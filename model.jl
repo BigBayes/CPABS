@@ -79,6 +79,13 @@ type ModelSpecification
     verbose::Bool
 end
 
+copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parenthood,
+                                   ms.use_childhood, ms.symmetric_W, ms.diagonal_W,
+                                   copy(ms.rrj_jump_probabilities), 
+                                   ms.global_move_probability,
+                                   ms.Z_sample_branch_prob,
+                                   ms.debug, ms.verbose)
+
 # Data container
 type DataState
     Ytrain::Array{Int64,2}
@@ -88,6 +95,11 @@ type DataState
     X_c::Array{Float64,2}
 end
 
+copy(data::DataState) = DataState(copy(data.Ytrain), 
+                                  copy(data.Ytest),
+                                  copy(data.X_r),
+                                  copy(data.X_p),
+                                  copy(data.X_c)) 
 # Tree/Model Utility Functions
 
 # Prune tree while also adjusting the weight matrix appropriately
