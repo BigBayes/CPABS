@@ -1,6 +1,7 @@
 load("mcmc.jl")
 load("read_nips_data.jl")
 load("profile.jl")
+load("data_utils.jl")
 
 model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))
@@ -28,7 +29,9 @@ Ytest[y_train_inds] = -1
 
 data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
 
-results = mcmc(data, 0.01, 0.5, model_spec, 11)
-
-# can't save models...
+results = mcmc(data, 0.01, 0.5, model_spec, 5)
+models = results[end]
+model = models[end]
+# can't save models directly
 save("testfile.jlz", results[1:end-1])
+save("testmodel.jlz", model2array(model)

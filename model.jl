@@ -325,3 +325,34 @@ function move_features(augmented_matrix,
     end
 end
 
+# Utilities for saving/restoring models
+
+function model2array(model::ModelState)
+    (Z, U, inds) = tree2array(model.tree, model.gamma)
+    _2Nm1 = length(inds)
+    N::Int = (_2Nm1+1)/2
+    feature_indices = [zeros(Int, 0) for i = 1:2N-1]
+    W_index_pointers = weight_index_pointers(model.tree)
+
+    for i = 1:2N-1
+        start_index = W_index_pointers[i]
+        u = model.tree.nodes[i].state
+        end_index = start_index + u - 1
+
+        feature_indices[i] = linspace(start_index,end_index,u) 
+    end
+
+    permuted_features = feature_indices[inds]
+   
+    permutation = Int64[]
+
+
+    for i = 1:2N-1
+        append!(permutation, permuted_features[i])
+    end
+
+    W = copy(model.weights)
+    permute_rows_and_cols!(W, permutation)
+
+    (Z, U, W)
+end

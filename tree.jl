@@ -375,3 +375,35 @@ function ConstructZ{T}(tree::Tree{T})
     sparse(Z_I, Z_J, Z_S, N, sum(U))
 end
 
+function tree2array(tree::Tree,
+                    gam::Float64)
+    nodes = tree.nodes
+    _2Nm1 = length(nodes)
+    N::Int = (_2Nm1+1) / 2
+    times = [ (1-gam)*gam^(tree.nodes[i].num_ancestors-1) for i = N+1:2N-1]
+    s, I = sortperm(times)
+    II = N+I
+
+    Z = zeros(N-1,4)
+
+    for k = 1:length(II)
+        i = I[k]
+        ii = II[k]
+        Z[i,3] = times[i]
+        l = nodes[ii].children[1].index
+        r = nodes[ii].children[2].index
+        Z[i,1] = l
+        Z[i,2] = r
+
+        l_leaves = l <= N ? 1 : Z[l-N,4]
+        r_leaves = r <= N ? 1 : Z[r-N,4]
+
+        Z[i,4] = l_leaves + r_leaves
+    end
+
+    sorted_inds = [linspace(1,N,N), II]
+
+    states = [nodes[i].state for i = sorted_inds]
+
+    (Z, states, sorted_inds)
+end
