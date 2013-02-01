@@ -1,5 +1,4 @@
 require("mcmc.jl")
-require("read_nips_data.jl")
 require("data_utils.jl")
 
 # Assumes symmetric Y, thus creates a symmetric train/test split
