@@ -1,7 +1,7 @@
 @everywhere require("mcmc.jl")
 @everywhere require("data_utils.jl")
 require("read_nips_data.jl")
-require("profile.jl")
+#require("profile.jl")
 @everywhere require("experiment_utils.jl")
 
 model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
