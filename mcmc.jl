@@ -293,12 +293,16 @@ function sample_W(model::ModelState,
 #    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
 #    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
+    Ynn = zeros(size(Y))
+    Ynn[find(Y .>= 0)] = 1
+    Ynn = sparse(Ynn)
+
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
         for k1 = 1:K
             k2_range = model_spec.diagonal_W ? k1 : (1:K)
             for k2 = k2_range
-                relevant_pairs = compute_relevant_pairs(Z,k1,k2)
+                relevant_pairs = compute_relevant_pairs(Ynn,Z,k1,k2)
                 w_cur = W[k1,k2]
                 w_old = w_cur
                 g = x -> W_local_logpdf(model, data, relevant_pairs, latent_effects, observed_effects, w_old, x)
@@ -387,7 +391,7 @@ function sample_Z(model::ModelState,
     (K, K) = size(model.weights)
     #Array(Array{Int64, 2}, (K,K))
 
-    old_relevant_pairs = compute_all_relevant_pairs(model_spec, K, Z)
+    old_relevant_pairs = compute_all_relevant_pairs(model_spec, data, K, Z)
 
     current_model_logprob = model_logprob
 
@@ -489,7 +493,7 @@ function sample_Z(model::ModelState,
         st_ind = old_W_index_pointers[node_index]
         end_ind = st_ind + u - 1
 
-        adj_relevant_pairs = compute_new_relevant_pairs(model,model_spec,
+        adj_relevant_pairs = compute_new_relevant_pairs(model,model_spec,data,
                              old_relevant_pairs, node_index, st_ind, end_ind)
 
         if L == u-1
@@ -541,7 +545,7 @@ function sample_Z(model::ModelState,
             tmodel.tree.nodes[node_index].state = L
             Z = ConstructZ(tmodel.tree)
 
-            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, K, Z)
+            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, data, K, Z)
 
             assert( verify_relevant_pairs == new_relevant_pairs)
 
@@ -573,7 +577,7 @@ function sample_Z(model::ModelState,
             get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
         new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds] 
 
-        new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,
+        new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,data,
                                  new_relevant_pairs, node_index, start_index, end_index)
 
 
@@ -582,7 +586,7 @@ function sample_Z(model::ModelState,
             tmodel.tree.nodes[node_index].state = L+1
             Z = ConstructZ(tmodel.tree)
 
-            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, K+1, Z)
+            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, data, K+1, Z)
             assert( verify_relevant_pairs == new_relevant_pairs)
 
         end

@@ -1113,15 +1113,20 @@ function compute_latent_effects(model::ModelState,
 end
 
 function compute_all_relevant_pairs(model_spec::ModelSpecification,
+                                    data::DataState,
                                     K::Int,
                                     Z)
 
+    Y = data.Ytrain
+    Ynn = zeros(size(Y))
+    Ynn[find(Y .>= 0)] = 1
+    Ynn = sparse(Ynn)
     relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
 
     for k1 = 1:K
         k2_range = model_spec.diagonal_W ? k1 : (1:K)
         for k2 = k2_range
-            relevant_pairs[k1,k2] = compute_relevant_pairs(Z,k1,k2)
+            relevant_pairs[k1,k2] = compute_relevant_pairs(Ynn,Z,k1,k2)
         end
     end 
 
@@ -1132,6 +1137,7 @@ end
 # should be called without changing model.tree from the original
 function compute_new_relevant_pairs(model::ModelState,
                                     model_spec::ModelSpecification,
+                                    data::DataState,
                                     relevant_pairs::Array{Array{Int64,2},2},
                                     node_index::Int,
                                     start_index::Int,
@@ -1162,13 +1168,17 @@ function compute_new_relevant_pairs(model::ModelState,
     new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
     nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K-1]
 
+    Y = data.Ytrain
+    Ynn = zeros(size(Y))
+    Ynn[find(Y .>= 0)] = 1
+    Ynn = sparse(Ynn)
 
     new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(relevant_pairs)
     k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K)
     for k1 = k1_range
         k2 = new_k
-        new_relevant_pairs[k1,k2] = compute_relevant_pairs(Znew,k1,k2)
-        new_relevant_pairs[k2,k1] = compute_relevant_pairs(Znew,k2,k1)
+        new_relevant_pairs[k1,k2] = compute_relevant_pairs(Ynn,Znew,k1,k2)
+        new_relevant_pairs[k2,k1] = compute_relevant_pairs(Ynn,Znew,k2,k1)
     end
     new_relevant_pairs
 end
@@ -1232,11 +1242,13 @@ function compute_unaugmented_prob(model::ModelState,
 end
 
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
-function compute_relevant_pairs(Z, #sparse or full binary array
+function compute_relevant_pairs(mask, #sparse or full binary array, so we only inlude training data
+                                Z, #sparse or full binary array
                                 k1::Int64,
                                 k2::Int64)
     ZZ = Z[:,k1]*Z[:,k2]'
     #ZZ = ZZ + ZZ' - ZZ .* ZZ'
+    #ZZ = ZZ.*mask #only need pairs from Ytrain
     (I, J) = findn(ZZ)
     [I', J']
 end

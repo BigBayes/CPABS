@@ -2,21 +2,34 @@ load("mcmc.jl")
 load("read_nips_data.jl")
 load("data_utils.jl")
 
+# Assumes symmetric Y, thus creates a symmetric train/test split
 function train_test_split(Y::Array{Int64, 2},
                           train_pct::Float64)
     assert(train_pct <= 1.0 && train_pct >= 0.0)
-    
-    y_inds = linspace(1,length(Y),length(Y))
+   
+    Ytri = triu(Y)
+
+    # don't pick diagonal terms for random removal
+    y_inds = find(triu(ones(size(Y)),1)) 
     shuffle!(y_inds)
-    train_end = ifloor(train_pct * length(Y))
+    train_end = ifloor(train_pct * length(y_inds))
 
     y_train_inds = y_inds[1:train_end]
-    y_test_inds = y_inds[train_end+1:end]
+
+    train_mask = zeros(size(Y))
+    train_mask[y_train_inds] = 1
+    train_mask = triu(train_mask)' + triu(train_mask,1)
+    test_mask = 1 - train_mask
 
     Ytrain = copy(Y)
     Ytest = copy(Y)
-    Ytrain[y_test_inds] = -1
-    Ytest[y_train_inds] = -1
+    Ytrain[find(test_mask)] = -1
+    Ytest[find(train_mask)] = -1
+
+    # remove diagonal terms
+    diag_mask = diagm(ones(size(Y)[1]))
+    Ytrain[find(diag_mask)] = -1
+    Ytest[find(diag_mask)] = -1
 
     (Ytrain, Ytest)
 end
@@ -33,12 +46,16 @@ function run_batch(model_spec::ModelSpecification,
                    result_path)
 
     assert(burnin_iterations < num_iterations)
-    Ytrain, Ytest = train_test_split(Y, train_pct)
+
     X_r = zeros((0,0,0))
     X_p = zeros((0,0))
     X_c = zeros((0,0))
 
-    data = DataState(Ytrain, Ytest, X_r, X_p, X_c)
+    datas = Array(Any, num_trials) 
+    for i = 1:num_trials
+        Ytrain, Ytest = train_test_split(Y, train_pct)
+        datas[i] = DataState(Ytrain, Ytest, copy(X_r), copy(X_p), copy(X_c))
+    end
 
     result_refs = Array(Any, num_trials)
     results = Array(Any, num_trials)
@@ -48,7 +65,6 @@ function run_batch(model_spec::ModelSpecification,
     train_pcts = train_pct * ones(num_trials)
     trials = linspace(1,num_trials,num_trials)
 
-    datas = [copy(data) for i = 1:num_trials]
     lambdas = lambda*ones(num_trials)
     gammas = gamma*ones(num_trials)
     model_specs = [copy(model_spec) for i = 1:num_trials]
@@ -57,6 +73,9 @@ function run_batch(model_spec::ModelSpecification,
 
     pmap(run_and_save, result_paths, id_strings, train_pcts, trials, datas, 
          lambdas, gammas, model_specs, num_iterses, burn_iterses)
+
+#    run_and_save(result_paths[1], id_strings[1], train_pcts[1], trials[1], datas[1],
+#         lambdas[1], gammas[1], model_specs[1], num_iterses[1], burn_iterses[1])
 
 #    for trial = 1:num_trials
 #        result_refs[trial] = @spawn mcmc(data, lambda, gamma, model_spec,
