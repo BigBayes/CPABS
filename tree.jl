@@ -1,4 +1,4 @@
-load("sparse.jl")
+require("sparse.jl")
 abstract Node
 
 type Nil <: Node

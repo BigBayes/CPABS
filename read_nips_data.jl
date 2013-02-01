@@ -1,4 +1,4 @@
-load("matio.jl")
+require("matio.jl")
 
 nips_data = MatIO.matopen("../data/nips_coauthorship/nips_1-17_matv7.3.mat")
 

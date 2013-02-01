@@ -1,8 +1,8 @@
-load("model.jl")
-load("tree.jl")
-load("probability_util.jl")
-load("pdf.jl")
-load("slicesampler.jl")
+require("model.jl")
+require("tree.jl")
+require("probability_util.jl")
+require("pdf.jl")
+require("slicesampler.jl")
 
 #@profile begin
 function mcmc(data::DataState,

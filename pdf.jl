@@ -1,7 +1,7 @@
-load("model.jl")
-load("tree.jl")
-load("probability_util.jl")
-#load("profile.jl")
+require("model.jl")
+require("tree.jl")
+require("probability_util.jl")
+#require("profile.jl")
 #Global pdf
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,

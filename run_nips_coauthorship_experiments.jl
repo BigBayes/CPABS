@@ -1,8 +1,8 @@
-@everywhere load("mcmc.jl")
-@everywhere load("data_utils.jl")
-load("read_nips_data.jl")
-load("profile.jl")
-@everywhere load("experiment_utils.jl")
+@everywhere require("mcmc.jl")
+@everywhere require("data_utils.jl")
+require("read_nips_data.jl")
+require("profile.jl")
+@everywhere require("experiment_utils.jl")
 
 model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))

@@ -1,6 +1,6 @@
-load("mcmc.jl")
-load("read_nips_data.jl")
-load("data_utils.jl")
+require("mcmc.jl")
+require("read_nips_data.jl")
+require("data_utils.jl")
 
 # Assumes symmetric Y, thus creates a symmetric train/test split
 function train_test_split(Y::Array{Int64, 2},

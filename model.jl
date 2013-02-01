@@ -1,4 +1,4 @@
-load("tree.jl")
+require("tree.jl")
 
 # Type for augmented weight matrix.  store a matrix, a set of pointers for 
 # each node denoting features attributed to said node
