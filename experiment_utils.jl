@@ -1,5 +1,4 @@
 load("mcmc.jl")
-load("read_nips_data.jl")
 load("data_utils.jl")
 
 # Assumes symmetric Y, thus creates a symmetric train/test split
