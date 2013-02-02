@@ -1,15 +1,18 @@
 require("mcmc.jl")
 require("data_utils.jl")
 
-# Assumes symmetric Y, thus creates a symmetric train/test split
 function train_test_split(Y::Array{Int64, 2},
-                          train_pct::Float64)
+                          train_pct::Float64,
+                          symmetric_split::Bool)
     assert(train_pct <= 1.0 && train_pct >= 0.0)
    
     Ytri = triu(Y)
 
-    # don't pick diagonal terms for random removal
-    y_inds = find(triu(ones(size(Y)),1)) 
+    if symmetric_split
+        y_inds = find(triu(ones(size(Y)),1))
+    else
+        y_inds = find(ones(size(Y))-eye(size(Y)[1]))
+    end
     shuffle!(y_inds)
     train_end = ifloor(train_pct * length(y_inds))
 
@@ -17,7 +20,10 @@ function train_test_split(Y::Array{Int64, 2},
 
     train_mask = zeros(size(Y))
     train_mask[y_train_inds] = 1
-    train_mask = triu(train_mask)' + triu(train_mask,1)
+
+    if symmetric_split
+        train_mask = triu(train_mask)' + triu(train_mask,1)
+    end
     test_mask = 1 - train_mask
 
     Ytrain = copy(Y)
@@ -52,7 +58,7 @@ function run_batch(model_spec::ModelSpecification,
 
     datas = Array(Any, num_trials) 
     for i = 1:num_trials
-        Ytrain, Ytest = train_test_split(Y, train_pct)
+        Ytrain, Ytest = train_test_split(Y, train_pct, model_spec.symmetric_W)
         datas[i] = DataState(Ytrain, Ytest, copy(X_r), copy(X_p), copy(X_c))
     end
 
@@ -61,7 +67,6 @@ function run_batch(model_spec::ModelSpecification,
 
     result_paths = [copy(result_path) for i = 1:num_trials]
     id_strings = [copy(id_string) for i = 1:num_trials]
-    train_pcts = train_pct * ones(num_trials)
     trials = linspace(1,num_trials,num_trials)
 
     lambdas = lambda*ones(num_trials)
@@ -70,7 +75,7 @@ function run_batch(model_spec::ModelSpecification,
     num_iterses = num_iterations*ones(Int, num_trials)
     burn_iterses = burnin_iterations*ones(Int, num_trials)
 
-    pmap(run_and_save, result_paths, id_strings, train_pcts, trials, datas, 
+    pmap(run_and_save, result_paths, id_strings, trials, datas, 
          lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
 #    run_and_save(result_paths[1], id_strings[1], train_pcts[1], trials[1], datas[1],
@@ -98,11 +103,16 @@ function run_batch(model_spec::ModelSpecification,
 
 end
 
-function run_and_save(result_path, id_string, train_pct, trial, mcmc_args...)
+function run_and_save(result_path, id_string, trial, mcmc_args...)
     results = mcmc(mcmc_args...)
-    trial_string = "$(id_string)_$(train_pct)_$(trial)"
+    trial_string = "$(id_string)_$(trial)"
     models = results[end]
     model = models[end]
+    data = mcmc_args[1]
+    datas = Array(Any,2)
+    datas[1] = data.Ytrain
+    datas[2] = data.Ytest
     save("$result_path/metrics_$trial_string.jla", results[1:end-1])
     save("$result_path/model_$trial_string.jla", model2array(model))
+    save("$result_path/data_$trial_string.jla", datas)
 end

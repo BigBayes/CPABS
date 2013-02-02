@@ -18,9 +18,12 @@ function prior(model::ModelState,
    
     if model_spec.diagonal_W 
         total_prob = sum(normal_logpdf(diag(model.weights), w_sigma ))
+    elseif model_spec.symmetric_W
+        total_prob = sum(normal_logpdf(tril(model.weights), w_sigma ))
     else
         total_prob = sum(normal_logpdf(model.weights, w_sigma ))
     end
+
     total_prob += sum(normal_logpdf(model.beta, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
@@ -691,7 +694,9 @@ function vardim_logpdf(model::ModelState,
     sigma = model.w_sigma
 
     for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : (1:K)
+        k2_range = model_spec.diagonal_W ? k1 : 
+                   model_spec.symmetric_W ? (1:k1) :
+                   (1:K)
 
         for k2 = k2_range
             if w_is_auxiliary[k1,k2]
@@ -878,7 +883,9 @@ function adjust_model_logprob(model::ModelState,
         end
     else
         for k1 = 1:K # start_index:new_index
-            k2_range = k1 == new_index ? (1:K) : new_index
+            k2_range = k1 != new_index ? new_index :
+                       model_spec.symmetric_W ? (1:k1) : 
+                       (1:K)
             for k2 = k2_range
                 if L <= u
                     aug_terms += t_logpdf(W[k1,k2], model.nu)
@@ -893,7 +900,12 @@ function adjust_model_logprob(model::ModelState,
         if L < u || L > u
             assert( L < u || aug_k == new_index)
             for k1 = 1:K
-                k2_range = k1 == aug_k ? (1:K) : aug_k 
+                if model_spec.symmetric_W
+                    k2_range = k1 == aug_k ? (1:k1) :
+                               k1 < aug_k ? aug_k : []
+                else
+                    k2_range = k1 == aug_k ? (1:K) : aug_k
+                end
                 for k2 = k2_range
                     if k1 != new_index && k2 != new_index
                         aug_terms += t_logpdf(W[k1,k2], model.nu)
@@ -1124,9 +1136,11 @@ function compute_all_relevant_pairs(model_spec::ModelSpecification,
     relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
 
     for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : (1:K)
+        k2_range = model_spec.diagonal_W ? k1 :
+                   model_spec.symmetric_W ? (1:k1) :
+                   (1:K)
         for k2 = k2_range
-            relevant_pairs[k1,k2] = compute_relevant_pairs(Ynn,Z,k1,k2)
+            relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Z,k1,k2)
         end
     end 
 
@@ -1177,8 +1191,8 @@ function compute_new_relevant_pairs(model::ModelState,
     k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K)
     for k1 = k1_range
         k2 = new_k
-        new_relevant_pairs[k1,k2] = compute_relevant_pairs(Ynn,Znew,k1,k2)
-        new_relevant_pairs[k2,k1] = compute_relevant_pairs(Ynn,Znew,k2,k1)
+        new_relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Znew,k1,k2)
+        new_relevant_pairs[k2,k1] = compute_relevant_pairs(model_spec,Ynn,Znew,k2,k1)
     end
     new_relevant_pairs
 end
@@ -1222,15 +1236,31 @@ function compute_unaugmented_prob(model::ModelState,
         if u < current_u
             removed_ind = start_index + u_index - 1
             for k1 = 1:K
-                k2_range = k1 == removed_ind || k1 == new_index ? 
-                           (1:K) : [removed_ind, new_index]
+                if model_spec.symmetric_W
+                    @assert removed_ind < new_index
+                    k2_range = k1 == removed_ind || k1 == new_index ? (1:k1) : 
+                               k1 < removed_ind ? [] :
+                               k1 < new_index ? removed_ind :
+                               [removed_ind, new_index]
+                    
+                else
+                    k2_range = k1 == removed_ind || k1 == new_index ? 
+                               (1:K) : [removed_ind, new_index]
+                end
+
                 for k2 = k2_range
                     unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
                 end
             end
         elseif u == current_u
             for k1 = 1:K
-                k2_range = k1 == new_index ? (1:K) : new_index
+                if model_spec.symmetric_W
+                    k2_range = k1 == new_index ? (1:k1) : 
+                               k1 < new_index ? [] :
+                               new_index
+                else
+                    k2_range = k1 == new_index ? (1:K) : new_index
+                end
                 for k2 = k2_range
                     unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
                 end
@@ -1242,15 +1272,23 @@ function compute_unaugmented_prob(model::ModelState,
 end
 
 # Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
-function compute_relevant_pairs(mask, #sparse or full binary array, so we only inlude training data
+function compute_relevant_pairs(model_spec::ModelSpecification,
+                                mask, #sparse or full binary array, so we only inlude training data
                                 Z, #sparse or full binary array
                                 k1::Int64,
                                 k2::Int64)
     ZZ = Z[:,k1]*Z[:,k2]'
-    #ZZ = ZZ + ZZ' - ZZ .* ZZ'
+    if model_spec.symmetric_W
+        ZZ = ZZ + ZZ' - ZZ .* ZZ'
+    end
     #ZZ = ZZ.*mask #only need pairs from Ytrain
     (I, J) = findn(ZZ)
     [I', J']
+end
+
+function symmetrize!(A::Array)
+    triu_inds = find(triu(ones(size(A)),1))
+    A[triu_inds] = tril(A,1)'[triu_inds];
 end
 
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])

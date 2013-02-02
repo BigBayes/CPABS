@@ -300,9 +300,11 @@ function sample_W(model::ModelState,
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
         for k1 = 1:K
-            k2_range = model_spec.diagonal_W ? k1 : (1:K)
+            k2_range = model_spec.diagonal_W ? k1 :
+                       model_spec.symmetric_W ? (1:k1) :
+                       (1:K)
             for k2 = k2_range
-                relevant_pairs = compute_relevant_pairs(Ynn,Z,k1,k2)
+                relevant_pairs = compute_relevant_pairs(model_spec,Ynn,Z,k1,k2)
                 w_cur = W[k1,k2]
                 w_old = w_cur
                 g = x -> W_local_logpdf(model, data, relevant_pairs, latent_effects, observed_effects, w_old, x)
@@ -362,6 +364,10 @@ function sample_W(model::ModelState,
         end
 
  
+    end
+
+    if model_spec.symmetric_W
+        symmetrize!(W)
     end
 
     inds = get_augmented_submatrix_indices(model.augmented_weights, 1, 0)
@@ -739,18 +745,11 @@ function sample_Z(model::ModelState,
         for iter = 1:num_W_sweeps
             k1_range = start_index:end_index+1 #model_spec.diagonal_W ? new_k : start_index:end_index+1 #(1:K+1)
             for k1 = k1_range
-                if model_spec.diagonal_W
-                    k2_range = k1
-                else
-                    k2_range = start_index:end_index+1
-                end
 
-#                elseif k1 >= start_index && k1 <= end_index+1
-#                    k2_range = start_index:end_index+1 #1:K+1
-#                else
-#                    k2_range = start_index:end_index+1
-#                end
-                #k2_range = 1:K+1
+                k2_range = model_spec.diagonal_W ? k1 :
+                           model_spec.symmetric_W ? start_index:k1 :
+                           start_index:end_index+1
+
                 for k2 = k2_range
 
                     #println("slice sample prep, start, end:", start_index, " ", end_index)
@@ -838,6 +837,10 @@ function sample_Z(model::ModelState,
 #                    println(unscaled_const_terms) 
                 end
             end
+        end
+
+        if model_spec.symmetric_W
+            symmetrize!(W)
         end
 
         logprobs = const_terms
