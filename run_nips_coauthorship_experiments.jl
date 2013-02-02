@@ -2,13 +2,14 @@
 @everywhere load("data_utils.jl")
 @everywhere load("read_nips_data.jl")
 @everywhere load("experiment_utils.jl")
-
-model_spec = ModelSpecification(false, false, false, true, false, ones(3)/3, 0.2, 1.0, false, false)
+symmetric = true
+model_spec = ModelSpecification(false, false, false, symmetric, false, ones(3)/3, 0.2, 1.0, false, false)
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
 
-run_batch(model_spec, YY, 0.8, 0.1, 0.5, 500, 200, 10, "NIPS_test", "../results")
+trnpct = 0.8
+run_batch(model_spec, YY, trnpct, 0.3, 0.5, 500, 200, 10, "NIPS_test_$trnpct", "../results")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
