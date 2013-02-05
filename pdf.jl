@@ -15,8 +15,8 @@ function prior(model::ModelState,
                model_spec::ModelSpecification)
     w_sigma = model.w_sigma
     b_sigma = model.b_sigma
-   
-    if model_spec.diagonal_W 
+ 
+    if model_spec.diagonal_W && length(model.weights) > 0
         total_prob = sum(normal_logpdf(diag(model.weights), w_sigma ))
     elseif model_spec.symmetric_W
         total_prob = sum(normal_logpdf(tril(model.weights), w_sigma ))

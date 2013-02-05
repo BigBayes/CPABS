@@ -62,21 +62,24 @@ function run_batch(model_spec::ModelSpecification,
         datas[i] = DataState(Ytrain, Ytest, copy(X_r), copy(X_p), copy(X_c))
     end
 
-    result_refs = Array(Any, num_trials)
-    results = Array(Any, num_trials)
+    if num_trials > 1
+        result_paths = [copy(result_path) for i = 1:num_trials]
+        id_strings = [copy(id_string) for i = 1:num_trials]
+        trials = linspace(1,num_trials,num_trials)
 
-    result_paths = [copy(result_path) for i = 1:num_trials]
-    id_strings = [copy(id_string) for i = 1:num_trials]
-    trials = linspace(1,num_trials,num_trials)
+        lambdas = lambda*ones(num_trials)
+        gammas = gamma*ones(num_trials)
+        model_specs = [copy(model_spec) for i = 1:num_trials]
+        num_iterses = num_iterations*ones(Int, num_trials)
+        burn_iterses = burnin_iterations*ones(Int, num_trials)
 
-    lambdas = lambda*ones(num_trials)
-    gammas = gamma*ones(num_trials)
-    model_specs = [copy(model_spec) for i = 1:num_trials]
-    num_iterses = num_iterations*ones(Int, num_trials)
-    burn_iterses = burnin_iterations*ones(Int, num_trials)
+        pmap(run_and_save, result_paths, id_strings, trials, datas, 
+             lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
-    pmap(run_and_save, result_paths, id_strings, trials, datas, 
-         lambdas, gammas, model_specs, num_iterses, burn_iterses)
+    else
+        run_and_save(result_path, id_string, 1, data, 
+             lambda, gamma, model_spec, num_iterations, burnin_iterations)
+    end
 
 #    run_and_save(result_paths[1], id_strings[1], train_pcts[1], trials[1], datas[1],
 #         lambdas[1], gammas[1], model_specs[1], num_iterses[1], burn_iterses[1])

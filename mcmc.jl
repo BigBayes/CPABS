@@ -117,7 +117,7 @@ function mcmc(data::DataState,
 
     # if not diagonal, initialize using a diagonal model
     diagonal = model_spec.diagonal_W
-    model_spec.diagonal_W = true
+#    model_spec.diagonal_W = true
 
     avg_test_likelihoods = [zeros(Float64, 0) for x in 1:N, y in 1:N]
     logit_args = [zeros(Float64, 0) for x = 1:N, y = 1:N]
@@ -747,8 +747,8 @@ function sample_Z(model::ModelState,
             for k1 = k1_range
 
                 k2_range = model_spec.diagonal_W ? k1 :
-                           model_spec.symmetric_W ? start_index:k1 :
-                           start_index:end_index+1
+                           model_spec.symmetric_W ? (start_index:k1) :
+                           (start_index:end_index+1)
 
                 for k2 = k2_range
 
