@@ -9,7 +9,7 @@ X_p = zeros((0,0))
 X_c = zeros((0,0))
 
 trnpct = 0.8
-run_batch(model_spec, YY, trnpct, 0.3, 0.5, 500, 200, 10, "NIPS_test_$trnpct", "../results")
+run_batch(model_spec, YY, trnpct, 0.1, 0.5, 500, 200, 10, "NIPS_test_$trnpct", "../results")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)

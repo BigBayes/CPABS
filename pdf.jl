@@ -1191,8 +1191,14 @@ function compute_new_relevant_pairs(model::ModelState,
     k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K)
     for k1 = k1_range
         k2 = new_k
-        new_relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Znew,k1,k2)
-        new_relevant_pairs[k2,k1] = compute_relevant_pairs(model_spec,Ynn,Znew,k2,k1)
+        if model_spec.symmetric_W
+            k11 = max(k1,k2)
+            k22 = min(k1,k2)
+            new_relevant_pairs[k11,k22] = compute_relevant_pairs(model_spec,Ynn,Znew,k11,k22)
+        else
+            new_relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Znew,k1,k2)
+            new_relevant_pairs[k2,k1] = compute_relevant_pairs(model_spec,Ynn,Znew,k2,k1)
+        end
     end
     new_relevant_pairs
 end
