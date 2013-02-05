@@ -1,9 +1,11 @@
-@everywhere load("mcmc.jl")
-@everywhere load("data_utils.jl")
-@everywhere load("read_nips_data.jl")
-@everywhere load("experiment_utils.jl")
+@everywhere require("mcmc.jl")
+@everywhere require("data_utils.jl")
+@everywhere require("read_nips_data.jl")
+@everywhere require("experiment_utils.jl")
+
 symmetric = true
 model_spec = ModelSpecification(false, false, false, symmetric, false, ones(3)/3, 0.2, 1.0, false, false)
+
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))

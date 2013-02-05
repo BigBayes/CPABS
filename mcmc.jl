@@ -1,8 +1,8 @@
-load("model.jl")
-load("tree.jl")
-load("probability_util.jl")
-load("pdf.jl")
-load("slicesampler.jl")
+require("model.jl")
+require("tree.jl")
+require("probability_util.jl")
+require("pdf.jl")
+require("slicesampler.jl")
 
 #@profile begin
 function mcmc(data::DataState,
@@ -161,10 +161,10 @@ function mcmc(data::DataState,
             for i = 1:N
                 for j = 1:N
                     testLL,logit_arg = test_likelihood_ij(model,model_spec,data,Z,i,j)
-                    push(logit_args[i,j], logit_arg)
+                    push!(logit_args[i,j], logit_arg)
 
                     if data.Ytest[i,j] >= 0
-                        push(avg_test_likelihoods[i,j], testLL)
+                        push!(avg_test_likelihoods[i,j], testLL)
                         total_LL += logsumexp(avg_test_likelihoods[i,j]) - log(length(avg_test_likelihoods[i,j]))
                     end
                 end
@@ -176,21 +176,21 @@ function mcmc(data::DataState,
         end
 
         if mod(iter, 10) == 0 || iter == iterations
-            push(models,copy(model))
-            push(iters, iter)
+            push!(models,copy(model))
+            push!(iters, iter)
             if iter > burnin_iterations
                 (train_error, test_error, auc) = error_and_auc(logit_args, data)
                 println("Train, Test, AUC: ", (train_error, test_error, auc))
 
-                push(train_errors, train_error)
-                push(test_errors, test_error)
-                push(avg_test_LLs, total_LL)
-                push(aucs, auc)
+                push!(train_errors, train_error)
+                push!(test_errors, test_error)
+                push!(avg_test_LLs, total_LL)
+                push!(aucs, auc)
             end
         end
-        push(trainLLs, tree_LL)
-        push(testLLs, test_LL)
-        push(Ks, size(model.weights)[1])
+        push!(trainLLs, tree_LL)
+        push!(testLLs, test_LL)
+        push!(Ks, size(model.weights)[1])
     end
 
     (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, models )
@@ -505,7 +505,7 @@ function sample_Z(model::ModelState,
         if L == u-1
             new_relevant_pairs = copy(old_relevant_pairs)
 
-            aug_u = randi(u)
+            aug_u = rand(1:u)
             deactivate_feature(new_model.augmented_weights,
                                node_index,
                                aug_u)
@@ -675,19 +675,19 @@ function sample_Z(model::ModelState,
  
         for u_ind = 1:L
             k_ind = start_index + u_ind - 1
-            push(w_is_auxiliary,[x == k_ind  || y == k_ind ||
+            push!(w_is_auxiliary,[x == k_ind  || y == k_ind ||
                                  x == new_k || y == new_k
                                  for x = 1:K+1, y = 1:K+1] )
 
-            push(k_is_auxiliary, [x == k_ind || x == new_k for x = 1:K+1])
+            push!(k_is_auxiliary, [x == k_ind || x == new_k for x = 1:K+1])
             
         end
 
-        push(w_is_auxiliary,[x == new_k || y == new_k for x = 1:K+1, y = 1:K+1] )
-        push(k_is_auxiliary,[x == new_k for x = 1:K+1] )
+        push!(w_is_auxiliary,[x == new_k || y == new_k for x = 1:K+1, y = 1:K+1] )
+        push!(k_is_auxiliary,[x == new_k for x = 1:K+1] )
 
-        push(w_is_auxiliary, zeros(Bool, (K+1,K+1)))
-        push(k_is_auxiliary, zeros(Bool, K+1))
+        push!(w_is_auxiliary, zeros(Bool, (K+1,K+1)))
+        push!(k_is_auxiliary, zeros(Bool, K+1))
 
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
@@ -1169,12 +1169,12 @@ function sample_psi(model::ModelState,
         new_graftpoint_features = Array(Array{Int64,1},0)
         for i = 1:length(pstates)
             if pstates[i][1] == original_sibling.index
-                push(A, i)
+                push!(A, i)
             end 
 
-            push(graft_indices, pstates[i][1])
-            push(new_graftpoint_features, pstates[i][2])
-            push(new_parent_features, pstates[i][3])
+            push!(graft_indices, pstates[i][1])
+            push!(new_graftpoint_features, pstates[i][2])
+            push!(new_parent_features, pstates[i][3])
         end
 
 

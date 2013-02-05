@@ -1,4 +1,8 @@
-load("tree.jl")
+require("tree.jl")
+
+import Base.copy
+import Base.ref
+import Base.assign
 
 # Type for augmented weight matrix.  store a matrix, a set of pointers for 
 # each node denoting features attributed to said node
@@ -127,17 +131,17 @@ function prune_tree!(model::ModelState,
 
 
     if sibling_start < parent_start
-        del(weight_permutation, parent_start:parent_end)
+        delete!(weight_permutation, parent_start:parent_end)
     
         for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, sibling_end + 1, p)
+            insert!(weight_permutation, sibling_end + 1, p)
         end
     else
         for p = reverse(parent_start:parent_end)
-            insert(weight_permutation, sibling_end + 1, p)
+            insert!(weight_permutation, sibling_end + 1, p)
         end
 
-        del(weight_permutation, parent_start:parent_end)
+        delete!(weight_permutation, parent_start:parent_end)
     end
 
     permute_rows_and_cols!(model.weights, weight_permutation)
@@ -179,21 +183,21 @@ function graft_tree!(model::ModelState,
 
     if graftpoint_start < parent_start
         for p = reverse(parent_features)
-            insert(weight_permutation, parent_start, p)
+            insert!(weight_permutation, parent_start, p)
         end
 
-        del(weight_permutation, graftpoint_start:graftpoint_end)
+        delete!(weight_permutation, graftpoint_start:graftpoint_end)
         for p = reverse(graftpoint_features)
-            insert(weight_permutation, graftpoint_start, p)
+            insert!(weight_permutation, graftpoint_start, p)
         end
     else
-        del(weight_permutation, graftpoint_start:graftpoint_end)
+        delete!(weight_permutation, graftpoint_start:graftpoint_end)
         for p = reverse(graftpoint_features)
-            insert(weight_permutation, graftpoint_start, p)
+            insert!(weight_permutation, graftpoint_start, p)
         end
 
         for p = reverse(parent_features)
-            insert(weight_permutation, parent_start, p)
+            insert!(weight_permutation, parent_start, p)
         end
     end
 
@@ -296,8 +300,8 @@ function deactivate_feature(augmented_matrix::AugmentedMatrix,
     num_features = augmented_matrix.num_active_features[augmented_set_index]
     el = feature_pointers[feature_index]
 
-    del(feature_pointers, feature_index)
-    insert(feature_pointers, num_features, el) #insert el as next augmented feature
+    delete!(feature_pointers, feature_index)
+    insert!(feature_pointers, num_features, el) #insert el as next augmented feature
     augmented_matrix.num_active_features[augmented_set_index] -= 1
 end
 
@@ -325,14 +329,14 @@ function move_features(augmented_matrix,
     rev_indices = reverse(sort(feature_indices))
     for feature_index = rev_indices
         el = source_pointers[feature_index]
-        push(els, el)
-        del(source_pointers, feature_index)
+        push!(els, el)
+        delete!(source_pointers, feature_index)
         num_features[source_index] -= 1
     end
 
     for el = reverse(els)
         numf = num_features[target_index]
-        insert(target_pointers, numf+1, el)
+        insert!(target_pointers, numf+1, el)
         num_features[target_index] += 1
     end
 end

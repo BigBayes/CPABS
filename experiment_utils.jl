@@ -1,5 +1,5 @@
-load("mcmc.jl")
-load("data_utils.jl")
+require("mcmc.jl")
+require("data_utils.jl")
 
 function train_test_split(Y::Array{Int64, 2},
                           train_pct::Float64,
@@ -112,7 +112,12 @@ function run_and_save(result_path, id_string, trial, mcmc_args...)
     datas = Array(Any,2)
     datas[1] = data.Ytrain
     datas[2] = data.Ytest
+    trees_array = [model2array(models[i])[1] for i = 1:length(models)]
+    features_array = [model2array(models[i])[2] for i = 1:length(models)]
+    weights_array = [model2array(models[i])[3] for i = 1:length(models)]
     save("$result_path/metrics_$trial_string.jla", results[1:end-1])
-    save("$result_path/model_$trial_string.jla", model2array(model))
+    save("$result_path/trees_$trial_string.jla", trees_array)
+    save("$result_path/features_$trial_string.jla", features_array)
+    save("$result_path/weights_$trial_string.jla", weights_array)
     save("$result_path/data_$trial_string.jla", datas)
 end

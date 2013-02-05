@@ -1,4 +1,6 @@
-load("sparse.jl")
+import Base.copy
+import Base.show
+import Base.==
 abstract Node
 
 type Nil <: Node
@@ -102,20 +104,20 @@ function Tree(U::Array{Int64,1})
         tree.nodes[i] = TreeNode(U[i], i)
 
         #coalesce pairs uniformly at random
-        l_ind = randi(coalescing_nodes_remaining)
+        l_ind = rand(1:coalescing_nodes_remaining)
         l = coalescing_nodes[l_ind]
         r_ind = l_ind
         while r_ind == l_ind
-            r_ind = randi(coalescing_nodes_remaining)
+            r_ind = rand(1:coalescing_nodes_remaining)
         end
         r = coalescing_nodes[r_ind]
 
         #update the set of nodes remaining
         m_ind = min(l_ind,r_ind)
         x_ind = max(l_ind,r_ind)
-        del(coalescing_nodes, x_ind)
-        del(coalescing_nodes, m_ind)
-        push(coalescing_nodes, i)
+        delete!(coalescing_nodes, x_ind)
+        delete!(coalescing_nodes, m_ind)
+        push!(coalescing_nodes, i)
         coalescing_nodes_remaining -= 1
      
         tree.nodes[l].parent = tree.nodes[i]
@@ -208,14 +210,14 @@ function UpdateSubtreeAncestorCounts!{T}(tree::Tree{T},
         return
     end
 
-    enqueue(subtree_queue, subtree_root.index)
+    unshift!(subtree_queue, subtree_root.index)
     while length(subtree_queue) > 0
-        cur = tree.nodes[pop(subtree_queue)]
+        cur = tree.nodes[pop!(subtree_queue)]
         if cur.children[1] != Nil() 
-            enqueue(subtree_queue, cur.children[1].index)
+            unshift!(subtree_queue, cur.children[1].index)
         end
         if cur.children[2] != Nil()
-            enqueue(subtree_queue, cur.children[2].index)
+            unshift!(subtree_queue, cur.children[2].index)
         end
         if cur.parent == Nil()
             cur.num_ancestors = 0
@@ -231,7 +233,7 @@ function GetPath{T}(tree::Tree{T},
     path = Array(Int64,0)
     current_node = tree.nodes[node_index]
     while (current_node != Nil())
-        push(path, current_node.index)
+        push!(path, current_node.index)
         current_node = current_node.parent
     end
     path
@@ -294,7 +296,7 @@ end
 function GetRandomLeaf{T}(tree::Tree{T},
                           index::Int)
     leaves = GetLeaves(tree,index)
-    d_ind = randi(length(leaves))
+    d_ind = rand(1:length(leaves))
     leaves[d_ind]
 end
 
@@ -312,16 +314,16 @@ function GetSubtreeIndicies{T}(tree::Tree{T},
     subtree_indices = IntSet()
     assert( tree.nodes[subtree_root] != Nil())
     queue = Int64[]
-    enqueue(queue, subtree_root)
+    unshift!(queue, subtree_root)
     while length(queue) > 0
-        cur = tree.nodes[pop(queue)]
+        cur = tree.nodes[pop!(queue)]
         if cur.children[1] != Nil()
-            enqueue(queue, cur.children[1].index)
+            unshift!(queue, cur.children[1].index)
         end
         if cur.children[2] != Nil()
-            enqueue(queue, cur.children[2].index)
+            unshift!(queue, cur.children[2].index)
         end
-        add(subtree_indices, cur.index)
+        add!(subtree_indices, cur.index)
     end
 
     subtree_indices
@@ -333,17 +335,17 @@ function GetLeafToRootOrdering{T}(tree::Tree{T},
     queue = Int64[]
     stack = Int64[]
     assert( tree.nodes[root_index] != Nil())
-    enqueue(queue, root_index)
+    unshift!(queue, root_index)
 
     while length(queue) > 0
-        cur = tree.nodes[pop(queue)]
+        cur = tree.nodes[pop!(queue)]
         if cur.children[1] != Nil()
-            enqueue(queue, cur.children[1].index)
+            unshift!(queue, cur.children[1].index)
         end
         if cur.children[2] != Nil()
-            enqueue(queue, cur.children[2].index)
+            unshift!(queue, cur.children[2].index)
         end  
-        push(stack, cur.index)
+        push!(stack, cur.index)
     end
 
     reverse(stack)
@@ -366,9 +368,9 @@ function ConstructZ{T}(tree::Tree{T})
         for j = 1:U[i]
             cur_j += 1
             for l = leaves
-                push(Z_I, l)
-                push(Z_J, cur_j)
-                push(Z_S, 1)
+                push!(Z_I, l)
+                push!(Z_J, cur_j)
+                push!(Z_S, 1)
             end
         end
     end

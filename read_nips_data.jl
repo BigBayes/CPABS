@@ -1,6 +1,6 @@
-load("matio.jl")
+using MAT
 
-nips_data = MatIO.matopen("../data/nips_coauthorship/nips_1-17_matv7.3.mat")
+nips_data = matopen("../data/nips_coauthorship/nips_1-17_matv7.3.mat")
 
 authors_names = read(nips_data["authors_names"]);
 aw_counts = read(nips_data["aw_counts"]);
@@ -16,7 +16,7 @@ YY[y_ind_nnz] = 1
  
 authors_numlinks = squeeze(sum(YY, 2))
 
-sorted,perm = sortperm(authors_numlinks)
+perm = sortperm(authors_numlinks)
 perm = reverse(perm)
 
 top234 = perm[1:234]

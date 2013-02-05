@@ -42,7 +42,7 @@ function restore(filename)
         sz = sizes[i]
         for j = 1:nds[i]
             count += 1
-            push(sz,lengths[count]) 
+            push!(sz,lengths[count]) 
         end
     end
 

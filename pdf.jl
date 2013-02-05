@@ -1,7 +1,7 @@
-load("model.jl")
-load("tree.jl")
-load("probability_util.jl")
-#load("profile.jl")
+require("model.jl")
+require("tree.jl")
+require("probability_util.jl")
+#require("profile.jl")
 #Global pdf
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
@@ -201,7 +201,7 @@ function psi_infsites_logpdf(model::ModelState,
                        poisson_logpdf(length(v), poisson_mean_before) -
                        poisson_logpdf(cur.state, poisson_mean_before)
 
-                push(total_probs, prob + child_mutation_contributions + psi_probs[i] + subtree_probs[i])
+                push!(total_probs, prob + child_mutation_contributions + psi_probs[i] + subtree_probs[i])
     #            if true
     #                println("prob ", prob)
     #                println("child contributions ", child_mutation_contributions)
@@ -209,7 +209,7 @@ function psi_infsites_logpdf(model::ModelState,
     #                println("subtree_probs ", subtree_probs[i])
     #            end
                 # (node above which to attach, features moved below graft point, features moved above)
-                push(tree_states, (i, u, v) )                
+                push!(tree_states, (i, u, v) )                
             end
         end
     end
@@ -298,7 +298,7 @@ function psi_likelihood_logpdf(model::ModelState,
 #    end
 
     for i = 1:length(nzI)
-        push(leaf_features[nzI[i]], nzJ[i])
+        push!(leaf_features[nzI[i]], nzJ[i])
     end
 
     latent_effects = zeros(Float64, (length(path), length(subtree_leaves), N))
@@ -414,8 +414,8 @@ function psi_likelihood_logpdf(model::ModelState,
                 end
     
             end
-            insert(likelihoods, 1, likelihood)
-            insert(tree_states, 1, (i, rV[m], t))
+            insert!(likelihoods, 1, likelihood)
+            insert!(tree_states, 1, (i, rV[m], t))
         end       
 
     end
@@ -1051,7 +1051,7 @@ function adjust_latent_effects(model::ModelState,
         if new_k == 0 # sometimes there is no new dimension to worry about
             k_range0 = linspace(1,K,K)
         else
-            k_range0 = del(linspace(1,K,K), new_k)
+            k_range0 = delete!(linspace(1,K,K), new_k)
         end
 
         k_range = model_spec.diagonal_W ? removed_k : k_range0
@@ -1339,11 +1339,11 @@ function all_splits(v::Array{Int64})
         u = Int64[]
         for j = 1:length(v)
             if bool(x & 1)
-                push(u, v[j])
+                push!(u, v[j])
             end
             x = x >> 1
         end
-        push(U, u)
+        push!(U, u)
     end
     (U,reverse(U))
 end
