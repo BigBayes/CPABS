@@ -1046,12 +1046,13 @@ function adjust_latent_effects(model::ModelState,
     assert(new_k <= K)
     new_latent_effects = copy(latent_effects)
     if L == u - 1
+        assert(aug_k < new_k || new_k == 0)
+
         removed_k = aug_k
+        k_range0 = linspace(1,K,K)
         # latent effects assumes new dimensions haven't been added, so don't remove them!
-        if new_k == 0 # sometimes there is no new dimension to worry about
-            k_range0 = linspace(1,K,K)
-        else
-            k_range0 = delete!(linspace(1,K,K), new_k)
+        if new_k != 0 # only need to worry about new dimension if we have one
+            delete!(k_range0, new_k)
         end
 
         k_range = model_spec.diagonal_W ? removed_k : k_range0
@@ -1119,6 +1120,11 @@ function compute_latent_effects(model::ModelState,
     elseif L > u
         assert(aug_k == new_index)
         W = model.weights
+    end
+
+    if model_spec.symmetric_W
+        W = copy(W)
+        symmetrize!(W)
     end
 
     Z*W*Z' 

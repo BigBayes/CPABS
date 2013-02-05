@@ -77,7 +77,7 @@ function run_batch(model_spec::ModelSpecification,
              lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
     else
-        run_and_save(result_path, id_string, 1, data, 
+        run_and_save(result_path, id_string, 1, datas[1], 
              lambda, gamma, model_spec, num_iterations, burnin_iterations)
     end
 

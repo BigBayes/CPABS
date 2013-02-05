@@ -564,7 +564,7 @@ function sample_Z(model::ModelState,
             verify_latent_effects = compute_latent_effects(tmodel, model_spec, u, L,
                                         aug_k, node_index)
 
-            (s,permutation) = sortperm( abs(latent_effects - verify_latent_effects)[:])
+            permutation = sortperm( abs(latent_effects - verify_latent_effects)[:])
             rev = reverse(permutation)
             maxinds = rev[1:10]
           
@@ -637,37 +637,37 @@ function sample_Z(model::ModelState,
             le_diffs = verify_latent_effects .- component_latent_effects
 
             maxabss = [ max(abs(le_diffs[x])) for x = 1:length(le_diffs)]
-#            println(maxabss )
-#            println(maxabss .< 10.0^-5)
-#
-#            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
-#
-#            tmodel = copy(new_model)
-#            tmodel.tree.nodes[node_index].state = L+1
-#            ZZ = ConstructZ(tmodel.tree)
-#            if length(I) > 0
-#                println(size(ZZ))
-#                println(I[1])
-#                println(J[1])
-#            
-#
-#                println(new_model.weights)
-#                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
-#                println("original: ", latent_effects[maxi[1],maxj[1]])
-#                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
-#                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
-#
-#
-#                k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)
-#                println("k_common: ", k_common)
-#                println(W[k_common, k_common])
-#
-#                k1 = k_common[1]
-#                k2 = k_common[2]
-#                II = find( new_relevant_pairs[k1,k2][1,:] .== I[1])
-#                println(II)
-#                println(new_relevant_pairs[k1,k2][:,II])
-#            end
+            println(maxabss )
+            println(maxabss .< 10.0^-5)
+
+            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
+
+            tmodel = copy(new_model)
+            tmodel.tree.nodes[node_index].state = L+1
+            ZZ = ConstructZ(tmodel.tree)
+            if length(I) > 0
+                println(size(ZZ))
+                println(I[1])
+                println(J[1])
+            
+
+                println(new_model.weights)
+                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
+                println("original: ", latent_effects[maxi[1],maxj[1]])
+                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
+                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
+
+
+                k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)
+                println("k_common: ", k_common)
+                println(W[k_common, k_common])
+
+                k1 = k_common[1]
+                k2 = k_common[2]
+                II = find( new_relevant_pairs[k1,k2][1,:] .== I[1])
+                println(II)
+                println(new_relevant_pairs[k1,k2][:,II])
+            end
 
             assert(all(maxabss .< 10.0^-5))
 
