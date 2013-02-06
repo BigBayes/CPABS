@@ -1,8 +1,6 @@
-require("model.jl")
-require("mcmc.jl")
-require("data_utils.jl")
 require("experiment_utils.jl")
-require("read_nips_data.jl")
+require("mcmc.jl")
+include("read_nips_data.jl")
 
 model_spec = ModelSpecification(false, false, false, false, false, ones(3)/3, 0.2, 1.0, false, false)
 

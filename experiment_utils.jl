@@ -1,4 +1,5 @@
-
+require("model.jl")
+require("data_utils.jl")
 function train_test_split(Y::Array{Int64, 2},
                           train_pct::Float64,
                           symmetric_split::Bool)
