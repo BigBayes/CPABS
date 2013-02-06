@@ -409,7 +409,17 @@ function sample_Z(model::ModelState,
             percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
             println(" ",percent , "% ")
         end
-
+#        if model_spec.symmetric_W
+#            println("rtl_index: ", rtl_index)
+#            (K0,K0) = size(model.weights)
+#            if K0 > 1
+#                println(old_relevant_pairs[1,K0])
+#                assert( length(old_relevant_pairs[1,K0]) == 0)
+#            end
+#            println("rtl_index: ", rtl_index)
+#
+#        end
+#
         if rand() > model_spec.Z_sample_branch_prob
             continue
         end
@@ -466,10 +476,18 @@ function sample_Z(model::ModelState,
         end
 
         if model_spec.debug
+            println("(L,u,ind): ", (L,u,rtl_index))
             Z = ConstructZ(model.tree)
-            verify_latent_effects = Z*model.weights*Z' 
-            println(verify_latent_effects[1:10])
-            println(latent_effects[1:10])
+            W = copy(model.weights)
+            symmetrize!(W)
+            verify_latent_effects = Z*W*Z' 
+            badinds = findn(abs(verify_latent_effects - latent_effects) .> 10.0^-5)
+
+            println(badinds)
+            println(latent_effects[badinds...])
+            println(verify_latent_effects[badinds...])
+            println(model.weights)
+            println(W)
             assert(max(abs(verify_latent_effects - latent_effects)) < 10.0^-5)
 
         end
@@ -594,7 +612,6 @@ function sample_Z(model::ModelState,
 
             verify_relevant_pairs = compute_all_relevant_pairs(model_spec, data, K+1, Z)
             assert( verify_relevant_pairs == new_relevant_pairs)
-
         end
 
         # adjust model probability
@@ -633,29 +650,36 @@ function sample_Z(model::ModelState,
             verify_latent_effects = compute_component_latent_effects(new_model,
                                         model_spec, L, start_index, end_index, node_index)
 
-
             le_diffs = verify_latent_effects .- component_latent_effects
 
             maxabss = [ max(abs(le_diffs[x])) for x = 1:length(le_diffs)]
             println(maxabss )
             println(maxabss .< 10.0^-5)
 
-            I,J = findn(abs(verify_latent_effects[1] - component_latent_effects[1]) .> 10.0^-5)
 
             tmodel = copy(new_model)
             tmodel.tree.nodes[node_index].state = L+1
             ZZ = ConstructZ(tmodel.tree)
-            if length(I) > 0
+            bad_indices = find(maxabss .> 10.0^-5)
+            if length(bad_indices) > 0
+
+                bad_ind = bad_indices[1]
+                println("bad_ind: ", bad_ind)
+                I,J = findn(abs(verify_latent_effects[bad_ind] - component_latent_effects[bad_ind]) .> 10.0^-5)
+
+
                 println(size(ZZ))
                 println(I[1])
                 println(J[1])
-            
+          
+                println(ZZ[I[1],:])
+                println(ZZ[J[1],:]) 
 
                 println(new_model.weights)
-                maxi,maxj = findn(maxabss[1] .== abs(le_diffs[1]))
+                maxi,maxj = findn(maxabss[bad_ind] .== abs(le_diffs[bad_ind]))
                 println("original: ", latent_effects[maxi[1],maxj[1]])
-                println("verified: ", verify_latent_effects[1][maxi[1],maxj[1]])
-                println("component: ", component_latent_effects[1][maxi[1],maxj[1]])
+                println("verified: ", verify_latent_effects[bad_ind][maxi[1],maxj[1]])
+                println("component: ", component_latent_effects[bad_ind][maxi[1],maxj[1]])
 
 
                 k_common = find(ZZ[I[1],:] .* ZZ[J[1],:] .> 0)

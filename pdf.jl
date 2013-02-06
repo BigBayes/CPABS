@@ -1078,6 +1078,16 @@ function adjust_latent_effects(model::ModelState,
         k_range = model_spec.diagonal_W ? new_k : (1:K)
         
         for k = k_range
+
+            if model_spec.symmetric_W
+                kmin = min(k,new_k)
+                kmax = max(k,new_k)
+
+                if kmax > kmin
+                    assert(size(relevant_pairs[kmin,kmax])[2] == 0)
+                end
+            end
+
             for p = 1:size(relevant_pairs[k, new_k])[2]
                 i = relevant_pairs[k, new_k][1,p]
                 j = relevant_pairs[k, new_k][2,p]

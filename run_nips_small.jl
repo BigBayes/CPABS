@@ -16,10 +16,11 @@ X_c = zeros((0,0))
 perm = randperm(234)
 permute_rows_and_cols!(YY,perm)
 
-YY = YY[1:70,1:70]
+Ysmall = YY[1:70,1:70]
 
 trnpct = 0.8
-run_batch(model_spec, YY, trnpct, 0.1, 0.5, 500, 200, 1, "NIPS_small_$trnpct", "../results/nips_small/")
+symmetric_split = true
+run_batch(model_spec, Ysmall, symmetric_split, trnpct, 0.3, 0.5, 300, 150, 1, "NIPS_small_$trnpct", "../results/nips_small/")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
