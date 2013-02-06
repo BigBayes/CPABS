@@ -1,5 +1,3 @@
-@everywhere require("mcmc.jl")
-@everywhere require("data_utils.jl")
 
 function train_test_split(Y::Array{Int64, 2},
                           train_pct::Float64,
@@ -39,7 +37,7 @@ function train_test_split(Y::Array{Int64, 2},
     (Ytrain, Ytest)
 end
 
-@everywhere function run_and_save(result_path, id_string, trial, mcmc_args...)
+function run_and_save(result_path, id_string, trial, mcmc_args...)
     results = mcmc(mcmc_args...)
     trial_string = "$(id_string)_$(trial)"
     models = results[end]
@@ -98,19 +96,19 @@ function run_batch(model_spec::ModelSpecification,
 
 #        remote_refs = Array(Any, num_trials)
 #
-#        for trial = 1:num_trials
-#            remote_refs[trial] = @spawn run_and_save(result_path, id_string, trial, datas[trial], lambda, 
+#        for i = 1:num_trials
+#            remote_refs[i] = @spawnat i run_and_save(result_path, id_string, i, datas[i], lambda, 
 #                         gamma, model_spec, num_iterations, burnin_iterations)
-#            println(remote_refs[trial])
+#            println(remote_refs[i])
 #        end
-#
+
 #        for trial = 1:num_trials
 #            wait(remote_refs[trial])
 #        end
 
-#        @parallel for trial = 1:num_trials
-#            run_and_save(result_path, id_string, trial, datas[trial], lambda, 
-#                         gamma, model_spec, num_iterations, burnin_iterations)
+#        @parallel for i=1:num_trials
+#            run_and_save(result_paths[i], id_strings[i], i, datas[i], lambdas[i], 
+#                         gammas[i], model_specs[i], num_iterses[i], burn_iterses[i])
 #        end
     else
         run_and_save(result_path, id_string, 1, datas[1], 

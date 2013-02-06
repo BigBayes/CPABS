@@ -383,7 +383,7 @@ function tree2array(tree::Tree,
     _2Nm1 = length(nodes)
     N::Int = (_2Nm1+1) / 2
     times = [ (1-gam)*gam^(tree.nodes[i].num_ancestors-1) for i = N+1:2N-1]
-    s, I = sortperm(times)
+    I = sortperm(times)
     II = N+I
 
     Z = zeros(N-1,4)
