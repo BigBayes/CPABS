@@ -39,10 +39,23 @@ function prior(model::ModelState,
     total_prob += sum(log(1:N))
     for i = 1:length(tree.nodes)
         total_prob -= log(tree.nodes[i].num_leaves)
-        segment_length = (1-gam)*gam^(tree.nodes[i].num_ancestors-1)
+        segment_length = get_segment_length(i, N, tree.nodes[i].num_ancestors, gam)
         total_prob += poisson_logpdf(tree.nodes[i].state, lambda * segment_length)
     end
     total_prob
+end
+
+function get_segment_length(i::Int,
+                            N::Int,
+                            num_ancestors::Int,
+                            gam::Float64)
+    if i > N
+        segment_length = gam*(1-gam)^(num_ancestors-1)
+    else
+        segment_length = (1-gam)^(num_ancestors-1)
+    end
+
+    segment_length
 end
 
 function likelihood(model::ModelState,
@@ -146,11 +159,8 @@ function psi_infsites_logpdf(model::ModelState,
         end
         for j = subtree_indices
             cur = tree.nodes[j]
-            if j <= N
-                poisson_mean = model.lambda * gam^(cur.num_ancestors + graft_node.num_ancestors)
-            else
-                poisson_mean = model.lambda * (1 - gam) * gam^(cur.num_ancestors + graft_node.num_ancestors - 1)
-            end
+            segment_length = get_segment_length(j, N, cur.num_ancestors + graft_node.num_ancestors, gam)
+            poisson_mean = model.lambda * segment_length
             subtree_probs[i] += poisson_logpdf(cur.state, poisson_mean)
         end
     end
@@ -158,11 +168,8 @@ function psi_infsites_logpdf(model::ModelState,
     for i = indices
         cur = tree.nodes[i]
 
-        if i <= N #leaf node
-            poisson_mean_before = model.lambda * gam^(cur.num_ancestors)
-        else
-            poisson_mean_before = model.lambda * (1 - gam) * gam^(cur.num_ancestors - 1)
-        end
+        segment_length = get_segment_length(i, N, cur.num_ancestors, gam)
+        poisson_mean_before = model.lambda * segment_length
 
         poisson_mean_after = poisson_mean_before * gam
         descendant_mutation_probs[i] = poisson_logpdf(cur.state, poisson_mean_after) -
@@ -674,7 +681,7 @@ function vardim_logpdf(model::ModelState,
     logprob += sum(log(1:N))
     for i = 1:length(tree.nodes)
         logprob -= log(tree.nodes[i].num_leaves)
-        segment_length = (1-gam)*gam^(tree.nodes[i].num_ancestors-1)
+        segment_length = get_segment_length(i, N, tree.nodes[i].num_ancestors, gam)
         logprob += poisson_logpdf(tree.nodes[i].state, lambda * segment_length)
     end
 
