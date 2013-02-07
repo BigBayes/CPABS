@@ -51,3 +51,12 @@ function restore(filename)
     close(stream)
     arrays
 end
+
+function restore_in_range(filename_base,
+                          index_range)
+
+    [restore("$filename_base$i.jla") for i = index_range]
+end
+
+
+

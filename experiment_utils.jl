@@ -95,45 +95,46 @@ function run_batch(model_spec::ModelSpecification,
         pmap(run_and_save, result_paths, id_strings, trials, datas, 
              lambdas, gammas, model_specs, num_iterses, burn_iterses)
 
-#        remote_refs = Array(Any, num_trials)
-#
-#        for i = 1:num_trials
-#            remote_refs[i] = @spawnat i run_and_save(result_path, id_string, i, datas[i], lambda, 
-#                         gamma, model_spec, num_iterations, burnin_iterations)
-#            println(remote_refs[i])
-#        end
-
-#        for trial = 1:num_trials
-#            wait(remote_refs[trial])
-#        end
-
-#        @parallel for i=1:num_trials
-#            run_and_save(result_paths[i], id_strings[i], i, datas[i], lambdas[i], 
-#                         gammas[i], model_specs[i], num_iterses[i], burn_iterses[i])
-#        end
     else
         run_and_save(result_path, id_string, 1, datas[1], 
              lambda, gamma, model_spec, num_iterations, burnin_iterations)
     end
 
-#    run_and_save(result_paths[1], id_strings[1], train_pcts[1], trials[1], datas[1],
-#         lambdas[1], gammas[1], model_specs[1], num_iterses[1], burn_iterses[1])
-
-#    for trial = 1:num_trials
-#        result_refs[trial] = @spawn mcmc(data, lambda, gamma, model_spec,
-#                                         num_iterations, burnin_iterations)
-#        println(result_refs[trial]) 
-#    end
-
-#    for trial = 1:num_trials
-#        trial_string = "$(id_string)_$(train_pct)_$(trial)"
-#        results[trial] = fetch(result_refs[trial])
-#        println(results[trial][1:end-1])
-#        models = results[trial][end]
-#        model = models[end]
-#        save("$result_path/metrics_$trial_string.jla", results[trial][1:end-1])
-#        save("$result_path/model_$trial_string.jla", model2array(model))
-#    end
 
 end
 
+function restore_all(result_path, id_string, num_trials)
+    trials = 1:num_trials 
+    metrics = restore_in_range("$result_path/metrics_$id_string", trials)
+    trees = restore_in_range("$result_path/trees_$id_string", trials)
+    features = restore_in_range("$result_path/features_$id_string", trials)
+    weights = restore_in_range("$result_path/weights_$id_string", trials)
+    datas = restore_in_range("$result_path/data_$id_string", trials)
+
+    results = Dict{ASCIIString, Any}()
+    results["metrics"] = metrics_array2dict(metrics)
+    results["trees"] = trees
+    results["features"] = features
+    results["weights"] = weights
+    results["datas"] = datas
+
+    results
+end
+
+function metrics_array2dict(metrics)
+    dictionaries = {Dict{ASCIIString, Array}() for i = 1:length(metrics)}
+
+    for i = 1:length(metrics)
+        metric = metrics[i]
+        dict = dictionaries[i]
+        dict["iters"] = metric[1]
+        dict["train_errors"] = metric[2]
+        dict["test_errors"] = metric[3]
+        dict["avg_test_LLs"] = metric[4]
+        dict["AUCs"] = metric[5]
+        dict["Ks"] = metric[6]
+        dict["trainLLs"] = metric[7]
+        dict["testLLs"] = metric[8]
+    end
+    dictionaries
+end

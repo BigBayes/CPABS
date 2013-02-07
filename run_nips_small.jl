@@ -20,7 +20,7 @@ Ysmall = YY[1:70,1:70]
 
 trnpct = 0.8
 symmetric_split = true
-run_batch(model_spec, Ysmall, symmetric_split, trnpct, 0.3, 0.5, 300, 150, 1, "NIPS_small_$trnpct", "../results/nips_small/")
+run_batch(model_spec, Ysmall, symmetric_split, trnpct, 0.03, 0.5, 300, 150, 1, "NIPS_small_$trnpct", "../results/nips_small/")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
