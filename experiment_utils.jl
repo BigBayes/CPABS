@@ -99,7 +99,7 @@ function run_batch(model_spec::ModelSpecification,
 
     else
         run_and_save(result_path, id_string, 1, datas[1], 
-             lambda, gamma, model_spec, num_iterations, burnin_iterations)
+             lambda, gamma, w_sigma, model_spec, num_iterations, burnin_iterations)
     end
 
 

@@ -386,24 +386,32 @@ function tree2array(tree::Tree,
     I = sortperm(times)
     II = N+I
 
+    #maps from new to original indices
+    sorted_inds = [linspace(1,N,N), II]
+
+    #maps from original to new indices
+    ind_map = zeros(length(sorted_inds))
+    ind_map[sorted_inds] = 1:length(sorted_inds)
+
+
     Z = zeros(N-1,4)
 
     for k = 1:length(II)
         i = I[k]
         ii = II[k]
-        Z[i,3] = times[i]
-        l = nodes[ii].children[1].index
-        r = nodes[ii].children[2].index
-        Z[i,1] = l
-        Z[i,2] = r
+        assert(k+N == ind_map[ii])
+
+        Z[k,3] = times[i]
+        l = ind_map[nodes[ii].children[1].index]
+        r = ind_map[nodes[ii].children[2].index]
+        Z[k,1] = l
+        Z[k,2] = r
 
         l_leaves = l <= N ? 1 : Z[l-N,4]
         r_leaves = r <= N ? 1 : Z[r-N,4]
 
-        Z[i,4] = l_leaves + r_leaves
+        Z[k,4] = l_leaves + r_leaves
     end
-
-    sorted_inds = [linspace(1,N,N), II]
 
     states = [nodes[i].state for i = sorted_inds]
 
