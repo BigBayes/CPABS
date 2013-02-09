@@ -8,6 +8,7 @@ require("slicesampler.jl")
 function mcmc(data::DataState,
               lambda::Float64,
               gamma::Float64,
+              w_sigma::Float64,
               model_spec::ModelSpecification,
               iterations::Int64,
               burnin_iterations::Int64)
@@ -38,7 +39,6 @@ function mcmc(data::DataState,
     W = randn(0,0)
     Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
-    w_sigma = 0.1;
     model = ModelState(lambda,gamma,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
     for i = 1:2N-1

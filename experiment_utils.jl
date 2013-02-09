@@ -63,6 +63,7 @@ function run_batch(model_spec::ModelSpecification,
                    train_pct::Float64,
                    lambda::Float64,
                    gamma::Float64,
+                   w_sigma::Float64,
                    num_iterations::Int,
                    burnin_iterations::Int,
                    num_trials::Int,
@@ -88,12 +89,13 @@ function run_batch(model_spec::ModelSpecification,
 
         lambdas = lambda*ones(num_trials)
         gammas = gamma*ones(num_trials)
+        sigmas = w_sigma*ones(num_trials)
         model_specs = [copy(model_spec) for i = 1:num_trials]
         num_iterses = num_iterations*ones(Int, num_trials)
         burn_iterses = burnin_iterations*ones(Int, num_trials)
 
         pmap(run_and_save, result_paths, id_strings, trials, datas, 
-             lambdas, gammas, model_specs, num_iterses, burn_iterses)
+             lambdas, gammas, sigmas, model_specs, num_iterses, burn_iterses)
 
     else
         run_and_save(result_path, id_string, 1, datas[1], 
