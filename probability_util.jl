@@ -1,3 +1,4 @@
+require("model.jl")
 
 # Utility probability functions
 function normal_logpdf(x, sigma)

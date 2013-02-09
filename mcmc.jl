@@ -38,11 +38,13 @@ function mcmc(data::DataState,
     W = randn(0,0)
     Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
-    model = ModelState(lambda,gamma,1.0,1.0,1.0,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
+    w_sigma = 0.1;
+    model = ModelState(lambda,gamma,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
     for i = 1:2N-1
         num_ancestors = tree.nodes[i].num_ancestors
-        effective_lambda = lambda* (1.0-gamma)*gamma^(num_ancestors-1)
+        #hard code lambda for initialization so we always start with some features
+        effective_lambda = 4 *gamma * (1.0-gamma)^(num_ancestors-1)
         U[i] = randpois(effective_lambda)
         if U[i] > 0
             U[i] = 1
