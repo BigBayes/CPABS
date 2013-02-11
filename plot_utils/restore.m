@@ -23,11 +23,10 @@
 % data files: The train test splits, for this run.
 %             (-1s correspond to missing, 0/1 correspond to no-link/link)
 function [arrays] = restore(filename)
-
-stream = fopen(filename,'r');
-array_size = fread(stream, 1, 'int64');
-nds = fread(stream, array_size, 'int64');
-lengths = fread(stream, sum(nds), 'int64');
+fid = fopen(filename,'r');
+array_size = fread(fid, 1, 'int64');
+nds = fread(fid, array_size, 'int64');
+lengths = fread(fid, sum(nds), 'int64');
 
 sizes = cell(array_size,1);
 
@@ -43,8 +42,8 @@ end
 
 arrays = cell(array_size,1);
 for i = 1:array_size
-    arrays{i} = fread(stream, sizes{i}', 'double');
+    arrays{i} = fread(fid, sizes{i}', 'double');
 end
 
-fclose(stream);
+fclose(fid);
 

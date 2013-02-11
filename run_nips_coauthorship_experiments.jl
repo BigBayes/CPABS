@@ -11,8 +11,9 @@ X_c = zeros((0,0))
 
 symmetric_split = true
 trnpct = 0.8
-run_batch(model_spec, YY, symmetric_split, trnpct, 0.01, 0.5, 1.0, 500, 200, 10, 
-          "NIPS_.01_$trnpct", "../results/nips/")
+lambda = 0.001
+run_batch(model_spec, YY, symmetric_split, trnpct, lambda, 0.5, 1.0, 500, 200, 10, 
+          "NIPS_$(lambda)_$trnpct", "../results/nips/")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
