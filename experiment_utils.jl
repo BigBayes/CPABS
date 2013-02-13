@@ -1,10 +1,10 @@
 require("model.jl")
 require("data_utils.jl")
-function train_test_split(Y::Array{Int64, 2},
+function train_test_split(YY::Array{Array{Int64, 2},1},
                           train_pct::Float64,
                           symmetric_split::Bool)
     assert(train_pct <= 1.0 && train_pct >= 0.0)
-   
+    Y = YY[1] 
     Ytri = triu(Y)
 
     if symmetric_split
@@ -25,15 +25,19 @@ function train_test_split(Y::Array{Int64, 2},
     end
     test_mask = 1 - train_mask
 
-    Ytrain = copy(Y)
-    Ytest = copy(Y)
-    Ytrain[find(test_mask)] = -1
-    Ytest[find(train_mask)] = -1
+    Ytrain = deepcopy(YY)
+    Ytest = deepcopy(YY)
 
-    # remove diagonal terms
-    diag_mask = diagm(ones(size(Y)[1]))
-    Ytrain[find(diag_mask)] = -1
-    Ytest[find(diag_mask)] = -1
+    for i = 1:length(YY)
+
+        Ytrain[i][find(test_mask)] = -1
+        Ytest[i][find(train_mask)] = -1
+
+        # remove diagonal terms
+        diag_mask = diagm(ones(size(Y)[1]))
+        Ytrain[i][find(diag_mask)] = -1
+        Ytest[i][find(diag_mask)] = -1
+    end
 
     (Ytrain, Ytest)
 end
@@ -45,8 +49,10 @@ function run_and_save(result_path, id_string, trial, mcmc_args...)
     model = models[end]
     data = mcmc_args[1]
     datas = Array(Any,2)
-    datas[1] = data.Ytrain
-    datas[2] = data.Ytest
+
+    # code currently assumes train/test splits are the same across all observations, so only save first observation
+    datas[1] = data.Ytrain[1]
+    datas[2] = data.Ytest[1]
     trees_array = [model2array(models[i])[1] for i = 1:length(models)]
     features_array = [model2array(models[i])[2] for i = 1:length(models)]
     weights_array = [model2array(models[i])[3] for i = 1:length(models)]
@@ -58,7 +64,7 @@ function run_and_save(result_path, id_string, trial, mcmc_args...)
 end
 
 function run_batch(model_spec::ModelSpecification,
-                   Y::Array{Int64,2},
+                   Y::Array{Array{Int64,2},1},
                    symmetric_split::Bool,
                    train_pct::Float64,
                    lambda::Float64,

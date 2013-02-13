@@ -12,7 +12,7 @@ type TreeNode{T <: Real} <: Node
     children::Array{Node,1}
     index::Int64
     num_leaves::Int64 #more accurately number of leaves
-    num_ancestors::Int64 #not self inclusive
+    num_ancestors::Int64 #self inclusive!
 end
 
 function TreeNode{T}(state::T, ind::Int64)
@@ -126,9 +126,11 @@ function Tree(U::Array{Int64,1})
         tree.nodes[i].children = [tree.nodes[l], tree.nodes[r]]
 
         tree.nodes[i].num_leaves = tree.nodes[l].num_leaves +
-                                        tree.nodes[r].num_leaves 
+                                   tree.nodes[r].num_leaves 
     end
 
+
+    tree.nodes[2N-1].num_ancestors = 1
     for i = 2N-2:-1:1
         tree.nodes[i].num_ancestors = tree.nodes[i].parent.num_ancestors + 1
     end 
@@ -220,7 +222,7 @@ function UpdateSubtreeAncestorCounts!{T}(tree::Tree{T},
             unshift!(subtree_queue, cur.children[2].index)
         end
         if cur.parent == Nil()
-            cur.num_ancestors = 0
+            cur.num_ancestors = 1
         else
             cur.num_ancestors = cur.parent.num_ancestors + 1
         end
@@ -377,12 +379,25 @@ function ConstructZ{T}(tree::Tree{T})
     sparse(Z_I, Z_J, Z_S, N, sum(U))
 end
 
+function get_segment_length(i::Int,
+                            N::Int,
+                            num_ancestors::Int,
+                            gam::Float64)
+    if i > N
+        segment_length = gam*(1-gam)^(num_ancestors-1)
+    else
+        segment_length = (1-gam)^(num_ancestors-1)
+    end
+
+    segment_length
+end
+
 function tree2array(tree::Tree,
                     gam::Float64)
     nodes = tree.nodes
     _2Nm1 = length(nodes)
     N::Int = (_2Nm1+1) / 2
-    times = [ (1-gam)*gam^(tree.nodes[i].num_ancestors-1) for i = N+1:2N-1]
+    times = [ (1-gam)^(tree.nodes[i].num_ancestors) for i = N+1:2N-1]
     I = sortperm(times)
     II = N+I
 

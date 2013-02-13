@@ -6,8 +6,8 @@ require("probability_util.jl")
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
                   data::DataState)
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
     prior(model,model_spec)+likelihood(model,model_spec,data,linspace(1,N,N))[1]
 end
 
@@ -45,26 +45,13 @@ function prior(model::ModelState,
     total_prob
 end
 
-function get_segment_length(i::Int,
-                            N::Int,
-                            num_ancestors::Int,
-                            gam::Float64)
-    if i > N
-        segment_length = gam*(1-gam)^(num_ancestors-1)
-    else
-        segment_length = (1-gam)^(num_ancestors-1)
-    end
-
-    segment_length
-end
 
 function likelihood(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
                     indices::Array{Int64,1})
-    Y = data.Ytrain
-    Ytest = data.Ytest
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
     tree = model.tree
     Z = ConstructZ(tree)
     W = model.weights
@@ -75,18 +62,22 @@ function likelihood(model::ModelState,
     total_prob = 0.0
     total_test_prob = 0.0
 
-    for i = indices
-        for j = 1:N
+    for s = 1:length(data.Ytrain)
+        Y = data.Ytrain[s]
+        Ytest = data.Ytest[s]
+        for i = indices
+            for j = 1:N
 
-#            if i == 1 && mod(j, 20) == 0
-#                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
-#            end
-            oe = compute_observed_effects(model, model_spec, data, i, j)
-            logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
-                        
-            
-            total_prob += log_logit(logit_arg, Y[i,j])
-            total_test_prob += log_logit(logit_arg, Ytest[i,j])
+    #            if i == 1 && mod(j, 20) == 0
+    #                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
+    #            end
+                oe = compute_observed_effects(model, model_spec, data, i, j)
+                logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
+                            
+                
+                total_prob += log_logit(logit_arg, Y[i,j])
+                total_test_prob += log_logit(logit_arg, Ytest[i,j])
+            end
         end
     end
     (total_prob, total_test_prob)
@@ -99,8 +90,8 @@ function test_likelihood_ij(model::ModelState,
                             i::Int,
                             j::Int)
 
-    Ytest = data.Ytest
-    (N,N) = size(Ytest)
+    YYtest = data.Ytest
+    (N,N) = size(YYtest[1])
     tree = model.tree
     W = model.weights
     beta = model.beta
@@ -112,7 +103,11 @@ function test_likelihood_ij(model::ModelState,
   
     oe = compute_observed_effects(model, model_spec, data, i, j)
     logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
-    LL = log_logit(logit_arg, Ytest[i,j]) 
+    LL = 0.0
+    for s = 1:length(YYtest)
+        Ytest = YYtest[s]
+        LL += log_logit(logit_arg, Ytest[i,j])
+    end
     (LL,logit_arg)
 end
 
@@ -128,7 +123,7 @@ function psi_infsites_logpdf(model::ModelState,
                              data::DataState,
                              pruned_index::Int64,
                              path::Array{Int64,1})
-    (N,N) = size(data.Ytrain)
+    (N,N) = size(data.Ytrain[1])
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda
@@ -159,7 +154,7 @@ function psi_infsites_logpdf(model::ModelState,
         end
         for j = subtree_indices
             cur = tree.nodes[j]
-            segment_length = get_segment_length(j, N, cur.num_ancestors + graft_node.num_ancestors, gam)
+            segment_length = get_segment_length(j, N, cur.num_ancestors + graft_node.num_ancestors - 1, gam)
             poisson_mean = model.lambda * segment_length
             subtree_probs[i] += poisson_logpdf(cur.state, poisson_mean)
         end
@@ -233,8 +228,8 @@ function psi_likelihood_logpdf(model::ModelState,
                                pruned_index::Int64,
                                path::Array{Int64,1})
 
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(data.Ytrain[1])
     tree = model.tree
     W = model.weights
 
@@ -394,8 +389,12 @@ function psi_likelihood_logpdf(model::ModelState,
 #                        println("leaf features: ", leaf_features[l2])
 #                    end
 
-                    likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
-                    likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    for s = 1:length(YY)
+                        Y = YY[s]
+                        likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
+                        likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    end
+
                     if likelihood == -Inf
                         println("leaves")
                         println(latent_effect,",",observed_parenthood_effects[j1,l2],",",observed_childhood_effects[j1,l2])
@@ -411,8 +410,12 @@ function psi_likelihood_logpdf(model::ModelState,
                         append!(subtree_leaf_features2, target_subtree_features[path_index,j2])
                     end
                     latent_effect = sum(W[t, subtree_leaf_features2]) + sum(W[t, subtree_leaf_features1]) + sum(W[t,t]) + latent_effects[path_index,j1,l2]
-                    likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
-                    #likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    for s = 1:length(YY)
+                        Y = YY[s]
+                        likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
+                        #likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                    end
+
                     if likelihood == -Inf
                         println("subtree leaves")
                         println(latent_effect,",",observed_parenthood_effects[j1,l2],",",observed_childhood_effects[j1,l2])
@@ -494,7 +497,7 @@ function W_local_logpdf(model::ModelState,
                         observed_effects::Array{Float64, 2},
                         w_old::Float64,
                         w_new::Float64)
-    Y = data.Ytrain
+    YY = data.Ytrain
     sigma = model.w_sigma 
 
     (_, npairs) = size(relevant_pairs)
@@ -509,7 +512,10 @@ function W_local_logpdf(model::ModelState,
 
         le += w_new - w_old
 
-        logprob += log_logit(le + oe, Y[i,j])
+        for s = 1:length(YY)
+            Y = YY[s]   
+            logprob += log_logit(le + oe, Y[i,j])
+        end
     end 
 
     return logprob + normal_logpdf(w_new, sigma)
@@ -528,8 +534,8 @@ function bias_logpdf(model::ModelState,
                      old_bias::Float64,
                      new_bias::Float64)
 
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
      
     b_sigma = model.b_sigma
     total_prob = 0.0
@@ -539,8 +545,10 @@ function bias_logpdf(model::ModelState,
         for j = 1:N
             oe = observed_effects[i,j] + new_bias - old_bias
             logit_arg = latent_effects[i,j] + oe
-
-            total_prob += log_logit(logit_arg, Y[i,j])
+            for s = 1:length(YY)
+                Y = YY[s]
+                total_prob += log_logit(logit_arg, Y[i,j])
+            end
         end
     end
     total_prob
@@ -564,7 +572,6 @@ function vardim_local_logpdf(model::ModelState,
                              w_new::Float64,
                              w_is_auxiliary::Bool)
 
-    Y = data.Ytrain
     (K,K) = size(model.weights)
     sigma = model.w_sigma
     if u == model.tree.nodes[node_index].state - 1
@@ -574,7 +581,7 @@ function vardim_local_logpdf(model::ModelState,
 
             # W_local_logpdf includes the prior term for w_old as if it were normal,
             # need to subtract it out here
-            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
+            logprob += aug_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
         else
             logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
@@ -584,7 +591,7 @@ function vardim_local_logpdf(model::ModelState,
             logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_old)
 
-            logprob += t_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
+            logprob += aug_logpdf( w_new, model.nu) - normal_logpdf(w_old, sigma)
         else
             logprob = W_local_logpdf(model,data,relevant_pairs, latent_effects[mixture_component_index],
                       observed_effects, w_old, w_new)
@@ -659,8 +666,8 @@ function vardim_logpdf(model::ModelState,
                        node_index::Int64,
                        effective_lambda::Float64,
                        w_is_auxiliary::Array{Bool, 2})
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
 
     b_sigma = model.b_sigma
     logprob = 0.0
@@ -691,7 +698,10 @@ function vardim_logpdf(model::ModelState,
         for j = 1:N
             le = latent_effects[i,j]
             oe = observed_effects[i,j]
-            likelihood_terms += log_logit(le + oe, Y[i,j])   
+            for s = 1:length(YY)
+                Y = YY[s]
+                likelihood_terms += log_logit(le + oe, Y[i,j])
+            end 
         end
     end
 
@@ -707,7 +717,7 @@ function vardim_logpdf(model::ModelState,
 
         for k2 = k2_range
             if w_is_auxiliary[k1,k2]
-                aug_terms += t_logpdf(W[k1,k2], nu)
+                aug_terms += aug_logpdf(W[k1,k2], nu)
             else
                 logprob += normal_logpdf(W[k1,k2], sigma)
             end
@@ -716,7 +726,7 @@ function vardim_logpdf(model::ModelState,
     #println("prior: ", logprob - LL)
 
 #    for k = find(w_is_auxiliary)
-#        logprob += t_logpdf(W[k], nu)
+#        logprob += aug_logpdf(W[k], nu)
 #    end
 #
 #    for k = find(!w_is_auxiliary)
@@ -784,7 +794,6 @@ function compute_constant_terms(model::ModelState,
                                 total_logprob::Float64)
 
     assert(length(U) > 0)
-    Y = data.Ytrain
     logprobs = total_logprob * ones(length(U))
 
     current_ind = length(U) - 1
@@ -839,7 +848,7 @@ function adjust_model_logprob(model::ModelState,
         return (0.0, 0.0, 0.0)
     end
 
-    Y = data.Ytrain
+    YY = data.Ytrain
 
     augW = model.augmented_weights
     aug_inds = get_augmented_submatrix_indices(augW, node_index, 1)
@@ -857,8 +866,8 @@ function adjust_model_logprob(model::ModelState,
     if model_spec.diagonal_W
         if L < u
             removed_ind = aug_k
-            aug_terms += t_logpdf(W[new_index,new_index], model.nu)
-            aug_terms += t_logpdf(W[removed_ind, removed_ind], model.nu)
+            aug_terms += aug_logpdf(W[new_index,new_index], model.nu)
+            aug_terms += aug_logpdf(W[removed_ind, removed_ind], model.nu)
             prior_terms -= normal_logpdf(W[removed_ind, removed_ind], model.w_sigma)
 
             rpairs = relevant_pairs[removed_ind, removed_ind]
@@ -869,11 +878,14 @@ function adjust_model_logprob(model::ModelState,
                 le = latent_effects[i,j]
                 oe = observed_effects[i,j]
                 old_le = current_latent_effects[i,j]
-                likelihood_terms += log_logit(le + oe, Y[i,j])
-                likelihood_terms -= log_logit(old_le + oe, Y[i,j]) 
+                for s = 1:length(YY)
+                    Y = YY[s]
+                    likelihood_terms += log_logit(le + oe, Y[i,j])
+                    likelihood_terms -= log_logit(old_le + oe, Y[i,j])
+                end
             end 
         elseif L == u
-            aug_terms += t_logpdf(W[new_index,new_index], model.nu)
+            aug_terms += aug_logpdf(W[new_index,new_index], model.nu)
         else 
             prior_terms += normal_logpdf(W[new_index,new_index], model.w_sigma)
             rpairs = relevant_pairs[new_index, new_index]
@@ -884,8 +896,11 @@ function adjust_model_logprob(model::ModelState,
                 le = latent_effects[i,j]
                 oe = observed_effects[i,j]
                 old_le = current_latent_effects[i,j]
-                likelihood_terms += log_logit(le + oe, Y[i,j])
-                likelihood_terms -= log_logit(old_le + oe, Y[i,j]) 
+                for s = 1:length(YY)
+                    Y = YY[s]
+                    likelihood_terms += log_logit(le + oe, Y[i,j])
+                    likelihood_terms -= log_logit(old_le + oe, Y[i,j])
+                end 
             end 
         end
     else
@@ -895,7 +910,7 @@ function adjust_model_logprob(model::ModelState,
                        (1:K)
             for k2 = k2_range
                 if L <= u
-                    aug_terms += t_logpdf(W[k1,k2], model.nu)
+                    aug_terms += aug_logpdf(W[k1,k2], model.nu)
                 else
                     prior_terms += normal_logpdf(W[k1,k2], model.w_sigma)
                 end
@@ -915,7 +930,7 @@ function adjust_model_logprob(model::ModelState,
                 end
                 for k2 = k2_range
                     if k1 != new_index && k2 != new_index
-                        aug_terms += t_logpdf(W[k1,k2], model.nu)
+                        aug_terms += aug_logpdf(W[k1,k2], model.nu)
                         prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
                     end
 
@@ -930,8 +945,11 @@ function adjust_model_logprob(model::ModelState,
                         # dirty hack to prevent double counting (ie from visiting the same
                         # pair more than once)
                         c_latent_effects[i,j] = le
-                        likelihood_terms += log_logit(le + oe, Y[i,j])
-                        likelihood_terms -= log_logit(old_le + oe, Y[i,j])
+                        for s = 1:length(YY)
+                            Y = YY[s]
+                            likelihood_terms += log_logit(le + oe, Y[i,j])
+                            likelihood_terms -= log_logit(old_le + oe, Y[i,j])
+                        end
                     end
                 end
             end
@@ -1152,9 +1170,9 @@ function compute_all_relevant_pairs(model_spec::ModelSpecification,
                                     K::Int,
                                     Z)
 
-    Y = data.Ytrain
-    Ynn = zeros(size(Y))
-    Ynn[find(Y .>= 0)] = 1
+    YY = data.Ytrain
+    Ynn = zeros(size(YY[1]))
+    Ynn[find(YY[1] .>= 0)] = 1
     Ynn = sparse(Ynn)
     relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
 
@@ -1205,9 +1223,9 @@ function compute_new_relevant_pairs(model::ModelState,
     new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
     nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K-1]
 
-    Y = data.Ytrain
-    Ynn = zeros(size(Y))
-    Ynn[find(Y .>= 0)] = 1
+    YY = data.Ytrain
+    Ynn = zeros(size(YY[1]))
+    Ynn[find(YY[1] .>= 0)] = 1
     Ynn = sparse(Ynn)
 
     new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(relevant_pairs)
@@ -1256,10 +1274,10 @@ function compute_unaugmented_prob(model::ModelState,
     if model_spec.diagonal_W
         if u < current_u
             removed_ind = start_index + u_index - 1
-            unaugmented_logprob -= t_logpdf(W[removed_ind,removed_ind], model.nu)
-            unaugmented_logprob -= t_logpdf(W[new_index,new_index], model.nu)
+            unaugmented_logprob -= aug_logpdf(W[removed_ind,removed_ind], model.nu)
+            unaugmented_logprob -= aug_logpdf(W[new_index,new_index], model.nu)
         elseif u == current_u 
-            unaugmented_logprob -= t_logpdf(W[new_index,new_index], model.nu)
+            unaugmented_logprob -= aug_logpdf(W[new_index,new_index], model.nu)
         end #if u => current_u, no changes are necessary
     else
         if u < current_u
@@ -1278,7 +1296,7 @@ function compute_unaugmented_prob(model::ModelState,
                 end
 
                 for k2 = k2_range
-                    unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
+                    unaugmented_logprob -= aug_logpdf(W[k1,k2],model.nu)
                 end
             end
         elseif u == current_u
@@ -1291,7 +1309,7 @@ function compute_unaugmented_prob(model::ModelState,
                     k2_range = k1 == new_index ? (1:K) : new_index
                 end
                 for k2 = k2_range
-                    unaugmented_logprob -= t_logpdf(W[k1,k2],model.nu)
+                    unaugmented_logprob -= aug_logpdf(W[k1,k2],model.nu)
                 end
             end
         end

@@ -22,5 +22,6 @@ perm = reverse(perm)
 top234 = perm[1:234]
 
 Y234 = convert(Array{Int64}, YY[top234, top234])
-YY = copy(Y234)
+YY = Array(Array{Int64,2},1)
+YY[1] = copy(Y234)
 

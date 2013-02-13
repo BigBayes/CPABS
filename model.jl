@@ -92,15 +92,15 @@ copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parent
 
 # Data container
 type DataState
-    Ytrain::Array{Int64,2}
-    Ytest::Array{Int64,2}
+    Ytrain::Array{Array{Int64,2},1}
+    Ytest::Array{Array{Int64,2},1}
     X_r::Array{Float64,3}
     X_p::Array{Float64,2}
     X_c::Array{Float64,2}
 end
 
-copy(data::DataState) = DataState(copy(data.Ytrain), 
-                                  copy(data.Ytest),
+copy(data::DataState) = DataState(deepcopy(data.Ytrain), 
+                                  deepcopy(data.Ytest),
                                   copy(data.X_r),
                                   copy(data.X_p),
                                   copy(data.X_c)) 

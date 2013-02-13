@@ -13,12 +13,12 @@ function mcmc(data::DataState,
               iterations::Int64,
               burnin_iterations::Int64)
 
-    Y = data.Ytrain
+    YY = data.Ytrain
     X_r = data.X_r
     X_p = data.X_p
     X_c = data.X_c
  
-    (N,N) = size(Y)
+    (N,N) = size(YY[1])
 
     if model_spec.use_pairwise
         (N1, N2, pairwise_p) = size(X_r)
@@ -45,7 +45,8 @@ function mcmc(data::DataState,
         num_ancestors = tree.nodes[i].num_ancestors
         #hard code lambda for initialization so we always start with some features
         effective_lambda = 4 *gamma * (1.0-gamma)^(num_ancestors-1)
-        U[i] = randpois(effective_lambda)
+        U[i] = effective_lambda > 10.0^-5 ? randpois(effective_lambda) : 0
+
         if U[i] > 0
             U[i] = 1
         end
@@ -157,7 +158,7 @@ function mcmc(data::DataState,
 
         if iter > burnin_iterations
             Z = ConstructZ(model.tree) 
-            testI, testJ = findn(data.Ytest .>= 0)
+            testI, testJ = findn(data.Ytest[1] .>= 0)
             total_LL = 0.0
 
             for i = 1:N
@@ -165,7 +166,7 @@ function mcmc(data::DataState,
                     testLL,logit_arg = test_likelihood_ij(model,model_spec,data,Z,i,j)
                     push!(logit_args[i,j], logit_arg)
 
-                    if data.Ytest[i,j] >= 0
+                    if data.Ytest[1][i,j] >= 0
                         push!(avg_test_likelihoods[i,j], testLL)
                         total_LL += logsumexp(avg_test_likelihoods[i,j]) - log(length(avg_test_likelihoods[i,j]))
                     end
@@ -203,8 +204,8 @@ function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState)
 
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
     tree = model.tree
     Z = ConstructZ(tree)
 
@@ -278,9 +279,9 @@ function sample_W(model::ModelState,
                   latent_effects::Array{Float64,2},
                   observed_effects::Array{Float64,2})
 
-    Y = data.Ytrain
+    YY = data.Ytrain
     (K,K) = size(model.weights)
-    (N,N) = size(Y)
+    (N,N) = size(YY[1])
     W = model.weights
 
     num_W_sweeps = 3
@@ -291,12 +292,8 @@ function sample_W(model::ModelState,
     beta_p = model.beta_p
     beta_c = model.beta_c
 
-#    tree_prior = prior(model,model_spec) 
-#    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-#    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
-    Ynn = zeros(size(Y))
-    Ynn[find(Y .>= 0)] = 1
+    Ynn = zeros(size(YY[1]))
+    Ynn[find(YY[1] .>= 0)] = 1
     Ynn = sparse(Ynn)
 
     for iter = 1:num_W_sweeps
@@ -331,35 +328,6 @@ function sample_W(model::ModelState,
 
                     latent_effects[i,j] += w_cur - w_old
                 end
-#                if k1 == 45 && k2 == 40
-#                    println(relevant_pairs)
-#                    assert(false)
-#                end
-
-#                if model_spec.debug
-#                    tree_prior = prior(model) 
-#                    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-#                    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-#
-#                    for p = 1:size(relevant_pairs)[2]
-#                        i = relevant_pairs[1,p]
-#                        j = relevant_pairs[2,p]
-#                        
-#                        le = (Z[i,:] * W * Z[j,:]')[1]
-#
-#                        if abs(le - latent_effects[i,j]) > 10.0^-6
-#                            println("p,i,j: ", (p,i,j))
-#                            println("le, latent_effects: ", (le, latent_effects[i,j]))
-#                            println("pairs: ", relevant_pairs)
-#                            (I,J) = findn(Z[:,k1]*Z[:,k2]')
-#                            println("I,J: ", (I,J))
-#                            
-#                            assert(le == latent_effects[i,j])
-#                        end
-#                    end
-#
-#                end
-
 
             end
 
@@ -385,8 +353,8 @@ function sample_Z(model::ModelState,
                   model_logprob::Float64)
 
     println("Sample Z")
-    Y = data.Ytrain
-    (N,N) = size(Y)
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
     tree = model.tree
     num_W_sweeps = 3
     num_W_slice_steps = 1
@@ -813,7 +781,7 @@ function sample_Z(model::ModelState,
                     W[k1,k2] = w_cur
 
 #                    if model_spec.debug
-#                        delta_const_terms = vardim_local_splits(new_model, Y, 
+#                        delta_const_terms = vardim_local_splits(new_model, data, 
 #                            new_relevant_pairs[k1,k2], component_latent_effects,
 #                            observed_effects, num_local_mutations, W_index_pointers,
 #                            node_index, effective_lambda, zeros(length(num_local_mutations)),
@@ -1002,10 +970,6 @@ function sample_Z(model::ModelState,
 
 
 
-#        tree_prior = prior(model) 
-#        tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-#        println("new probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
 
 #        println("new_u,weight_prob,new_weight_prob ", new_u, ",", sum(normal_logpdf(oldW, model.w_sigma )), ",", sum(normal_logpdf(new_W, model.w_sigma )))
 
@@ -1054,10 +1018,6 @@ function sample_Z(model::ModelState,
             println(logprobs - max(logprobs))
             println(full_probs - max(full_probs))
 
-
-#            tree_prior = prior(model) 
-#            tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-#            println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
 
 #            println("start: ", start_index)
@@ -1108,12 +1068,6 @@ function sample_psi(model::ModelState,
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
 
-#    tree_prior = prior(model) 
-#    tree_LL = likelihood(model, model_spec, Y, X_r, X_p, X_c, linspace(1,N,N))
-#    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
-    #for prune_index = 1:2N-1
-    
     println("psi: ")
     for prune_index = 1:N # only prune leaves, it's much faster
 
@@ -1236,9 +1190,9 @@ function construct_effects(model::ModelState,
                            data::DataState,
                            Z) #sparse or full binary array
 
-    Y = data.Ytrain
+    YY = data.Ytrain
     W = model.weights
-    (N,N) = size(Y)
+    (N,N) = size(YY[1])
     #latent_effects = zeros(Float64, (N,N))
     observed_effects = zeros(Float64, (N,N))
     for i = 1:N
