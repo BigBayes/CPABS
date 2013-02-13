@@ -43,15 +43,15 @@ end
 
 function [Z, featuresOnBranchAboveNode] = generateTMC_features(numActors, parents, children, branchLengthGamma, featureRateLambda)
 %Generate the feature matrix.  Nice wrapper function for the recursive function.
-    [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, cell(length(children),1), [], [], 0, [], length(children), 0, 1);
+    [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, cell(length(children),1), [], [], 0, [], length(children), 1);
     Z = sparse(Zsparse_i, Zsparse_j, ones(length(Zsparse_i),1), numActors, maxFeature);
 end
 
 
-function [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, featuresOnBranchAboveNode, Zsparse_i, Zsparse_j, maxFeature, featuresFromAbove, currentNode, currentTime, numAncestors)
+function [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, featuresOnBranchAboveNode, Zsparse_i, Zsparse_j, maxFeature, featuresFromAbove, currentNode, numAncestors)
 %recursive function for the tree, generate the features in the portion of the tree starting from currentNode
     if children{currentNode}(1) == -1; %leaf node
-        branchLength = 1 - currentTime;
+        branchLength = (1-branchLengthGamma)^(numAncestors-1);
         numFeaturesAboveNode = poissrnd(featureRateLambda .* branchLength);
         featuresOnBranchAboveNode{currentNode} = (maxFeature+1:maxFeature+numFeaturesAboveNode)';
         
@@ -60,11 +60,11 @@ function [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generat
         maxFeature = maxFeature + numFeaturesAboveNode;
         return;
     end
-    branchLength = (1-branchLengthGamma).* branchLengthGamma^(numAncestors-1);
+    branchLength = branchLengthGamma.* (1-branchLengthGamma)^(numAncestors-1);
     numFeaturesAboveNode = poissrnd(featureRateLambda .* branchLength);
     featuresOnBranchAboveNode{currentNode} = (maxFeature+1:maxFeature+numFeaturesAboveNode)';
-
+    maxFeature = maxFeature + numFeaturesAboveNode;
     for a = 1:length(children{currentNode})
-        [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, featuresOnBranchAboveNode, Zsparse_i, Zsparse_j, maxFeature + numFeaturesAboveNode, [featuresFromAbove; featuresOnBranchAboveNode{currentNode}], children{currentNode}(a), currentTime + branchLength, numAncestors + 1);
+        [Zsparse_i, Zsparse_j, featuresOnBranchAboveNode, maxFeature] = generateFeaturesBelow(numActors, parents, children, branchLengthGamma, featureRateLambda, featuresOnBranchAboveNode, Zsparse_i, Zsparse_j, maxFeature, [featuresFromAbove; featuresOnBranchAboveNode{currentNode}], children{currentNode}(a), numAncestors + 1);
     end
 end
