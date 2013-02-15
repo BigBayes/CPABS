@@ -9,7 +9,7 @@ X_c = zeros((0,0))
 
 trnpct = 1.0
 symmetric_split = false
-lambda = 0.001
+lambda = 0.01
 gamma = 0.9
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, 5.0, 500, 200, 5, "synthetic_L$(lambda)_G$(gamma)_P$(trnpct)", "../results/synthetic/")
 

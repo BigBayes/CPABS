@@ -1,4 +1,4 @@
-f = figure()
+f = figure();
 subplot(2,2,1);
 imagesc(Znew);
 ylabel('Actor');
@@ -14,6 +14,8 @@ subplot(2,2,3);
 imagesc(W);
 xlabel('Feature');
 ylabel('Feature');
+set(gca, 'XTick', [1,2,3,4,5]);
+set(gca, 'YTick', [1,2,3,4,5]);
 title('Feature Weights W');
 subplot(2,2,4);
 imagesc(Znew');
