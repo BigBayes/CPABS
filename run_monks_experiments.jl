@@ -10,6 +10,6 @@ X_c = zeros((0,0))
 trnpct = 0.8
 symmetric_split = false
 lambda = 0.01
-gamma = 0.9
+gamma = 0.95
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, 1.0, 500, 200, 10, "monks_L$(lambda)_G$(gamma)_P$(trnpct)", "../results/monks/")
 
