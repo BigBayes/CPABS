@@ -1,6 +1,6 @@
 using MAT
 
-synthetic_data = matopen("jimmy_synthetic/synthetic_2_julia.mat")
+synthetic_data = matopen("jimmy_synthetic/synthetic_3_julia.mat")
 
 Y = read(synthetic_data["Xnew"]);
 Z = read(synthetic_data["Znew"]);
