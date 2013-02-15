@@ -85,6 +85,7 @@ obslabels = [];
 threshold = 0.7 * max(Z(:,3));
 leafOrder = [];
 horz = false;
+logScale = false;
 
 if nargin > 3
     if isnumeric(varargin{1})
@@ -95,9 +96,9 @@ if nargin > 3
         offset = 0;
     end
     
-    pnames = {'orientation' 'colorthreshold' 'labels'  'reorder'};
-    dflts =  {orientation   'default'        obslabels leafOrder};
-    [orientation,threshold,obslabels,leafOrder,setFlag] =  ...
+    pnames = {'orientation' 'colorthreshold' 'labels'  'reorder' 'logscale'};
+    dflts =  {orientation   'default'        obslabels leafOrder logScale};
+    [orientation,threshold,obslabels,leafOrder,logScale, setFlag] =  ...
         internal.stats.parseArgs(pnames, dflts, varargin{1+offset:end});
     
     if ~isempty(orientation) && ischar(orientation)
@@ -369,6 +370,7 @@ if(~horz)
     end
 
     hold on;
+
     plot(u_x,u_y,'kd', 'MarkerFaceColor','k',...
                        'MarkerSize',8);
 
@@ -378,6 +380,10 @@ if(~horz)
     mask = logical([0 0 1 1]);
     if strcmp(orientation,'b')
         set(gca,'XAxisLocation','top','Ydir','reverse');
+    end
+
+    if logScale
+        set(gca,'YScale','log');
     end
 else
     for count = 1:(m-1)
@@ -393,6 +399,9 @@ else
     mask = logical([1 1 0 0]);
     if strcmp(orientation, 'l')
         set(gca,'YAxisLocation','right','Xdir','reverse');
+    end
+    if logScale
+        set(gca,'XScale','log');
     end
 end
 
