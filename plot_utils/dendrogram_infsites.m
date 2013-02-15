@@ -140,10 +140,22 @@ end
 % min(i,j) where i and j are the nodes under node m+k.
 ZZ = Z;
 
-for i = 1:m
+for i = 1:m-1
 
-    zl = traceback(ZZ(i,1));
-    zr = traceback(ZZ(i,2));
+    l = ZZ(i,1);
+    r = ZZ(i,2);
+
+    if l > m
+        zl = traceback(ZZ,ZZ(i,1));
+    else
+        zl = l;
+    end
+
+    if r > m
+        zr = traceback(ZZ,ZZ(i,2));
+    else
+        zr = r;
+    end
 
     if zr < zl
        ZZ(i,1:2) = ZZ(i, [2,1]);
