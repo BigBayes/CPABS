@@ -139,6 +139,17 @@ end
 % For each node currently labeled m+k, replace its index by
 % min(i,j) where i and j are the nodes under node m+k.
 ZZ = Z;
+
+for i = 1:m
+
+    zl = traceback(ZZ(i,1));
+    zr = traceback(ZZ(i,2));
+
+    if zr < zl
+       ZZ(i,1:2) = ZZ(i, [2,1]);
+    end
+end
+
 Z = transz(Z);
 T = (1:m)';
 
