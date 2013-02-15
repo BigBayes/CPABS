@@ -194,6 +194,9 @@ if (m > p) && (p ~= 0)
     m = p; % reset the number of node to be 30 (row number = 29).
 end
 
+Zpos = find(Z(:,3));
+Zmin = min(Z(Zpos,3));
+
 A = zeros(4,m-1);
 B = A;
 n = m;
@@ -202,6 +205,9 @@ Y = zeros(n,1);
 r = Y;
 
 % arrange Z into W so that there will be no crossing in the dendrogram.
+
+
+
 W = zeros(size(Z));
 W(1,:) = Z(1,:);
 
@@ -306,13 +312,17 @@ UU = zeros(m-1,2);
 
 for n = 1:(m-1)
     i = Z(n,1); j = Z(n,2); w = Z(n,3);
+
+    yi = max(Y(i), Zmin*.1);
+    yj = max(Y(j), Zmin*.1);
+
     A(:,n) = [X(i) X(i) X(j) X(j)]';
-    B(:,n) = [Y(i) w w Y(j)]';
+    B(:,n) = [yi w w yj]';
     XX(n,1) = X(i);
     XX(n,2) = X(j);
-    YY(n,1,1) = Y(i);
+    YY(n,1,1) = yi;
     YY(n,2,1) = w;
-    YY(n,1,2) = Y(j);
+    YY(n,1,2) = yj;
     YY(n,2,2) = w;
     UU(n,1) = U(ZZ(n,1));
     UU(n,2) = U(ZZ(n,2));
