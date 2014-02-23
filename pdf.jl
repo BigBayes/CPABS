@@ -1,6 +1,10 @@
 require("model.jl")
 require("tree.jl")
 require("probability_util.jl")
+
+using NumericExtensions
+import NumericExtensions.evaluate, NumericExtensions.result_type
+
 #require("profile.jl")
 #Global pdf
 function full_pdf(model::ModelState,
@@ -8,20 +12,31 @@ function full_pdf(model::ModelState,
                   data::DataState)
     YY = data.Ytrain
     (N,N) = size(YY[1])
-    prior(model,model_spec)+likelihood(model,model_spec,data,linspace(1,N,N))[1]
+    prior(model,model_spec)+likelihood(model,model_spec,data,[1:N])[1]
 end
 
 function prior(model::ModelState,
                model_spec::ModelSpecification)
     w_sigma = model.w_sigma
     b_sigma = model.b_sigma
+
+    
+    if model_spec.positive_W
+        W = exp(model.weights)
+        W_pdf = exp_logpdf
+        W_jacobian = (W) -> W
+    else
+        W = model.weights
+        W_pdf = normal_logpdf
+        W_jacobian = (W) -> 0.0
+    end
  
     if model_spec.diagonal_W && length(model.weights) > 0
-        total_prob = sum(normal_logpdf(diag(model.weights), w_sigma ))
+        total_prob = sum(W_pdf(diag(W), w_sigma ))
     elseif model_spec.symmetric_W
-        total_prob = sum(normal_logpdf(tril(model.weights), w_sigma ))
+        total_prob = sum(tril(W_pdf(model.weights, w_sigma )))
     else
-        total_prob = sum(normal_logpdf(model.weights, w_sigma ))
+        total_prob = sum(W_pdf(model.weights, w_sigma ))
     end
 
     total_prob += sum(normal_logpdf(model.beta, b_sigma))
@@ -36,9 +51,14 @@ function prior(model::ModelState,
     tree = model.tree
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
-    total_prob += sum(log(1:N))
     for i = 1:length(tree.nodes)
-        total_prob -= log(tree.nodes[i].num_leaves)
+        if i > N
+            left_child = tree.nodes[i].children[1]
+            right_child = tree.nodes[i].children[2]
+            left_prob = tree.nodes[i].p_left
+            total_prob += left_child.num_leaves * log(left_prob)
+            total_prob += right_child.num_leaves * log(1.0 - left_prob)
+        end
         segment_length = get_segment_length(i, N, tree.nodes[i].num_ancestors, gam)
         total_prob += poisson_logpdf(tree.nodes[i].state, lambda * segment_length)
     end
@@ -194,7 +214,7 @@ function psi_infsites_logpdf(model::ModelState,
         features_end = weight_indices[i] + cur.state - 1
 
         if contains(path, i)
-            (U, V) = all_splits(linspace(features_start, features_end, cur.state))
+            (U, V) = all_splits([features_start:features_end])
             for j = 1:length(U)
                 u = U[j]
                 v = V[j]
@@ -272,7 +292,7 @@ function psi_likelihood_logpdf(model::ModelState,
         features_start = weight_indices[i]
         features_end = features_start + cur.state - 1
 
-        cur_features = linspace(features_start, features_end, cur.state)
+        cur_features = [features_start:features_end] 
 
         # cycle through all subtree leaves, find if the current node is its ancestor
         # and if so add the current node's features to the leaf's features for 
@@ -337,7 +357,7 @@ function psi_likelihood_logpdf(model::ModelState,
                 features_start = weight_indices[parent.index]
                 features_end = features_start + parent.state - 1
 
-                new_features = linspace(features_start, features_end, parent.state)
+                new_features = [features_start:features_end]
                 target_subtree_features[path_index,j1] = copy(target_subtree_features[parent_path_index,j1])
                 append!(target_subtree_features[path_index,j1], new_features)
 
@@ -360,7 +380,7 @@ function psi_likelihood_logpdf(model::ModelState,
         features_start = weight_indices[i]
         features_end = weight_indices[i] + cur.state - 1
 
-        (V, T) = all_splits(linspace(features_start, features_end, cur.state))
+        (V, T) = all_splits([features_start:features_end])
 
         #do everything in reverse
         rT = reverse(T)
@@ -433,15 +453,52 @@ function psi_likelihood_logpdf(model::ModelState,
     (likelihoods, tree_states)
 end
 
-# log \prod M_i for all valid grafting points
+## log \prod M_i for all valid grafting points
+#function prior_tree(tree::Tree,
+#                    pruned_index::Int)
+#    N::Int = (length(tree.nodes) + 1) / 2
+#
+#    # -log \prod M_i for all points below current one, both original and 
+#    # for grafted trees where the subtree was grafted below the current node
+#    original_probs = -Inf*ones(2N - 1)
+#    new_probs = -Inf*ones(2N - 1)
+#
+#    subtree_indices = GetSubtreeIndicies(tree, pruned_index)
+#
+#    i = 1
+#    while contains(subtree_indices, i)
+#        i += 1
+#    end
+#    root = FindRoot(tree, i)
+#
+#    # indices will contain a leaves to root ordering of nodes in the pruned tree
+#    indices = GetLeafToRootOrdering(tree, root.index)
+#
+#    for i = indices
+#        cur = tree.nodes[i]
+#        original_probs[i] = -log(max(cur.num_leaves - 1, 1))
+#        new_probs[i] = -log(cur.num_leaves + tree.nodes[pruned_index].num_leaves - 1)
+#        if i > N
+#            for j = 1:2
+#                child_original_prob = original_probs[cur.children[j].index]
+#                child_new_prob = new_probs[cur.children[j].index]
+#                if child_original_prob == -Inf || child_new_prob == -Inf
+#                    assert(in(subtree_indices, cur.children[j].index))
+#                end
+#                original_probs[i] += child_original_prob
+#                new_probs[i] += child_new_prob
+#            end
+#        end
+#    end
+#
+#    new_probs - original_probs
+#end
+
 function prior_tree(tree::Tree,
                     pruned_index::Int)
     N::Int = (length(tree.nodes) + 1) / 2
 
-    # -log \prod M_i for all points below current one, both original and 
-    # for grafted trees where the subtree was grafted below the current node
-    original_probs = -Inf*ones(2N - 1)
-    new_probs = -Inf*ones(2N - 1)
+    prob_diffs = -Inf*ones(2N - 1)
 
     subtree_indices = GetSubtreeIndicies(tree, pruned_index)
 
@@ -454,24 +511,30 @@ function prior_tree(tree::Tree,
     # indices will contain a leaves to root ordering of nodes in the pruned tree
     indices = GetLeafToRootOrdering(tree, root.index)
 
+    pruned_node = tree.nodes[pruned_index]
+    pruned_parent = pruned_node.parent
+
+    self_direction = find(pruned_parent.children .== pruned_node)
+    p_prob = pruned_parent.p_left
+    p_prob = self_direction == 2 ? 1-p_prob : p_prob
+
     for i = indices
         cur = tree.nodes[i]
-        original_probs[i] = -log(max(cur.num_leaves - 1, 1))
-        new_probs[i] = -log(cur.num_leaves + tree.nodes[pruned_index].num_leaves - 1)
-        if i > N
-            for j = 1:2
-                child_original_prob = original_probs[cur.children[j].index]
-                child_new_prob = new_probs[cur.children[j].index]
-                if child_original_prob == -Inf || child_new_prob == -Inf
-                    assert(contains(subtree_indices, cur.children[j].index))
-                end
-                original_probs[i] += child_original_prob
-                new_probs[i] += child_new_prob
-            end
-        end
-    end
+        num_leaves = cur.num_leaves
 
-    new_probs - original_probs
+        parent = cur.parent
+        if i == root.index
+            gp_prob = 1.0
+        else
+            parent_direction = find( parent.children .== cur )[1]
+            gp_prob = parent.p_left
+            gp_prob = parent_direction == 2 ? 1-gp_prob : gp_prob
+        end
+       
+        prob_diffs[i] = num_leaves * log(p_prob) + log(gp_prob)
+ 
+    end
+    prob_diffs
 end
 
 # log \prod M_i for a path starting at leaf node_index
@@ -521,6 +584,103 @@ function W_local_logpdf(model::ModelState,
     return logprob + normal_logpdf(w_new, sigma)
 end
 
+function log_logistic{T<:FloatingPoint}(effect::T, y::T)
+    value = 0.0
+    value = -(one(T)-y)*effect - log(one(T)+exp(-effect))
+    if isinf(value)
+        value = 0.0
+    end
+    return value
+end
+
+function log_logistic_dx(effect, y)
+    -(1-y) + exp(-effect)/(1+exp(-effect))
+end
+
+#type LogLogistic <: BinaryFunctor end
+#evaluate(::LogLogistic, x::Number, y::Number) = log_logistic(x,y)
+#result_type(::LogLogistic, t1::Type, t2::Type) = promote_type(t1,t2)
+
+
+# pdf for updating all elements of W
+function W_full_logpdf(model::ModelState,
+                       model_spec::ModelSpecification,
+                       data::DataState,
+                       Z::Matrix{Int},
+                       observed_effects::Array{Float64, 2})
+    YY = data.Ytrain
+    sigma = model.w_sigma
+
+    if model_spec.positive_W
+        W = exp(model.weights)
+    else
+        W = model.weights
+    end
+
+    latent_effects = Z*W*Z' 
+    effects = latent_effects + observed_effects
+
+    log_probs = 0.0 
+
+    for p = 1:length(YY)
+        Y = YY[p]
+
+        log_probs_t = broadcast(log_logistic, effects, Y) 
+        n_inds = find(Y .< 0)
+        log_probs_t[n_inds] = 0.0
+        log_probs += log_probs_t
+    end
+
+    if model_spec.positive_W # W is represented in log space 
+        return sum(sum(log_probs)) + sum(exp_logpdf(W, sigma)) + sum(model.weights)
+    else
+        return sum(sum(log_probs)) + sum(normal_logpdf(W, sigma))
+    end
+end
+
+function W_full_logpdf_gradient(model::ModelState,
+                                model_spec::ModelSpecification,
+                                data::DataState,
+                                Z::Matrix{Int},
+                                observed_effects::Array{Float64, 2})
+
+    YY = data.Ytrain
+    sigma = model.w_sigma
+
+    if model_spec.positive_W
+        W = exp(model.weights)
+    else
+        W = model.weights
+    end
+
+     
+    latent_effects = Z*W*Z' 
+
+    effects = latent_effects + observed_effects
+
+    log_sigmoid_gradient = 0.0
+    for p = 1:length(YY)
+        Y = YY[p]
+
+        gradient = broadcast(log_logistic_dx, effects, Y)
+        n_inds = find(Y .< 0)
+        gradient[n_inds] = 0.0
+        log_sigmoid_gradient += gradient
+    end
+
+    ZLZ = Z'*log_sigmoid_gradient*Z
+    LL_grad = ZLZ.*W
+
+    
+
+    if model_spec.positive_W # W is represented in log space 
+        return LL_grad + exp_logpdf_dx(W, sigma) + ones(size(W))
+    else
+        ngrad = normal_logpdf_dx(W, sigma)
+        return LL_grad + normal_logpdf_dx(W, sigma)
+    end
+
+end
 ###################################
 ###### pdfs for bias updates ######
 ###################################
@@ -1074,7 +1234,7 @@ function adjust_latent_effects(model::ModelState,
         assert(aug_k < new_k || new_k == 0)
 
         removed_k = aug_k
-        k_range0 = linspace(1,K,K)
+        k_range0 = [1:K]
         # latent effects assumes new dimensions haven't been added, so don't remove them!
         if new_k != 0 # only need to worry about new dimension if we have one
             delete!(k_range0, new_k)

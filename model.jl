@@ -23,7 +23,7 @@ function AugmentedMatrix(N::Int, W::Array{Float64,2}, feature_counts::Array{Int,
     feature_pointers = [Int[] for x = 1:N]
     next_index = 1 
     for i = 1:N
-        append!(feature_pointers[i],linspace(next_index, next_index + feature_counts[i] - 1, feature_counts[i]))
+        append!(feature_pointers[i],[next_index:next_index + feature_counts[i] - 1])
         next_index += feature_counts[i]
     end
     AugmentedMatrix(copy(W), N, feature_pointers, feature_counts, size(W)[1]+1)
@@ -73,6 +73,7 @@ type ModelSpecification
     use_childhood::Bool
     symmetric_W::Bool
     diagonal_W::Bool
+    positive_W::Bool
 
     # Inference Params
     rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
@@ -85,6 +86,7 @@ end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parenthood,
                                    ms.use_childhood, ms.symmetric_W, ms.diagonal_W,
+                                   ms.positive_W,
                                    copy(ms.rrj_jump_probabilities), 
                                    ms.global_move_probability,
                                    ms.Z_sample_branch_prob,
@@ -92,8 +94,8 @@ copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parent
 
 # Data container
 type DataState
-    Ytrain::Array{Array{Int64,2},1}
-    Ytest::Array{Array{Int64,2},1}
+    Ytrain::Array{Array{Float64,2},1}
+    Ytest::Array{Array{Float64,2},1}
     X_r::Array{Float64,3}
     X_p::Array{Float64,2}
     X_c::Array{Float64,2}
@@ -127,11 +129,11 @@ function prune_tree!(model::ModelState,
     sibling_end = sibling_start + sibling.state - 1
     parent_end = parent_start + parent.state - 1
 
-    weight_permutation = linspace(1,size(model.weights)[1],size(model.weights)[1])
+    weight_permutation = [1:size(model.weights)[1]]
 
 
     if sibling_start < parent_start
-        delete!(weight_permutation, parent_start:parent_end)
+        splice!(weight_permutation, parent_start:parent_end)
     
         for p = reverse(parent_start:parent_end)
             insert!(weight_permutation, sibling_end + 1, p)
@@ -141,7 +143,7 @@ function prune_tree!(model::ModelState,
             insert!(weight_permutation, sibling_end + 1, p)
         end
 
-        delete!(weight_permutation, parent_start:parent_end)
+        splice!(weight_permutation, parent_start:parent_end)
     end
 
     permute_rows_and_cols!(model.weights, weight_permutation)
@@ -150,7 +152,7 @@ function prune_tree!(model::ModelState,
     aug_W = model.augmented_weights
     num_features = aug_W.num_active_features[parent.index]
     move_features(aug_W,
-                  linspace(1,num_features,num_features),
+                  [1:num_features],
                   parent.index,
                   sibling.index) 
 
@@ -179,19 +181,19 @@ function graft_tree!(model::ModelState,
     graftpoint_end = graftpoint_start + graftnode.state - 1
     parent_end = parent_start + parent.state - 1
 
-    weight_permutation = linspace(1, size(model.weights)[1], size(model.weights)[1])
+    weight_permutation = [1:size(model.weights)[1]]
 
     if graftpoint_start < parent_start
         for p = reverse(parent_features)
             insert!(weight_permutation, parent_start, p)
         end
 
-        delete!(weight_permutation, graftpoint_start:graftpoint_end)
+        splice!(weight_permutation, graftpoint_start:graftpoint_end)
         for p = reverse(graftpoint_features)
             insert!(weight_permutation, graftpoint_start, p)
         end
     else
-        delete!(weight_permutation, graftpoint_start:graftpoint_end)
+        splice!(weight_permutation, graftpoint_start:graftpoint_end)
         for p = reverse(graftpoint_features)
             insert!(weight_permutation, graftpoint_start, p)
         end
@@ -206,7 +208,9 @@ function graft_tree!(model::ModelState,
     # adjust augmented matrix
     aug_W = model.augmented_weights
     # augmented_weights feature offsets are relative, given ones are absolute
-    aug_parent_features = parent_features - min([graftpoint_features, parent_features]) + 1
+    all_features = [graftpoint_features, parent_features]
+    offset = length(all_features) > 0 ? -min(all_features) + 1 : 0
+    aug_parent_features = parent_features + offset 
     move_features(aug_W, aug_parent_features, graftnode.index, parent.index)
 
     graftnode.state = length(graftpoint_features)
@@ -282,7 +286,7 @@ function add_new_features(augmented_matrix::AugmentedMatrix,
                           num_features::Int)
     next_index = augmented_matrix.next_novel_index
     end_index = next_index + num_features - 1
-    new_features = linspace(next_index,end_index,num_features)
+    new_features = [next_index:end_index]
 
     matrix_size = size(augmented_matrix.matrix)[1]
     if end_index > matrix_size 
@@ -300,7 +304,7 @@ function deactivate_feature(augmented_matrix::AugmentedMatrix,
     num_features = augmented_matrix.num_active_features[augmented_set_index]
     el = feature_pointers[feature_index]
 
-    delete!(feature_pointers, feature_index)
+    splice!(feature_pointers, feature_index)
     insert!(feature_pointers, num_features, el) #insert el as next augmented feature
     augmented_matrix.num_active_features[augmented_set_index] -= 1
 end
@@ -330,7 +334,7 @@ function move_features(augmented_matrix,
     for feature_index = rev_indices
         el = source_pointers[feature_index]
         push!(els, el)
-        delete!(source_pointers, feature_index)
+        splice!(source_pointers, feature_index)
         num_features[source_index] -= 1
     end
 
@@ -355,7 +359,7 @@ function model2array(model::ModelState)
         u = model.tree.nodes[i].state
         end_index = start_index + u - 1
 
-        feature_indices[i] = linspace(start_index,end_index,u) 
+        feature_indices[i] = [start_index:end_index]
     end
 
     permuted_features = feature_indices[inds]

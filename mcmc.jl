@@ -2,7 +2,10 @@ require("model.jl")
 require("tree.jl")
 require("probability_util.jl")
 require("pdf.jl")
+
 require("slicesampler.jl")
+require("refractive_sampler.jl")
+require("hmc.jl")
 
 #@profile begin
 function mcmc(data::DataState,
@@ -39,6 +42,7 @@ function mcmc(data::DataState,
     W = randn(0,0)
     Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
+    InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
     model = ModelState(lambda,gamma,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
     for i = 1:2N-1
@@ -108,8 +112,8 @@ function mcmc(data::DataState,
 #    start_index = weight_indices2[sib_ind]
 #    end_index = start_index + st2 - 1
 #
-#    parent_features = linspace(start_index + st1,end_index,st2 - st1)
-#    sibling_features = linspace(start_index,start_index + st1 - 1,st1)
+#    parent_features = [start_index + st1:end_index] 
+#    sibling_features = [start_index:start_index + st1 - 1]
 #    graft_tree!(model,prune_index, sib_ind, parent_features, sibling_features)
 #
 #    assert(tree_copy == tree)
@@ -143,7 +147,7 @@ function mcmc(data::DataState,
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
-        tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+        tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
         if iter == 2 && debug
@@ -214,7 +218,7 @@ function mcmc_sweep(model::ModelState,
 
     sample_bias(model, model_spec, data, latent_effects, observed_effects)
     tree_prior = prior(model,model_spec) 
-    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
     psi_time = time()
@@ -222,19 +226,23 @@ function mcmc_sweep(model::ModelState,
     psi_time = time() - psi_time
 
     tree_prior = prior(model,model_spec) 
-    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
+    UpdateBetaSplits(model.tree, (a,b) -> rand(Beta(a+1, b+1)))
 
     W_time = time()
     Z = ConstructZ(tree)
     (latent_effects, observed_effects) = 
         construct_effects(model, model_spec, data, Z)
-    sample_W(model, model_spec, data, Z, latent_effects, observed_effects)
+
+    #sample_W(model, model_spec, data, Z, latent_effects, observed_effects)
+    sample_W_full(model, model_spec, data, Z, observed_effects)
+
     W_time = time() - W_time
 
     tree_prior = prior(model,model_spec) 
-    tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+    tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
     vardim_time = time()
@@ -298,6 +306,9 @@ function sample_W(model::ModelState,
 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
+
+
+
         for k1 = 1:K
             k2_range = model_spec.diagonal_W ? k1 :
                        model_spec.symmetric_W ? (1:k1) :
@@ -344,6 +355,63 @@ function sample_W(model::ModelState,
     model.augmented_weights[inds,inds] = W
 
 end
+
+function sample_W_full(model::ModelState,
+                       model_spec::ModelSpecification,
+                       data::DataState,
+                       Z,#sparse or full 2d array
+                       observed_effects::Array{Float64,2})
+
+    YY = data.Ytrain
+    (K,K) = size(model.weights)
+    (N,N) = size(YY[1])
+    W = copy(model.weights)
+
+    num_W_sweeps = 3
+
+    if model_spec.symmetric_W
+        A = ones(K,K)
+        triu_inds = find(triu(A))
+        vectorize = x -> x[triu_inds]
+        devectorize = x -> (A = zeros(K,K); A[triu_inds] = x; symmetrize(A)) 
+    elseif model_spec.diagonal_W
+        vectorize = x -> diag(x)
+        devectorize = x -> diagm(x)
+    else
+        vectorize = x -> x[:]
+        devectorize = x -> reshape(x, (K,K))
+    end
+
+    temp_model = copy(model) 
+
+    function W_logpdf_vectorized(x::Vector{Float64})
+        W_matrix = devectorize(x)
+        temp_model.weights = W_matrix
+        W_full_logpdf(temp_model, model_spec, data, Z, observed_effects)
+    end
+    function W_logpdf_gradient_vectorized(x::Vector{Float64})
+        W_matrix = devectorize(x)
+        temp_model.weights = W_matrix
+        grad = W_full_logpdf_gradient(temp_model, model_spec, data, Z, observed_effects)
+        vectorize(grad)
+    end
+
+    hmc_opts = @options L=4 stepsize=0.01
+
+    W = vectorize(W) 
+    for iter = 1:num_W_sweeps
+        println("W sampling sweep ", iter,"/",num_W_sweeps)
+        
+        W = hmc_sampler(W, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
+    end
+
+    W = devectorize(W)
+    model.weights = W
+
+    inds = get_augmented_submatrix_indices(model.augmented_weights, 1, 0)
+    model.augmented_weights[inds,inds] = W
+end
+
 
 function sample_Z(model::ModelState,
                   model_spec::ModelSpecification,
@@ -502,7 +570,7 @@ function sample_Z(model::ModelState,
             aug_k = old_W_index_pointers[node_index] + aug_u - 1
             aug_new_k = old_W_index_pointers[node_index] + u - 1
 
-            permutation = linspace(1, oldK, oldK)
+            permutation = [1:oldK]
             permutation[aug_k] = aug_new_k
             permutation[aug_new_k] = aug_k
             
@@ -1002,7 +1070,7 @@ function sample_Z(model::ModelState,
                 new_model.tree.nodes[node_index].state = new_uu
 
                 tree_prior = prior(new_model,model_spec) 
-                tree_LL, test_LL = likelihood(new_model, model_spec, data, linspace(1,N,N))
+                tree_LL, test_LL = likelihood(new_model, model_spec, data, [1:N])
                 full_probs[cmp] = tree_prior + tree_LL
                 if cmp == sampled_component
                     str = "*tree probability["
@@ -1038,7 +1106,7 @@ function sample_Z(model::ModelState,
 
         if model_spec.debug && new_u - L > 0
             tree_prior = prior(model,model_spec) 
-            tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+            tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
         end
 
 
@@ -1179,7 +1247,7 @@ function sample_psi(model::ModelState,
             println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
 
             tree_prior = prior(model, model_spec) 
-            tree_LL, test_LL = likelihood(model, model_spec, data, linspace(1,N,N))
+            tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
             println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
         end
     end

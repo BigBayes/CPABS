@@ -11,12 +11,14 @@ type TreeNode{T <: Real} <: Node
     parent::Node
     children::Array{Node,1}
     index::Int64
-    num_leaves::Int64 #more accurately number of leaves
+    num_leaves::Int64 #number of leaves in subtree
     num_ancestors::Int64 #self inclusive!
+    p_left::Float64 #splitting point in Aldous beta-splitting representation, 
+                       #represented as the prob. mass of the left branch
 end
 
 function TreeNode{T}(state::T, ind::Int64)
-    TreeNode{T}(state,Nil(),Array(Node,2),ind,1,0)
+    TreeNode{T}(state,Nil(),Array(Node,2),ind,1,0,1.0)
 end
 
 show(tree_node::TreeNode) = print(tree_node.index)
@@ -64,6 +66,7 @@ function copy(tree::Tree{Int64})
         new_tree.nodes[i] = copy(tree.nodes[i])
         new_tree.nodes[i].num_ancestors = tree.nodes[i].num_ancestors
         new_tree.nodes[i].num_leaves = tree.nodes[i].num_leaves
+        new_tree.nodes[i].p_left = tree.nodes[i].p_left
     end
 
     for i = 1:n
@@ -97,7 +100,7 @@ function Tree(U::Array{Int64,1})
         tree.nodes[i].children[1] = Nil();
         tree.nodes[i].children[2] = Nil();
     end
-    coalescing_nodes = linspace(1,N,N)
+    coalescing_nodes = [1:N]
     coalescing_nodes_remaining = N
 
     for i = N+1:2N-1
@@ -115,11 +118,17 @@ function Tree(U::Array{Int64,1})
         #update the set of nodes remaining
         m_ind = min(l_ind,r_ind)
         x_ind = max(l_ind,r_ind)
-        delete!(coalescing_nodes, x_ind)
-        delete!(coalescing_nodes, m_ind)
+        splice!(coalescing_nodes, x_ind)
+        splice!(coalescing_nodes, m_ind)
         push!(coalescing_nodes, i)
         coalescing_nodes_remaining -= 1
-     
+   
+#        println("i,l,r: $i $l $r")
+#        println("tree.nodes[i]: $(tree.nodes[i])") 
+#        println("tree.nodes[l]: $(tree.nodes[l])") 
+#        println("tree.nodes[r]: $(tree.nodes[r])") 
+#
+ 
         tree.nodes[l].parent = tree.nodes[i]
         tree.nodes[r].parent = tree.nodes[i]
 
@@ -325,7 +334,7 @@ function GetSubtreeIndicies{T}(tree::Tree{T},
         if cur.children[2] != Nil()
             unshift!(queue, cur.children[2].index)
         end
-        add!(subtree_indices, cur.index)
+        push!(subtree_indices, cur.index)
     end
 
     subtree_indices
@@ -353,6 +362,29 @@ function GetLeafToRootOrdering{T}(tree::Tree{T},
     reverse(stack)
 end
 
+function InitializeBetaSplits{T}(tree::Tree{T},
+                                 draw_split::Function)
+
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    for i = N+1:2N-1
+        tree.nodes[i].p_left = draw_split()
+    end
+end
+
+function UpdateBetaSplits{T}(tree::Tree{T},
+                             update_split::Function)
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    for i = N+1:2N-1
+        cur = tree.nodes[i]
+        left_child = cur.children[1]
+        right_child = cur.children[2]
+
+        cur.p_left = update_split(left_child.num_leaves, right_child.num_leaves)
+    end
+end
+
 function ConstructZ{T}(tree::Tree{T})
     N::Int = (length(tree.nodes) + 1) / 2
     U = zeros(Int64, 2N - 1)
@@ -376,7 +408,7 @@ function ConstructZ{T}(tree::Tree{T})
             end
         end
     end
-    sparse(Z_I, Z_J, Z_S, N, sum(U))
+    full(sparse(Z_I, Z_J, Z_S, N, sum(U)))
 end
 
 function get_segment_length(i::Int,
@@ -402,7 +434,7 @@ function tree2array(tree::Tree,
     II = N+I
 
     #maps from new to original indices
-    sorted_inds = [linspace(1,N,N), II]
+    sorted_inds = [[1:N], II]
 
     #maps from original to new indices
     ind_map = zeros(length(sorted_inds))

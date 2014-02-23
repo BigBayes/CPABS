@@ -1,6 +1,6 @@
 require("model.jl")
 require("data_utils.jl")
-function train_test_split(YY::Array{Array{Int64, 2},1},
+function train_test_split(YY::Array{Array{Float64, 2},1},
                           train_pct::Float64,
                           symmetric_split::Bool)
     assert(train_pct <= 1.0 && train_pct >= 0.0)
@@ -64,7 +64,7 @@ function run_and_save(result_path, id_string, trial, mcmc_args...)
 end
 
 function run_batch(model_spec::ModelSpecification,
-                   Y::Array{Array{Int64,2},1},
+                   Y::Array{Array{Float64,2},1},
                    symmetric_split::Bool,
                    train_pct::Float64,
                    lambda::Float64,
@@ -91,7 +91,7 @@ function run_batch(model_spec::ModelSpecification,
     if num_trials > 1
         result_paths = [copy(result_path) for i = 1:num_trials]
         id_strings = [copy(id_string) for i = 1:num_trials]
-        trials = linspace(1,num_trials,num_trials)
+        trials = [1:num_trials]
 
         lambdas = lambda*ones(num_trials)
         gammas = gamma*ones(num_trials)
