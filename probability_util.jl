@@ -1,5 +1,9 @@
 require("model.jl")
 
+function incomplete_gamma(t::Float64, b::Float64)
+    quadgk(x -> x^(t-1)*exp(-x), zero(t), b, reltol=100*eps(t))[1]
+end
+
 # Utility probability functions
 function normal_logpdf(x, sigma)
     -x.*x/(2sigma*sigma) - 0.5log(2pi) - log(sigma)
@@ -18,6 +22,9 @@ function exp_logpdf_dx(x, scale)
 end
 
 function poisson_logpdf(k,lambda)
+    if lambda == 0.0 && k == 0
+        return 0.0
+    end
     -lambda + k*log(lambda) - sum(log(1:k))
 end
 

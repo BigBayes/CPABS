@@ -10,7 +10,7 @@ require("hmc.jl")
 #@profile begin
 function mcmc(data::DataState,
               lambda::Float64,
-              gamma::Float64,
+              gam::Float64,
               w_sigma::Float64,
               model_spec::ModelSpecification,
               iterations::Int64,
@@ -43,12 +43,12 @@ function mcmc(data::DataState,
     Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
-    model = ModelState(lambda,gamma,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
+    model = ModelState(lambda,gam,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
 
-    for i = 1:2N-1
+    for i = 1:2N-2 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
         #hard code lambda for initialization so we always start with some features
-        effective_lambda = 4 *gamma * (1.0-gamma)^(num_ancestors-1)
+        effective_lambda = 4 * (0.5)^(num_ancestors-1)
         U[i] = effective_lambda > 10.0^-5 ? randpois(effective_lambda) : 0
 
         if U[i] > 0
@@ -229,7 +229,13 @@ function mcmc_sweep(model::ModelState,
     tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
-    UpdateBetaSplits(model.tree, (a,b) -> rand(Beta(a+1, b+1)))
+    slice_iterations = 1
+    rho_time = time()
+    sample_rho_rhot(model, model_spec, slice_iterations)
+    rho_time = time() - rho_time
+    tree_prior = prior(model,model_spec) 
+    tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
+    println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
     W_time = time()
     Z = ConstructZ(tree)
@@ -253,7 +259,7 @@ function mcmc_sweep(model::ModelState,
     vardim_time = time() - vardim_time
 
     (K,K) = size(model.weights)
-    println("MCMC Timings (psi, W, vardim) = ", (psi_time, W_time, vardim_time))
+    println("MCMC Timings (psi, rho, W, vardim) = ", (psi_time, rho_time, W_time, vardim_time))
     println("K: ", K)
 end
 
@@ -396,7 +402,7 @@ function sample_W_full(model::ModelState,
         vectorize(grad)
     end
 
-    hmc_opts = @options L=4 stepsize=0.01
+    hmc_opts = @options L=4 stepsize=0.02
 
     W = vectorize(W) 
     for iter = 1:num_W_sweeps
@@ -431,6 +437,21 @@ function sample_Z(model::ModelState,
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
     root_to_leaf = reverse(leaf_to_root)
 
+
+    mu = ones(2N - 1)
+    for i = root_to_leaf
+        cur = tree.nodes[i]
+        parent = cur.parent    
+
+        if i != root.index
+            self_direction = find(parent.children .== cur)
+            cur_mu_prop = self_direction == 1 ? (1-parent.rho) : parent.rho
+            cur_mu_prop *= parent.rhot
+            mu[i] = mu[parent.index]*cur_mu_prop
+        end
+    end
+
+
     Z = ConstructZ(tree)
     (K, K) = size(model.weights)
     #Array(Array{Int64, 2}, (K,K))
@@ -442,6 +463,12 @@ function sample_Z(model::ModelState,
     for rtl_index = 1:length(root_to_leaf)
         tree = model.tree #make sure after copies to model we have the right tree ref
         node_index = root_to_leaf[rtl_index]
+        
+        # root node cannot have features above it
+        if node_index == root.index
+            continue
+        end
+        parent_index = tree.nodes[node_index].parent.index
 
         if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
             percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
@@ -484,7 +511,7 @@ function sample_Z(model::ModelState,
         end
         assert(all(model.augmented_weights.num_active_features .== tU))
 
-        effective_lambda = model.lambda * (1 - model.gamma) * model.gamma^(tree.nodes[node_index].num_ancestors - 1)
+        effective_lambda = model.lambda * (mu[parent_index]^model.gamma - mu[node_index]^model.gamma)
 
         (K, K) = size(model.weights)
         
@@ -753,6 +780,7 @@ function sample_Z(model::ModelState,
 
         # "constant" terms needed so that the sum of the different mixture components
         # is done with each scaled correctly when performing local pdf computations
+        # ie conditionals are not enough when the total mixture is in the joint space
         const_terms = compute_constant_terms(new_model, model_spec, data, 
                           new_relevant_pairs, component_latent_effects,
                           observed_effects, num_local_mutations, new_W_index_pointers,
@@ -1126,6 +1154,115 @@ function sample_Z(model::ModelState,
     end
 end
 
+function sample_rho_rhot(model::ModelState,
+                         model_spec::ModelSpecification,
+                         slice_iterations::Int)
+
+    println("Sample rho, rhot")
+    tree = model.tree
+    gam = model.gamma
+    lambda = model.lambda
+
+    N::Int = (length(tree.nodes)+1)/2
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+    T = ones(2N-1)
+    S_f = zeros(2N-1)
+    K = zeros(2N-1)
+
+    for i = reverse(indices)
+        if i > N
+            cur = tree.nodes[i]
+            l = tree.nodes[i].children[1].index
+            r = tree.nodes[i].children[2].index
+            if i != root.index
+                left_prob = tree.nodes[i].rhot*tree.nodes[i].rho
+                right_prob = tree.nodes[i].rhot*(1.0-tree.nodes[i].rho)
+
+                T[l] = T[i] * left_prob^gam
+                T[r] = T[i] * right_prob^gam
+            end
+        end
+    end
+
+    for i = indices
+        if i > N
+            left_child = tree.nodes[i].children[1]
+            right_child = tree.nodes[i].children[2]
+            K[i] = K[left_child.index] + K[right_child.index] +
+                   left_child.state + right_child.state 
+       
+            left_prob = (1-tree.nodes[i].rhot*tree.nodes[i].rho)^gam
+            right_prob = (1-tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam
+ 
+            S_f[i] = S_f[left_child.index] + S_f[right_child.index] + 
+                     left_prob*T[left_child.index] + right_prob*T[right_child.index] 
+        end
+    end
+
+    T_mult = ones(2N-1)
+
+    for i = reverse(indices)
+        if i > N
+            cur = tree.nodes[i]
+            left_child = tree.nodes[i].children[1]
+            right_child = tree.nodes[i].children[2]
+            l = left_child.index
+            r = right_child.index
+
+            k_l = left_child.state
+            k_r = right_child.state
+            N_l = left_child.num_leaves
+            N_r = right_child.num_leaves
+             
+            rho = cur.rho
+            rhot = cur.rhot
+            nut_l = cur.rhot
+            nut_r = cur.rhot
+            nu_l = cur.rho
+            nu_r = 1-cur.rho
+
+            T_l = T[l] * T_mult[i]
+            T_r = T[r] * T_mult[i]
+
+            S_l = S_f[l] * T_mult[i] / (nut_l * nu_l)^gam
+            S_r = S_f[r] * T_mult[i] / (nut_r * nu_r)^gam 
+     
+            f = x -> rho_logpdf(x, gam, lambda, nut_l, nut_r, k_l, k_r, 
+                                K[l], K[r], T[l], T[r], S_l, S_r, N_l, N_r) 
+            (rho, f_rho) = slice_sampler(rho, f, 0.1, 10, 0.0, 1.0)
+
+
+            p_s = 2/(N_l+N_r+1)
+            f = x -> logsumexp( rhot_splits(x, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
+                                      K[l], K[r], T[l], T[r], S_l, S_r))
+            (rhot_u, f_rhot) = slice_sampler(rhot, f, 0.1, 10, 0.0, 1.0)
+
+            f_vals = rhot_splits(rhot_u, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
+                                 K[l], K[r], T[l], T[r], S_l, S_r)
+
+            f_ind = rand(Categorical(exp_normalize(f_vals)))
+            rhot = f_ind == 1 ? 1.0 : rhot_u
+
+            # Update for T and S
+            l_new = rhot*rho
+            r_new = rhot*(1-rho)
+            l_old = cur.rhot*cur.rho
+            r_old = cur.rhot*(1-cur.rho) 
+
+            T_mult[l] = T_mult[i] * (l_new/l_old)^gam
+            T_mult[r] = T_mult[i] * (r_new/r_old)^gam
+
+
+            cur.rho = rho
+            cur.rhot = rhot
+        end
+    end
+
+end
+
+
 
 function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
@@ -1185,6 +1322,9 @@ function sample_psi(model::ModelState,
 
         sibling_path_index = find(path .== original_sibling.index)
 
+        if true
+            psi_p = prior_tree(tree, prune_index)
+        end 
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_likelihood_logpdf(model, model_spec, data, prune_index, path)
 
@@ -1197,6 +1337,7 @@ function sample_psi(model::ModelState,
             maxll = max(likelihoods)
             println("ind,logprob,prob: ", (nan_ind, logprobs[nan_ind], probs[nan_ind]))
             println("maxprior, maxlikelihood = ", (maxprior, maxll))
+            println(priors)
             println(likelihoods)
             println(lstates)
             assert(false)
@@ -1234,17 +1375,22 @@ function sample_psi(model::ModelState,
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
 
 
-        if model_spec.debug && false
+        if true #model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
             println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
             println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
-            println("logprobs: ", logprobs)
-            println("graft indices: ", graft_indices)
-            println("new parent features: ", new_parent_features)
-            println("new graftpoint features: ", new_graftpoint_features)
+#            println("logprobs: ", logprobs)
+#            println("graft indices: ", graft_indices)
+#            println("new parent features: ", new_parent_features)
+#            println("new graftpoint features: ", new_graftpoint_features)
             println("start_probs, end_prob: ",logprobs[A]  ,", ", logprobs[state_index])
             println("start_prior, start_LL: ",priors[A], ", ", likelihoods[A])
             println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
+
+            psi_before = psi_p[original_sibling.index]
+            psi_after = psi_p[graft_index]
+
+            println("psi_diff: $(psi_after-psi_before)")
 
             tree_prior = prior(model, model_spec) 
             tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])

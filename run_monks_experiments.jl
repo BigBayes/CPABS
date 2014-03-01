@@ -10,7 +10,7 @@ X_c = zeros((0,0))
 trnpct = 0.8
 symmetric_split = false
 lambda = 0.01
-gamma = 0.95
+gamma = 1.0
 
 if !isdefined(:num_trials)
     num_trials = 8
