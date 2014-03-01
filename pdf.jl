@@ -673,8 +673,8 @@ end
 
 function rhot_logf(rhot, gam, lambda, nu_l, nu_r,
                    k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r)
-    gam*k_l*log(1-nu_l*rhot) + gam*k_r*log(1-nu_r*rhot) + gam*(K_l+K_r)*log(rhot) -
-    lambda*( T_l*(1-nu_l*rhot)^gam + T_r*(1-nu_r*rhot)^gam + 
+    k_l*log(1-(nu_l*rhot)^gam) + k_r*log(1-(nu_r*rhot)^gam) + gam*(K_l+K_r)*log(rhot) -
+    lambda*( T_l*(1-(nu_l*rhot)^gam) + T_r*(1-(nu_r*rhot)^gam) + 
             (S_l*nu_l^gam + S_r*nu_r^gam)*rhot^gam )
 end
 
@@ -692,9 +692,9 @@ end
 
 function rho_logpdf(rho, gam, lambda, nut_l, nut_r,
                     k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r, N_l, N_r)
-    gam*k_l*log(1-nut_l*rho) + gam*k_r*log(1-nut_r*(1-rho)) + 
+    k_l*log(1-(nut_l*rho)^gam) + k_r*log(1-(nut_r*(1-rho))^gam) + 
     (gam*K_l+N_l)*log(rho) + (gam*K_r+N_r)*log(1-rho) -
-    lambda*( T_l*(1-nut_l*rho)^gam + T_r*(1-nut_r*(1-rho))^gam + 
+    lambda*( T_l*(1-(nut_l*rho)^gam) + T_r*(1-(nut_r*(1-rho))^gam) + 
              S_l*(nut_l*rho)^gam + S_r*(nut_r*(1-rho))^gam )
 end
 

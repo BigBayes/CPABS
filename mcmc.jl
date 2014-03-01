@@ -1193,8 +1193,8 @@ function sample_rho_rhot(model::ModelState,
             K[i] = K[left_child.index] + K[right_child.index] +
                    left_child.state + right_child.state 
        
-            left_prob = (1-tree.nodes[i].rhot*tree.nodes[i].rho)^gam
-            right_prob = (1-tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam
+            left_prob = (1-(tree.nodes[i].rhot*tree.nodes[i].rho)^gam)
+            right_prob = (1-(tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam)
  
             S_f[i] = S_f[left_child.index] + S_f[right_child.index] + 
                      left_prob*T[left_child.index] + right_prob*T[right_child.index] 
