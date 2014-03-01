@@ -444,8 +444,8 @@ function sample_Z(model::ModelState,
         parent = cur.parent    
 
         if i != root.index
-            self_direction = find(parent.children .== cur)
-            cur_mu_prop = self_direction == 1 ? (1-parent.rho) : parent.rho
+            self_direction = find(parent.children .== cur)[1]
+            cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
             cur_mu_prop *= parent.rhot
             mu[i] = mu[parent.index]*cur_mu_prop
         end
@@ -1375,7 +1375,7 @@ function sample_psi(model::ModelState,
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
 
 
-        if true #model_spec.debug 
+        if model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
             println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
             println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
