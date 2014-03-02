@@ -75,6 +75,11 @@ type ModelSpecification
     diagonal_W::Bool
     positive_W::Bool
 
+    # Define prior on W
+    sample_prior_W::Function
+    W_logpdf::Function
+    W_logpdf_gradient::Function
+
     # Inference Params
     rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
     global_move_probability::Float64
@@ -86,7 +91,8 @@ end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parenthood,
                                    ms.use_childhood, ms.symmetric_W, ms.diagonal_W,
-                                   ms.positive_W,
+                                   ms.positive_W, ms.sample_prior_W,
+                                   ms.W_logpdf, ms.W_logpdf_gradient,
                                    copy(ms.rrj_jump_probabilities), 
                                    ms.global_move_probability,
                                    ms.Z_sample_branch_prob,
@@ -237,6 +243,7 @@ function get_augmented_submatrix_indices(augmented_matrix::AugmentedMatrix,
                                          augmented_set_index::Int,
                                          num_augmented_features::Int)
     matrix_indices = Int[]
+    aug_indices = Int[]
     feature_pointers = augmented_matrix.feature_pointers
     num_active_features = augmented_matrix.num_active_features
 
@@ -252,22 +259,20 @@ function get_augmented_submatrix_indices(augmented_matrix::AugmentedMatrix,
                              i,
                              num_features - length(feature_pointers[i]) )
         end
+
+        if i == augmented_set_index && num_augmented_features > 0
+            start_ind = num_active_features[i] + 1
+            end_ind = num_active_features[i] + num_augmented_features
+            aug_indices = feature_pointers[i][start_ind:end_ind]
+        end
         append!(matrix_indices, feature_pointers[i][1:num_features])
     end
 
-    # always give augmented features last
-#    i = augmented_set_index
-#    if num_augmented_features  > 0
-#        num_features = num_active_features[i] + num_augmented_features
-#        if num_features > length(feature_pointers[i])
-#            add_new_features(augmented_matrix,
-#                             i,
-#                             num_features - length(feature_pointers[i]) )
-#        end
-#        append!(matrix_indices, feature_pointers[i][num_active_features[i]+1:num_features])
-#    end
-
-    matrix_indices
+    if num_augmented_features > 0
+        return matrix_indices, aug_indices
+    else
+        return matrix_indices
+    end
 end
 
 

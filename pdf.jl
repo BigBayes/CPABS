@@ -82,41 +82,27 @@ function prior(model::ModelState,
             left_prob = tree.nodes[i].rho
             right_prob = 1.0-tree.nodes[i].rho
     
-#            l_prob = left_child.num_leaves * log(left_prob)
-#            r_prob = right_child.num_leaves * log(right_prob)
-
             N_i = cur.num_leaves
             psi_term += (left_child.num_leaves-1) * log(left_prob)
             psi_term += (right_child.num_leaves-1) * log(right_prob)
             psi_term += -log(N_i) - log(N_i-1)
 
-            N_i = cur.num_leaves #left_child.num_leaves + right_child.num_leaves
+            N_i = cur.num_leaves
             p_s = 2/(N_i+1)
 
             rhot = tree.nodes[i].rhot
             if rhot == 1.0
-#                rhot_prob = log(p_s)
                 psi_term += log(p_s)
             else
-#                rhot_prob = log(1-p_s) + log(p_s) + (p_s-1)*log(rhot)
                 psi_term += log(1-p_s) + log(p_s) + (p_s-1)*log(rhot)
             end
             
-#            println("l_prob: $l_prob")
-#            println("r_prob: $l_prob")
-#            println("rhot_prob: $rhot_prob")
         end
-#        pois_prob = poisson_logpdf(tree.nodes[i].state, lambda * mu[i]^gam)
-#        println("pois_prob: $pois_prob")
         if i != root.index
             parent_t = t[parent.index]
             inf_term += poisson_logpdf(tree.nodes[i].state, lambda * (parent_t - t[i]))
         end
 
-    end
-
-    if true
-        println("total, psi, inf: $total_prob, $psi_term, $inf_term")
     end
 
     total_prob + psi_term + inf_term
@@ -870,6 +856,8 @@ end
 ###### pdfs for vardim updates ####
 ###################################
 #@profile begin
+
+
 function vardim_local_logpdf(model::ModelState,
                              data::DataState,
                              relevant_pairs::Array{Int64, 2},
@@ -967,124 +955,157 @@ function vardim_local_sum(model::ModelState,
     logsumexp(logprobs)
 end
 
+
+
 function vardim_logpdf(model::ModelState,
                        model_spec::ModelSpecification,
                        data::DataState,
-                       latent_effects::Array{Float64, 2},
                        observed_effects::Array{Float64, 2},
                        u::Int64,
+                       L::Int64,
+                       aug_k::Int64,
                        weight_index_pointers::Array{Int64, 1},
                        node_index::Int64,
-                       effective_lambda::Float64,
-                       w_is_auxiliary::Array{Bool, 2})
+                       effective_lambda::Float64)
+
+
+    tmodel = copy(model)
+    tmodel.tree.nodes[node_index].state = L+1
+    Z = ConstructZ(tmodel.tree)
+
+    start_index = weight_index_pointers[node_index]
+    end_index = start_index + L - 1
+    new_index = end_index + 1 
+
+    W = copy(model.weights)
+    if u < L
+        assert( aug_k < new_index)
+        W[:,new_index] = 0.0
+        W[new_index,:] = 0.0
+        W[aug_k,:] = 0.0
+        W[:,aug_k] = 0.0
+    elseif L == u
+        W[:,new_index] = 0.0
+        W[new_index,:] = 0.0
+    elseif u > L
+        assert(aug_k == new_index)
+    end
+
+    if model_spec.symmetric_W
+        W = copy(W)
+        symmetrize!(W)
+    end
+
     YY = data.Ytrain
     (N,N) = size(YY[1])
 
-    b_sigma = model.b_sigma
     logprob = 0.0
-
-
-    logprob += sum(normal_logpdf(model.beta, b_sigma))
-    logprob += sum(normal_logpdf(model.beta_p, b_sigma))
-    logprob += sum(normal_logpdf(model.beta_c, b_sigma))
-    logprob += sum(normal_logpdf(model.a, b_sigma))
-    logprob += sum(normal_logpdf(model.b, b_sigma))
-    logprob += normal_logpdf(model.c, b_sigma)
 
     gam = model.gamma
     lambda = model.lambda
     tree = model.tree
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
-    logprob += sum(log(1:N))
 
-    mu = ones(2N - 1)
-    for i = reverse(indices)
-        cur = tree.nodes[i]
-        parent = cur.parent    
+    ZWZ = Z*W*Z' 
+    effects = ZWZ + observed_effects
 
-        if i != root.index
-            self_direction = find(parent.children .== cur)[1]
-            cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
-            cur_mu_prop *= parent.rhot
-            mu[i] = mu[parent.index]*cur_mu_prop
-        end
+    logprob = 0.0
+    gradient = 0.0
+    for s = 1:length(YY)
+        Y = YY[s]
+        LL = broadcast(log_logit, effects, Y)
+        LL_grad = broadcast(log_logistic_dx, effects, Y)
+        missing_data = find(Y .< 0)
+        LL[missing_data] = 0.0
+        LL_grad[missing_data] = 0.0
+      
+        logprob += sum(LL) 
+        gradient += LL_grad 
     end
 
-    for i = 1:length(tree.nodes)
-        logprob -= log(tree.nodes[i].num_leaves)
-        logprob += poisson_logpdf(tree.nodes[i].state, lambda * mu[i]^gam)
-    end
+    gradient = Z'*gradient*Z
 
-    likelihood_terms = 0.0
-    aug_terms = 0.0
-    for i = 1:N
-        for j = 1:N
-            le = latent_effects[i,j]
-            oe = observed_effects[i,j]
-            for s = 1:length(YY)
-                Y = YY[s]
-                likelihood_terms += log_logit(le + oe, Y[i,j])
-            end 
-        end
-    end
-
-    W = model.weights
+    W_logpdf = model_spec.W_logpdf
+    W_logpdf_gradient = model_spec.W_logpdf_gradient
+    W_full = model.weights
     (K,K) = size(W)
-    nu = model.nu
     sigma = model.w_sigma
 
-    for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 : 
-                   model_spec.symmetric_W ? (1:k1) :
-                   (1:K)
+    W_logprob = W_logpdf(W, sigma)    
 
-        for k2 = k2_range
-            if w_is_auxiliary[k1,k2]
-                aug_terms += aug_logpdf(W[k1,k2], nu)
-            else
-                logprob += normal_logpdf(W[k1,k2], sigma)
-            end
-        end
+    if model_spec.diagonal_W
+        logprob += sum(diag(W_logprob)) 
+    elseif model_spec.symmetric_W
+        logprob += sum(triu(W_logprob))
+    else
+        logprob += sum(W_logprob)
     end
-    #println("prior: ", logprob - LL)
 
-#    for k = find(w_is_auxiliary)
-#        logprob += aug_logpdf(W[k], nu)
-#    end
-#
-#    for k = find(!w_is_auxiliary)
-#        logprob += normal_logpdf(W[k], sigma)
-#    end
-#
+    W_grad = W_logpdf_gradient(W, sigma)
+    gradient += W_grad
+
     logprob += poisson_logpdf(u, effective_lambda)
-#    if model_spec.debug
-#        println("u, prob_tuple: ", (u, (logprob, likelihood_terms, aug_terms)))
-#    end
 
-    return logprob + aug_terms + likelihood_terms
+    return logprob, gradient 
 end
 
 function vardim_splits(model::ModelState,
                        model_spec::ModelSpecification,
                        data::DataState,
-                       latent_effects::Array{Array{Float64, 2}, 1},
                        observed_effects::Array{Float64, 2},
                        U::Array{Int64, 1},
                        weight_index_pointers::Array{Int64, 1},
                        node_index::Int64,
-                       effective_lambda::Float64,
-                       w_is_auxiliary::Array{Array{Bool, 2}, 1})
+                       effective_lambda::Float64)
     logprobs = zeros(length(U))
+    gradients = cell(length(U))
+    assert(length(U) > 1)
+    L = U[end-1] 
+
+    start_index = weight_index_pointers[node_index]
+    end_index = start_index + L - 1
+    new_index = end_index + 1 
+
     for u_ind = 1:length(U)
         u = U[u_ind]
-        logprobs[u_ind] = vardim_logpdf(model, model_spec, data, latent_effects[u_ind],
-                              observed_effects, u, weight_index_pointers, node_index,
-                              effective_lambda, w_is_auxiliary[u_ind])
+          
+        if u < L 
+            aug_k = start_index + u_ind - 1
+        elseif u == L
+            aug_k = 0
+        elseif u > L
+            aug_k = new_index
+        end
+
+        logprobs[u_ind], gradients[u_ind] = 
+                              vardim_logpdf(model, model_spec, data,
+                              observed_effects, u, L, aug_k, 
+                              weight_index_pointers, node_index,
+                              effective_lambda)
 
     end
     logprobs += vardim_multiplier_terms(model_spec, U)
-    logprobs
+    logprobs, gradients
+end
+
+function vardim_sum(model::ModelState,
+                    model_spec::ModelSpecification,
+                    data::DataState,
+                    observed_effects::Array{Float64, 2},
+                    U::Array{Int64, 1},
+                    weight_index_pointers::Array{Int64, 1},
+                    node_index::Int64,
+                    effective_lambda::Float64)
+
+    logprobs, gradients = vardim_splits(model, model_spec, data, observed_effects,
+                                        U, weight_index_pointers, node_index,
+                                        effective_lambda)
+
+    logprob = logsumexp(logprobs)
+    gradient = logsumexp_d_dx(logprobs, gradients)
+
+    logprob, gradient
 end
 
 function vardim_multiplier_terms(model_spec::ModelSpecification,
@@ -1096,6 +1117,7 @@ function vardim_multiplier_terms(model_spec::ModelSpecification,
 
     logprobs = zeros(length(u))
     logprobs += log(model_spec.rrj_jump_probabilities[u - u[1] + 1])
+    # for u with K < L == u[end-1], we need the 1/L term
     logprobs -= [u[x] < u[end-1] ? log(u[end-1]) : 0.0 for x = 1:length(u)]
 
     logprobs
@@ -1175,7 +1197,7 @@ function adjust_model_logprob(model::ModelState,
     YY = data.Ytrain
 
     augW = model.augmented_weights
-    aug_inds = get_augmented_submatrix_indices(augW, node_index, 1)
+    aug_inds, _ = get_augmented_submatrix_indices(augW, node_index, 1)
 
     W = augW[aug_inds, aug_inds]
     (K,K) = size(W)
@@ -1462,7 +1484,8 @@ function compute_latent_effects(model::ModelState,
                                 u::Int,
                                 L::Int,
                                 aug_k::Int,
-                                node_index::Int)
+                                node_index::Int;
+                                include_gradient::Bool=false)
 
     tmodel = copy(model)
     tmodel.tree.nodes[node_index].state = L
@@ -1486,7 +1509,7 @@ function compute_latent_effects(model::ModelState,
         symmetrize!(W)
     end
 
-    Z*W*Z' 
+    Z*W*Z'
 end
 
 function compute_all_relevant_pairs(model_spec::ModelSpecification,

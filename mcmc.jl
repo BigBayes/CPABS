@@ -144,6 +144,7 @@ function mcmc(data::DataState,
     debug = model_spec.debug 
     model_spec.debug = false
 
+    println("Init K: $(size(model.weights,1))")
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec) 
@@ -253,8 +254,7 @@ function mcmc_sweep(model::ModelState,
 
     vardim_time = time()
     if rand() > 0.0
-        sample_Z(model, model_spec, data, latent_effects, observed_effects,
-                 tree_prior + tree_LL)
+        sample_Z(model, model_spec, data, observed_effects)
     end
     vardim_time = time() - vardim_time
 
@@ -418,15 +418,227 @@ function sample_W_full(model::ModelState,
     model.augmented_weights[inds,inds] = W
 end
 
-
 function sample_Z(model::ModelState,
                   model_spec::ModelSpecification,
                   data::DataState,
-                  latent_effects::Array{Float64,2},
-                  observed_effects::Array{Float64,2},
-                  model_logprob::Float64)
+                  observed_effects::Array{Float64,2})
+    println("Sample Z")
+    sample_prior_W = model_spec.sample_prior_W
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
+    tree = model.tree
+    num_W_sweeps = 3
+    num_W_slice_steps = 1
+    # Sample new features from root to leaf
+    root = FindRoot(tree, 1) 
+    leaf_to_root = GetLeafToRootOrdering(tree, root.index)
+    root_to_leaf = reverse(leaf_to_root)
+
+    (K, K) = size(model.weights)
+
+    mu = ones(2N-1)
+    for i = root_to_leaf
+        cur = tree.nodes[i]
+        parent = cur.parent    
+
+        if i != root.index
+            self_direction = find(parent.children .== cur)[1]
+            cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
+            cur_mu_prop *= parent.rhot
+            mu[i] = mu[parent.index]*cur_mu_prop
+        end
+    end
+
+    for rtl_index = 1:length(root_to_leaf)
+        tree = model.tree #make sure after copies to model we have the right tree ref
+        node_index = root_to_leaf[rtl_index]
+        
+        # root node cannot have features above it
+        if node_index == root.index
+            continue
+        end
+        if rand() > model_spec.Z_sample_branch_prob
+            continue
+        end
+
+        parent_index = tree.nodes[node_index].parent.index
+
+        if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
+            percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
+            println(" ",percent , "% ")
+        end
+
+        u = tree.nodes[node_index].state
+
+        tU = [tree.nodes[i].state for i = 1:2N-1]
+
+        effective_lambda = model.lambda * (mu[parent_index]^model.gamma - mu[node_index]^model.gamma)
+
+        new_model = copy(model)
+        L = u + randmult(model_spec.rrj_jump_probabilities) - 2
+
+        # if L < 0, then we are left with a single, discrete component in s_L, so 
+        # no need to sample, we remain in the same state u = 0
+        if L < 0
+            continue
+        end
+
+        K = K + L - u
+
+        if model_spec.symmetric_W
+            A = ones(K+1,K+1)
+            triu_inds = find(triu(A))
+            vectorize = x -> x[triu_inds]
+            devectorize = x -> (A = zeros(K+1,K+1); A[triu_inds] = x; symmetrize!(A)) 
+        elseif model_spec.diagonal_W
+            vectorize = x -> diag(x)
+            devectorize = x -> diagm(x)
+        else
+            vectorize = x -> x[:]
+            devectorize = x -> reshape(x, (K+1,K+1)) 
+        end
+
+
+
+        new_model.tree.nodes[node_index].state = L
+
+        old_W_index_pointers = weight_index_pointers(model.tree)
+        new_W_index_pointers = weight_index_pointers(new_model.tree)
+        start_index = new_W_index_pointers[node_index]
+        end_index = start_index + L - 1
+        new_k  = end_index + 1
+
+
+        assert(old_W_index_pointers[node_index] == new_W_index_pointers[node_index])
+
+        aug_k = 0
+        # pick one feature to remove to be the auxiliary for
+        # s_{u-1}'s k term
+
+        st_ind = old_W_index_pointers[node_index]
+        end_ind = st_ind + u - 1
+
+        if L == u-1
+            aug_u = rand(1:u)
+            deactivate_feature(new_model.augmented_weights,
+                               node_index,
+                               aug_u)
+            aug_k = old_W_index_pointers[node_index] + aug_u - 1
+            aug_new_k = old_W_index_pointers[node_index] + u - 1
+
+
+            aug_k = new_W_index_pointers[node_index] + aug_u - 1
+        elseif L == u+1
+            activate_feature(new_model.augmented_weights,
+                             node_index) 
+            aug_k = end_ind + 1 
+           
+        end
+
+        new_model_inds, augW_inds = 
+            get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
+
+        new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
+
+        W = new_model.weights
+        num_local_mutations = [ x <= L ? L-1 : x == L+1 ? L : L+1 for x = 1:L+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
+
+        function gen_logpdfs(logpdf_grad)
+            logpdf = 0.0
+            gradient = 0.0
+            cur_x = NaN
+            function lpdf(x)
+                if cur_x == x
+                    return logpdf
+                end
+                cur_x = x
+                y = devectorize(x)
+                logpdf, gradient = logpdf_grad(y)
+                gradient = vectorize(gradient)
+                logpdf
+            end
+            function lgrad(x)
+                if cur_x == x
+                    return gradient
+                end
+                cur_x = x
+                y = devectorize(x)
+                logpdf, gradient = logpdf_grad(y)
+                gradient = vectorize(gradient)
+                gradient
+            end
+
+            lpdf, lgrad
+        end
+
+        var_logpdf, var_gradient = gen_logpdfs( 
+            x -> (new_model.weights = x;
+                    vardim_sum(new_model, model_spec, data, observed_effects, 
+                               num_local_mutations, new_W_index_pointers,
+                               node_index, effective_lambda)) )
+
+        hmc_opts = @options numsteps=4 stepsize=0.02
+
+        W = vectorize(W)
+        for iter = 1:num_W_sweeps
+            W = hmc_sampler(W, var_logpdf, var_gradient, hmc_opts)
+        end
+
+
+        new_model.weights = devectorize(W)
+        v_logprobs, _ = vardim_splits(new_model, model_spec, data, observed_effects,
+                                      num_local_mutations, new_W_index_pointers,
+                                      node_index, effective_lambda)
+
+        sampled_component = randmult(exp_normalize(v_logprobs)) 
+        new_u = num_local_mutations[sampled_component]
+        new_K = K + new_u - L
+
+        oldW = copy(model.weights)
+        augW = copy(W)
+
+
+        new_model.tree.nodes[node_index].state = new_u
+
+
+        new_model_inds, _ = 
+            get_augmented_submatrix_indices(new_model.augmented_weights,
+                                            node_index,
+                                            1)
+        new_model.augmented_weights[new_model_inds, new_model_inds] = augW 
+
+        if new_K < K
+            deactivate_feature(new_model.augmented_weights,
+                               node_index,
+                               sampled_component)
+        elseif new_K > K
+            activate_feature(new_model.augmented_weights,
+                             node_index)
+        end
+
+        model.augmented_weights = copy(new_model.augmented_weights)
+        new_model_inds = 
+            get_augmented_submatrix_indices(new_model.augmented_weights,
+                                            node_index,
+                                            0)
+
+        model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
+        model.tree = copy(new_model.tree)
+
+        K = new_K
+
+    end
+end
+
+function sample_Z_local(model::ModelState,
+                        model_spec::ModelSpecification,
+                        data::DataState,
+                        latent_effects::Array{Float64,2},
+                        observed_effects::Array{Float64,2},
+                        model_logprob::Float64)
 
     println("Sample Z")
+    sample_prior_W = model_spec.sample_prior_W
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
@@ -617,12 +829,12 @@ function sample_Z(model::ModelState,
             activate_feature(new_model.augmented_weights,
                              node_index) 
 
-            new_model_inds = 
-                get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 0)
+            new_model_inds, augW_inds = 
+                get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
             new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
             aug_k = end_ind + 1 
             latent_effects = adjust_latent_effects(new_model, model_spec, latent_effects,
-                                 new_relevant_pairs, u, L, aug_k, aug_k)
+                                                   new_relevant_pairs, u, L, aug_k, aug_k)
            
         end
 
@@ -639,7 +851,7 @@ function sample_Z(model::ModelState,
             assert( verify_relevant_pairs == new_relevant_pairs)
 
 
-            WWinds = 
+            WWinds, _ = 
                 get_augmented_submatrix_indices(model.augmented_weights, node_index, 1)
             WW = model.augmented_weights[WWinds,WWinds]
             tmodel = copy(model)
@@ -662,22 +874,35 @@ function sample_Z(model::ModelState,
             assert(max(abs(latent_effects - verify_latent_effects)) < 10.0^-5)
         end
 
-        new_model_inds = 
+        new_model_inds, augW_inds = 
             get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
-        new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds] 
+
+        new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
+
+#        if L == u+1
+#            assert(length(augW_inds) == 1)
+#            k_range = model_spec.diagonal_W ? aug_k : (1:L)
+#            for k = k_range
+#                w_draw = sample_prior_W()
+#                new_model.weights[k,aug_k] = w_draw
+#                new_model.augmented_weights[new_model_inds[k], augW_inds[1]] = w_draw 
+#                if model_spec.symmetric_W
+#                    new_model.weights[aug_k,k] = w_draw
+#                    new_model.augmented_weights[augW_inds[1], new_model_inds[k]] = w_draw 
+#                else
+#                    w_draw = sample_prior_W()
+#                    new_model.weights[aug_k,k] = w_draw
+#                    new_model.augmented_weights[augW_inds[1], new_model_inds[k]] = w_draw 
+#                end
+#            end
+#        end
+
+        
+
 
         new_relevant_pairs = compute_new_relevant_pairs(new_model,model_spec,data,
                                  new_relevant_pairs, node_index, start_index, end_index)
 
-
-        if model_spec.debug
-            tmodel = copy(model)
-            tmodel.tree.nodes[node_index].state = L+1
-            Z = ConstructZ(tmodel.tree)
-
-            verify_relevant_pairs = compute_all_relevant_pairs(model_spec, data, K+1, Z)
-            assert( verify_relevant_pairs == new_relevant_pairs)
-        end
 
         # adjust model probability
         adjust_terms = adjust_model_logprob(model, model_spec, data, adj_relevant_pairs,
@@ -979,7 +1204,7 @@ function sample_Z(model::ModelState,
         proposed_model.weights = copy(new_W)
 
 
-        proposed_model_inds = 
+        proposed_model_inds, _ = 
             get_augmented_submatrix_indices(proposed_model.augmented_weights,
                                             node_index,
                                             1)

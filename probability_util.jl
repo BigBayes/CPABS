@@ -8,7 +8,6 @@ end
 function normal_logpdf(x, sigma)
     -x.*x/(2sigma*sigma) - 0.5log(2pi) - log(sigma)
 end
-
 function normal_logpdf_dx(x, sigma)
     -x/(sigma*sigma)
 end
@@ -55,6 +54,11 @@ function log_logit(effect, y)
     return value
 end
 
+function log_logistic_dx(effect, y)
+    -(1-y) + exp(-effect)/(1+exp(-effect))
+end
+
+
 function log_predictive(effect)
     -log(1+exp(-effect))
 end
@@ -65,6 +69,25 @@ function logsumexp(x)
     max_x = max(x)
     xp = x - max_x
     log(sum(exp(xp))) + max_x
+end
+
+function logsumexp_d_dx(x,xp)
+    #zeros in shape of xp[1]
+    xout = xp[1]-xp[1]
+
+    max_x = max(x)
+    xs = x - max_x
+
+    exp_xs = exp(xs)
+    sum_exp_xs = sum(exp_xs)
+    for i = 1:length(xp)
+        xout += exp_xs[i]*xp[i]
+    end
+
+    xout /= sum_exp_xs
+
+    #sum(exp(xs).*xp) / sum(exp(xs))
+    xout
 end
 
 function exp_normalize(x)
