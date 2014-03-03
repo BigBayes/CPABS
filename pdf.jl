@@ -72,6 +72,7 @@ function prior(model::ModelState,
         end
     end
 
+    t[1:N] = 0.0
 
     for i = 1:length(tree.nodes)
         cur = tree.nodes[i]
@@ -103,6 +104,10 @@ function prior(model::ModelState,
             inf_term += poisson_logpdf(tree.nodes[i].state, lambda * (parent_t - t[i]))
         end
 
+    end
+
+    if inf_term < -3.0
+        println("INF_TERM: $inf_term")
     end
 
     total_prob + psi_term + inf_term
@@ -254,24 +259,28 @@ function psi_infsites_logpdf(model::ModelState,
     t_2 = mu_2.^gam
     t_3 = mu_3.^gam
 
+    t_1[1:N] = 0.0
+    t_2[1:N] = 0.0
+    t_3[1:N] = 0.0
+
     subtree_probs = -Inf * ones(2N - 1)
     for i = indices
         graft_node = tree.nodes[i]
-        if i == root.index
-            t_graft = 1.0
+
+        if i > N 
+            t_graft = t_1[i]
         else
             parent = graft_node.parent
- 
-            graft_direction = find(parent.children .== graft_node)
-            graft_mu_prop = graft_direction == 1 ? (1-parent.rho) : parent.rho
-            graft_mu_prop *= parent.rhot
-            t_graft = graft_mu_prop^gam
+            self_direction = find(parent.children .== graft_node)[1]
+            mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho 
+            t_graft = t_1[parent.index] * (mu_prop * parent.rhot)^gam
         end
+
         if length(pruned_indices) > 0
             subtree_probs[i] = 0.0
         end
         for j = pruned_indices
-            parent_t = t_3[tree.nodes[j].parent.index] 
+            parent_t = t_3[tree.nodes[j].parent.index]
             cur = tree.nodes[j]
             poisson_mean = model.lambda * t_graft * (parent_t - t_3[j])
             subtree_probs[i] += poisson_logpdf(cur.state, poisson_mean)
@@ -287,8 +296,9 @@ function psi_infsites_logpdf(model::ModelState,
             parent_t1 = t_1[cur.parent.index]
         end
 
+        parent_t2 = parent_t1 * pruned_mu_prop^gam
         poisson_mean_before = model.lambda * (parent_t1 - t_1[i])
-        poisson_mean_after = model.lambda * (parent_t1 - t_2[i])
+        poisson_mean_after = model.lambda * (parent_t2 - t_2[i])
         descendant_mutation_probs[i] = poisson_logpdf(cur.state, poisson_mean_after) -
                                        poisson_logpdf(cur.state, poisson_mean_before)
 
@@ -315,14 +325,25 @@ function psi_infsites_logpdf(model::ModelState,
         features_start = weight_indices[i]
         features_end = weight_indices[i] + cur.state - 1
 
+        if i > N 
+            pruned_parent_t = t_1[i]
+        else
+            parent = cur.parent
+            self_direction = find(parent.children .== cur)[1]
+            mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho 
+            pruned_parent_t = parent_t1 * (mu_prop * parent.rhot)^gam
+        end
+        poisson_mean_after_above = model.lambda * (parent_t1 - pruned_parent_t)
+        poisson_mean_after_below = model.lambda * (pruned_parent_t - t_2[i])
+
         if contains(path, i)
             (U, V) = all_splits([features_start:features_end])
             for j = 1:length(U)
                 u = U[j]
                 v = V[j]
 
-                prob = poisson_logpdf(length(u), poisson_mean_after) +
-                       poisson_logpdf(length(v), poisson_mean_before) -
+                prob = poisson_logpdf(length(u), poisson_mean_after_below) +
+                       poisson_logpdf(length(v), poisson_mean_after_above) -
                        poisson_logpdf(cur.state, poisson_mean_before)
 
 

@@ -48,7 +48,7 @@ function mcmc(data::DataState,
     for i = 1:2N-2 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
         #hard code lambda for initialization so we always start with some features
-        effective_lambda = 4 * (0.5)^(num_ancestors-1)
+        effective_lambda = 4 * (0.3)^(num_ancestors-1)
         U[i] = effective_lambda > 10.0^-5 ? randpois(effective_lambda) : 0
 
         if U[i] > 0
@@ -1462,6 +1462,9 @@ function sample_rho_rhot(model::ModelState,
             p_s = 2/(N_l+N_r+1)
             f = x -> logsumexp( rhot_splits(x, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
                                       K[l], K[r], T[l], T[r], S_l, S_r))
+
+            rhot = rhot == 1.0 ? rand(Uniform(0,1)) : rhot
+
             (rhot_u, f_rhot) = slice_sampler(rhot, f, 0.1, 10, 0.0, 1.0)
 
             f_vals = rhot_splits(rhot_u, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
@@ -1498,8 +1501,14 @@ function sample_psi(model::ModelState,
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
 
+
     println("psi: ")
     for prune_index = 1:N # only prune leaves, it's much faster
+
+        if true
+            old_prior = prior(model, model_spec)
+            old_LL, old_test_LL = likelihood(model, model_spec, data, [1:N])
+        end
 
         if mod(prune_index,ceil(N/10)) == 0
             percent = ceil(prune_index/ceil(N/10))*10
@@ -1544,8 +1553,6 @@ function sample_psi(model::ModelState,
             leaf = GetRandomLeaf(tree, original_sibling.index)
             path = GetPath(tree, leaf)
         end
-
-        sibling_path_index = find(path .== original_sibling.index)
 
         if true
             psi_p = prior_tree(tree, prune_index)
@@ -1600,7 +1607,7 @@ function sample_psi(model::ModelState,
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
 
 
-        if model_spec.debug 
+        if true #model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
             println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
             println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
@@ -1608,18 +1615,64 @@ function sample_psi(model::ModelState,
 #            println("graft indices: ", graft_indices)
 #            println("new parent features: ", new_parent_features)
 #            println("new graftpoint features: ", new_graftpoint_features)
-            println("start_probs, end_prob: ",logprobs[A]  ,", ", logprobs[state_index])
-            println("start_prior, start_LL: ",priors[A], ", ", likelihoods[A])
-            println("end_prior, end_LL: ", priors[state_index], ", ", likelihoods[state_index])
 
+            println("graftpoint_features: $graftpoint_features")
+            println("parent_features: $parent_features")
+
+            subtree_indices = GetLeafToRootOrdering(tree, prune_index)
+            grafttree_indices = GetLeafToRootOrdering(tree, graft_index)
+            ancestor_indices = GetPath(tree, tree.nodes[prune_index].parent.index)
+
+            count_features = x -> sum([tree.nodes[i].state for i in x])
+            get_features = x -> [tree.nodes[i].state for i in x]
+
+            subtree_num = count_features(subtree_indices)
+            grafttree_num = count_features(grafttree_indices)
+            ancestor_num = count_features(ancestor_indices)
+           
+            println("subtree num_features: $subtree_num") 
+            println("grafttree num_features: $grafttree_num") 
+            println("ancestor num_features: $ancestor_num") 
+            println("original sibling under graftpoint?: $(original_sibling.index in grafttree_indices)")
+
+            println("ancestors: $ancestor_indices")
+            println("ancestor_features: $(get_features(ancestor_indices))")
             psi_before = psi_p[original_sibling.index]
             psi_after = psi_p[graft_index]
 
             println("psi_diff: $(psi_after-psi_before)")
 
+            println("local_LL: $(likelihoods[state_index])")
+            println("local_prior: $(priors[state_index])")
+            println("old_local_LL: $(likelihoods[A])")
+            println("old_local_prior: $(priors[A])")
+
+            println("prob: $(probs[state_index])")
+            println("old_prob: $(probs[A])")
+
+
             tree_prior = prior(model, model_spec) 
             tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
             println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
+
+            full_diff = tree_LL + tree_prior - old_LL - old_prior
+            local_diff = likelihoods[state_index] + priors[state_index] -
+                         likelihoods[A[1]] - priors[A[1]]
+
+            #if (tree_LL-old_LL) + (tree_prior-old_prior) < -8
+            if abs(full_diff - local_diff) > 0.1 && length(A) == 1 
+                println("full_diff: $full_diff")
+                println("local_diff: $local_diff")
+
+                println("prior_diff: $((tree_prior-old_prior))")
+                println("local_prior_diff: $(priors[state_index] - priors[A[1]])")
+
+                println("prior_err: $(abs((tree_prior-old_prior) - (priors[state_index] - priors[A[1]])))")
+
+                println("LL_diff: $(tree_LL-old_LL)")
+                println("local_LL_diff: $(likelihoods[state_index] - likelihoods[A[1]])")
+                assert(false)
+            end
         end
     end
 end
