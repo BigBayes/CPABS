@@ -1554,9 +1554,6 @@ function sample_psi(model::ModelState,
             path = GetPath(tree, leaf)
         end
 
-        if true
-            psi_p = prior_tree(tree, prune_index)
-        end 
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_likelihood_logpdf(model, model_spec, data, prune_index, path)
 
@@ -1637,10 +1634,6 @@ function sample_psi(model::ModelState,
 
             println("ancestors: $ancestor_indices")
             println("ancestor_features: $(get_features(ancestor_indices))")
-            psi_before = psi_p[original_sibling.index]
-            psi_after = psi_p[graft_index]
-
-            println("psi_diff: $(psi_after-psi_before)")
 
             println("local_LL: $(likelihoods[state_index])")
             println("local_prior: $(priors[state_index])")

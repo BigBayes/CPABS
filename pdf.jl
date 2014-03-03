@@ -106,9 +106,9 @@ function prior(model::ModelState,
 
     end
 
-    if inf_term < -3.0
-        println("INF_TERM: $inf_term")
-    end
+#    if inf_term < -3.0
+#        println("INF_TERM: $inf_term")
+#    end
 
     total_prob + psi_term + inf_term
 end
