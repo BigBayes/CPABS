@@ -402,15 +402,22 @@ function sample_W_full(model::ModelState,
         vectorize(grad)
     end
 
-    hmc_opts = @options L=4 stepsize=0.02
+    accept_count = 0
+    total_count = 0
+    hmc_opts = @options L=2 stepsize=0.0003
 
     W = vectorize(W) 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
-        
+         
+        W_prev = copy(W)
         W = hmc_sampler(W, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
+        if W_prev != W
+            accept_count +=1
+        end
+        total_count += 1
     end
-
+    println("W acceptance rate: $(accept_count/total_count)")
     W = devectorize(W)
     model.weights = W
 
@@ -449,6 +456,8 @@ function sample_Z(model::ModelState,
         end
     end
 
+    accept_count = 0
+    total_count = 0
     for rtl_index = 1:length(root_to_leaf)
         tree = model.tree #make sure after copies to model we have the right tree ref
         node_index = root_to_leaf[rtl_index]
@@ -466,6 +475,7 @@ function sample_Z(model::ModelState,
         if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
             percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
             println(" ",percent , "% ")
+            println("acceptance rate: $(accept_count/total_count)")
         end
 
         u = tree.nodes[node_index].state
@@ -577,11 +587,17 @@ function sample_Z(model::ModelState,
                                num_local_mutations, new_W_index_pointers,
                                node_index, effective_lambda)) )
 
-        hmc_opts = @options numsteps=4 stepsize=0.02
-
+        #hmc_opts = @options numsteps=4 stepsize=0.02
+        ref_opts = @options w=0.1 m=1 refractive_index_ratio=1.3
+        
         W = vectorize(W)
         for iter = 1:num_W_sweeps
-            W = hmc_sampler(W, var_logpdf, var_gradient, hmc_opts)
+            W_prev = copy(W)
+            W = refractive_sampler(W, var_logpdf, var_gradient, ref_opts)
+            if W != W_prev
+                accept_count += 1 
+            end
+            total_count += 1
         end
 
 
@@ -595,7 +611,7 @@ function sample_Z(model::ModelState,
         new_K = K + new_u - L
 
         oldW = copy(model.weights)
-        augW = copy(W)
+        augW = copy(new_model.weights)
 
 
         new_model.tree.nodes[node_index].state = new_u
@@ -642,8 +658,7 @@ function sample_Z_local(model::ModelState,
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
-    num_W_sweeps = 3
-    num_W_slice_steps = 1
+    num_W_sweeps = 1
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
     leaf_to_root = GetLeafToRootOrdering(tree, root.index)
