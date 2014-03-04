@@ -11,7 +11,7 @@ X_c = zeros((0,0))
 
 trnpct = 0.8
 symmetric_split = false
-lambda = 0.01
+lambda = 0.02
 gamma = 1.0
 
 if !isdefined(:num_trials)
