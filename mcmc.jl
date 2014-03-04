@@ -1417,10 +1417,20 @@ function sample_rho_rhot(model::ModelState,
             right_child = tree.nodes[i].children[2]
             K[i] = K[left_child.index] + K[right_child.index] +
                    left_child.state + right_child.state 
-       
-            left_prob = (1-(tree.nodes[i].rhot*tree.nodes[i].rho)^gam)
-            right_prob = (1-(tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam)
- 
+      
+
+            if left_child.index > N 
+                left_prob = (1-(tree.nodes[i].rhot*tree.nodes[i].rho)^gam)
+            else
+                left_prob = 1
+            end
+
+            if right_child.index > N
+                right_prob = (1-(tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam)
+            else
+                right_prob = 1
+            end
+
             S_f[i] = S_f[left_child.index] + S_f[right_child.index] + 
                      left_prob*T[left_child.index] + right_prob*T[right_child.index] 
         end
@@ -1454,21 +1464,21 @@ function sample_rho_rhot(model::ModelState,
             S_l = S_f[l] * T_mult[i] / (nut_l * nu_l)^gam
             S_r = S_f[r] * T_mult[i] / (nut_r * nu_r)^gam 
      
-            f = x -> rho_logpdf(x, gam, lambda, nut_l, nut_r, k_l, k_r, 
+            f = x -> rho_logpdf(x, l, r, N, gam, lambda, nut_l, nut_r, k_l, k_r, 
                                 K[l], K[r], T[l], T[r], S_l, S_r, N_l, N_r) 
             (rho, f_rho) = slice_sampler(rho, f, 0.1, 10, 0.0, 1.0)
 
 
             p_s = 2/(N_l+N_r+1)
-            f = x -> logsumexp( rhot_splits(x, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
-                                      K[l], K[r], T[l], T[r], S_l, S_r))
+            f = x -> logsumexp( rhot_splits(x, p_s, l, r, N, gam, lambda, nu_l, nu_r, 
+                                    k_l, k_r, K[l], K[r], T[l], T[r], S_l, S_r))
 
             rhot = rhot == 1.0 ? rand(Uniform(0,1)) : rhot
 
             (rhot_u, f_rhot) = slice_sampler(rhot, f, 0.1, 10, 0.0, 1.0)
 
-            f_vals = rhot_splits(rhot_u, p_s, gam, lambda, nu_l, nu_r, k_l, k_r,
-                                 K[l], K[r], T[l], T[r], S_l, S_r)
+            f_vals = rhot_splits(rhot_u, p_s, l, r, N, gam, lambda, nu_l, nu_r,
+                                    k_l, k_r, K[l], K[r], T[l], T[r], S_l, S_r)
 
             f_ind = rand(Categorical(exp_normalize(f_vals)))
             rhot = f_ind == 1 ? 1.0 : rhot_u
