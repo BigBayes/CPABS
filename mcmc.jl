@@ -1505,7 +1505,7 @@ function sample_psi(model::ModelState,
     println("psi: ")
     for prune_index = 1:N # only prune leaves, it's much faster
 
-        if true
+        if model_spec.debug
             old_prior = prior(model, model_spec)
             old_LL, old_test_LL = likelihood(model, model_spec, data, [1:N])
         end
@@ -1604,7 +1604,7 @@ function sample_psi(model::ModelState,
         graft_tree!(model, prune_index, graft_index, parent_features, graftpoint_features)
 
 
-        if true #model_spec.debug 
+        if model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
             println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
             println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
