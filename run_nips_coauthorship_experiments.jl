@@ -3,7 +3,8 @@ require("mcmc.jl")
 include("read_nips_data.jl")
 
 tree_global_move_prob = 0.5
-model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, tree_global_move_prob, 1.0, false, false)
+Z_sample_prob = 0.25
+model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, tree_global_move_prob, Z_sample_prob, false, false)
 model_spec.diagonal_W = false
 
 X_r = zeros((0,0,0))

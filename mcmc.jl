@@ -434,7 +434,7 @@ function sample_Z(model::ModelState,
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
-    num_W_sweeps = 3
+    num_W_sweeps = 4
     num_W_slice_steps = 1
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
@@ -588,7 +588,7 @@ function sample_Z(model::ModelState,
                                node_index, effective_lambda)) )
 
         #hmc_opts = @options numsteps=4 stepsize=0.02
-        ref_opts = @options w=0.1 m=1 refractive_index_ratio=1.3
+        ref_opts = @options w=0.05 m=1 refractive_index_ratio=1.3
         
         W = vectorize(W)
         for iter = 1:num_W_sweeps
