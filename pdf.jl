@@ -446,16 +446,11 @@ function psi_likelihood_logpdf(model::ModelState,
 
     nzI, nzJ = findn(Z .> 0)
 
-#    for l = leaves
-#        leaf_features[l] = find(Z[l,:] .> 0)
-#    end
-
     for i = 1:length(nzI)
         push!(leaf_features[nzI[i]], nzJ[i])
     end
 
-    latent_effects = zeros(Float64, (length(path), length(subtree_leaves), N))
-    #target_subtree_features = fill(Array(Int64,0), (length(path), length(subtree_leaves)))
+    latent_effects = zeros(Float64, (length(path), N, N))
     target_subtree_features = [Array(Int64,0) for x = 1:length(path), y = length(subtree_leaves)]
 
 
@@ -474,6 +469,8 @@ function psi_likelihood_logpdf(model::ModelState,
         #target_subtree_features = fill(Array(Int64,0), length(subtree_leaves))
         for j1 = 1:length(subtree_leaves)
 
+            l1 = subtree_leaves[j1]
+
             if path_index == 1
 
                 assert(cur.parent == Nil())
@@ -482,7 +479,8 @@ function psi_likelihood_logpdf(model::ModelState,
                 for j2 = 1:length(leaves)
                     l2 = leaves[j2]
                     assert(subtree_leaves[j1] != l2)
-                    latent_effects[path_index,j1,l2] = sum(W[target_subtree_features[path_index,j1], leaf_features[l2]])
+                    latent_effects[path_index,l1,l2] = sum(W[target_subtree_features[path_index,j1], leaf_features[l2]])
+                    latent_effects[path_index,l2,l1] = sum(W[leaf_features[l2], target_subtree_features[path_index,j1]])
                 end
             else
                 features_start = weight_indices[parent.index]
@@ -494,17 +492,20 @@ function psi_likelihood_logpdf(model::ModelState,
 
                 for j2 = 1:length(leaves)
                     l2 = leaves[j2]
-                    latent_effects[path_index,j1,l2] = sum(W[new_features, leaf_features[l2]]) +
-                                                       latent_effects[parent_path_index,j1,l2]
+                    latent_effects[path_index,l1,l2] = sum(W[new_features, leaf_features[l2]]) +
+                                                       latent_effects[parent_path_index,l1,l2]
+                    latent_effects[path_index,l2,l1] = sum(W[leaf_features[l2], new_features]) +
+                                                       latent_effects[parent_path_index,l2,l1]
                 end
             end
 
         end
 
         for j1 = 1:length(subtree_leaves)
+            l1 = subtree_leaves[j1]
             for j2 = 1:length(subtree_leaves)
                 l2 = subtree_leaves[j2]
-                latent_effects[path_index,j1,l2] = sum(W[target_subtree_features[path_index,j1], target_subtree_features[path_index,j2]])
+                latent_effects[path_index,l1,l2] = sum(W[target_subtree_features[path_index,j1], target_subtree_features[path_index,j2]])
             end
         end
 
@@ -533,7 +534,8 @@ function psi_likelihood_logpdf(model::ModelState,
                 #append!(total_features, subtree_features[j1])
                 for l2 = leaves
                     assert(l1 != l2)
-                    latent_effect = sum(W[t, leaf_features[l2]]) + latent_effects[path_index,j1,l2]
+                    latent_effect_1 = sum(W[t, leaf_features[l2]]) + latent_effects[path_index,l1,l2]
+                    latent_effect_2 = sum(W[leaf_features[l2], t]) + latent_effects[path_index,l2,l1]
 
 #                    if l1 == 1 && mod(l2,20) == 0
 #                        println("latent effect: ", latent_effect)
@@ -542,8 +544,8 @@ function psi_likelihood_logpdf(model::ModelState,
 
                     for s = 1:length(YY)
                         Y = YY[s]
-                        likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
-                        likelihood += log_logit(latent_effect + observed_childhood_effects[j1,l2], Y[l2,l1])
+                        likelihood += log_logit(latent_effect_1 + observed_parenthood_effects[j1,l2], Y[l1,l2])
+                        likelihood += log_logit(latent_effect_2 + observed_childhood_effects[j1,l2], Y[l2,l1])
                     end
 
                     if likelihood == -Inf
@@ -560,7 +562,7 @@ function psi_likelihood_logpdf(model::ModelState,
                         append!(subtree_leaf_features1, target_subtree_features[path_index,j1])
                         append!(subtree_leaf_features2, target_subtree_features[path_index,j2])
                     end
-                    latent_effect = sum(W[t, subtree_leaf_features2]) + sum(W[t, subtree_leaf_features1]) + sum(W[t,t]) + latent_effects[path_index,j1,l2]
+                    latent_effect = sum(W[t, subtree_leaf_features2]) + sum(W[t, subtree_leaf_features1]) + sum(W[t,t]) + latent_effects[path_index,l1,l2]
                     for s = 1:length(YY)
                         Y = YY[s]
                         likelihood += log_logit(latent_effect + observed_parenthood_effects[j1,l2], Y[l1,l2])
