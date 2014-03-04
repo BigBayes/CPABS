@@ -1,3 +1,4 @@
+using HDF5
 using MAT
 
 nips_data = matopen("../data/nips_coauthorship/nips_1-17_matv7.3.mat")
@@ -14,14 +15,14 @@ y_ind_nnz = find(Y)
 YY = copy(Y)
 YY[y_ind_nnz] = 1
  
-authors_numlinks = squeeze(sum(YY, 2))
+authors_numlinks = squeeze(sum(YY, 2), 2)
 
 perm = sortperm(authors_numlinks)
 perm = reverse(perm)
 
 top234 = perm[1:234]
 
-Y234 = convert(Array{Int64}, YY[top234, top234])
-YY = Array(Array{Int64,2},1)
+Y234 = convert(Array{Float64}, YY[top234, top234])
+YY = Array(Array{Float64,2},1)
 YY[1] = copy(Y234)
 
