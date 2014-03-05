@@ -84,6 +84,7 @@ type ModelSpecification
     rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
     global_move_probability::Float64
     Z_sample_branch_prob::Float64
+    options::Dict{ASCIIString, Any}
 
     debug::Bool
     verbose::Bool
@@ -95,7 +96,7 @@ copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parent
                                    ms.W_logpdf, ms.W_logpdf_gradient,
                                    copy(ms.rrj_jump_probabilities), 
                                    ms.global_move_probability,
-                                   ms.Z_sample_branch_prob,
+                                   ms.Z_sample_branch_prob, ms.options,
                                    ms.debug, ms.verbose)
 
 # Data container

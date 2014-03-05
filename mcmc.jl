@@ -217,7 +217,7 @@ function mcmc_sweep(model::ModelState,
     (latent_effects, observed_effects) = 
         construct_effects(model, model_spec, data, Z)
 
-    sample_bias(model, model_spec, data, latent_effects, observed_effects)
+    sample_intercept(model, model_spec, data, latent_effects, observed_effects)
     tree_prior = prior(model,model_spec) 
     tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
@@ -263,18 +263,18 @@ function mcmc_sweep(model::ModelState,
     println("K: ", K)
 end
 
-function sample_bias(model::ModelState,
+function sample_intercept(model::ModelState,
                      model_spec::ModelSpecification,
                      data::DataState,
                      latent_effects::Array{Float64,2},
                      observed_effects::Array{Float64,2})
 
-    println("Sample bias")
+    println("Sample intercept")
     num_slice_steps = 10
 
     c = model.c
     c_old = c
-    g = x -> bias_logpdf(model,model_spec,data,latent_effects,observed_effects,
+    g = x -> intercept_logpdf(model,model_spec,data,latent_effects,observed_effects,
                          c_old, x)
     gx0 = g(c)
 
@@ -404,7 +404,7 @@ function sample_W_full(model::ModelState,
 
     accept_count = 0
     total_count = 0
-    hmc_opts = @options L=2 stepsize=0.0003
+    hmc_opts = model_spec.options["hmc"] 
 
     W = vectorize(W) 
     for iter = 1:num_W_sweeps
@@ -587,13 +587,13 @@ function sample_Z(model::ModelState,
                                num_local_mutations, new_W_index_pointers,
                                node_index, effective_lambda)) )
 
-        #hmc_opts = @options numsteps=4 stepsize=0.02
-        ref_opts = @options w=0.05 m=1 refractive_index_ratio=1.3
-        
+        rtj_sampler = model_spec.options["RTJ_sampler"] 
+        rtj_opts = model_spec.options["RTJ_options"]
+                
         W = vectorize(W)
         for iter = 1:num_W_sweeps
             W_prev = copy(W)
-            W = refractive_sampler(W, var_logpdf, var_gradient, ref_opts)
+            W = rtj_sampler(W, var_logpdf, var_gradient, rtj_opts)
             if W != W_prev
                 accept_count += 1 
             end

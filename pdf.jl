@@ -848,28 +848,28 @@ function W_full_logpdf_gradient(model::ModelState,
 
 end
 ###################################
-###### pdfs for bias updates ######
+###### pdfs for intercept updates #
 ###################################
 
 
-function bias_logpdf(model::ModelState,
+function intercept_logpdf(model::ModelState,
                      model_spec::ModelSpecification,
                      data::DataState,
                      latent_effects::Array{Float64, 2},
                      observed_effects::Array{Float64, 2},
-                     old_bias::Float64,
-                     new_bias::Float64)
+                     old_intercept::Float64,
+                     new_intercept::Float64)
 
     YY = data.Ytrain
     (N,N) = size(YY[1])
      
     b_sigma = model.b_sigma
     total_prob = 0.0
-    total_prob += normal_logpdf(new_bias, b_sigma)
+    total_prob += normal_logpdf(new_intercept, b_sigma)
 
     for i = 1:N
         for j = 1:N
-            oe = observed_effects[i,j] + new_bias - old_bias
+            oe = observed_effects[i,j] + new_intercept - old_intercept
             logit_arg = latent_effects[i,j] + oe
             for s = 1:length(YY)
                 Y = YY[s]

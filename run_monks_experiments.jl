@@ -1,10 +1,22 @@
 require("experiment_utils.jl")
 require("mcmc.jl")
+require("hmc.jl")
+require("refractive_sampler.jl")
+
 include("read_monks_data.jl")
 
 w_sigma = 1.0
 
-model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, 1.0, 1.0, false, false)
+opts = Dict{ASCIIString, Any}()
+opts["hmc"] = @options numsteps=4 stepsize=0.02
+ref_opts = @options w=0.2 m=1 refractive_index_ratio=1.3
+
+opts["RTJ_sampler"] = refractive_sampler
+opts["RTJ_options"] = ref_opts 
+#opts["RTJ_options"] = @options numsteps=4 stepsize=0.02
+
+
+model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, 1.0, 1.0, opts, false, false)
 X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))

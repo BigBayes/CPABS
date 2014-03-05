@@ -1,10 +1,22 @@
 require("experiment_utils.jl")
 require("mcmc.jl")
+require("hmc.jl")
+require("refractive_sampler.jl")
+
 include("read_nips_data.jl")
 
 tree_global_move_prob = 0.5
 Z_sample_prob = 0.25
-model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, tree_global_move_prob, Z_sample_prob, false, false)
+
+opts = Dict{ASCIIString, Any}()
+opts["hmc"] = @options L=2 stepsize=0.0003
+hmc_opts = @options L=2 stepsize=0.0003
+ref_opts = @options w=0.05 m=1 refractive_index_ratio=1.3
+
+opts["RTJ_sampler"] = hmc_sampler
+opts["RTJ_options"] = hmc_opts 
+
+model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false)
 model_spec.diagonal_W = false
 
 X_r = zeros((0,0,0))
