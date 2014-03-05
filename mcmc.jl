@@ -22,6 +22,8 @@ function mcmc(data::DataState,
     X_c = data.X_c
  
     (N,N) = size(YY[1])
+    init_a = [0.0]
+    init_b = [0.0]
 
     if model_spec.use_pairwise
         (N1, N2, pairwise_p) = size(X_r)
@@ -32,10 +34,12 @@ function mcmc(data::DataState,
     if model_spec.use_parenthood
         (N1, parent_p) = size(X_p)
         assert(N1 == N)
+        init_a = zeros(N)
     end
     if model_spec.use_childhood
         (N2, children_p) = size(X_c)
         assert(N2 == N)
+        init_b = zeros(N)
     end
 
     U = zeros(Int64,2N-1)
@@ -43,7 +47,7 @@ function mcmc(data::DataState,
     Waug = AugmentedMatrix(2N-1)
     tree = Tree(U)
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
-    model = ModelState(lambda,gam,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],[0.0],[0.0],0.0)
+    model = ModelState(lambda,gam,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
 
     for i = 1:2N-2 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
@@ -222,6 +226,20 @@ function mcmc_sweep(model::ModelState,
     tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
+    if model_spec.use_parenthood
+        sample_a(model, model_spec, data, latent_effects)
+    end
+
+    if model_spec.use_childhood
+        sample_b(model, model_spec, data, latent_effects)
+    end
+
+    observed_effects = construct_observed_effects(model, model_spec, data)
+
+    tree_prior = prior(model,model_spec) 
+    tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
+    println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
+
     psi_time = time()
     sample_psi(model, model_spec, data, latent_effects, observed_effects)
     psi_time = time() - psi_time
@@ -284,6 +302,59 @@ function sample_intercept(model::ModelState,
 
     observed_effects += c - model.c
     model.c = c
+end
+
+function sample_a(model::ModelState,
+                  model_spec::ModelSpecification,
+                  data::DataState,
+                  latent_effects::Array{Float64,2})
+
+    println("Sample a")
+    new_model = copy(model)
+    f = a -> (new_model.a = a; ab_logpdf(new_model, model_spec, data, latent_effects)[1])
+    g = a -> (new_model.a = a; ab_logpdf(new_model, model_spec, data, latent_effects)[2])
+
+    hmc_opts = @options numsteps=4 stepsize=0.02
+    total_count = 0
+    accept_count = 0
+    num_iterations = 6
+    for iteration = 1:num_iterations
+        old_a = copy(new_model.a)
+        new_model.a = hmc_sampler(new_model.a, f, g, hmc_opts)
+        if old_a != new_model.a
+            accept_count += 1
+        end
+        total_count += 1
+    end
+
+    println("a acceptance rate: $(accept_count/total_count)")
+    model.a = copy(new_model.a)
+end
+
+function sample_b(model::ModelState,
+                  model_spec::ModelSpecification,
+                  data::DataState,
+                  latent_effects::Array{Float64,2})
+    println("Sample b")
+    new_model = copy(model)
+    f = b -> (new_model.b = b; ab_logpdf(new_model, model_spec, data, latent_effects)[1])
+    g = b -> (new_model.b = b; ab_logpdf(new_model, model_spec, data, latent_effects)[3])
+
+    hmc_opts = @options numsteps=4 stepsize=0.02
+    total_count = 0
+    accept_count = 0
+    num_iterations = 6
+    for iteration = 1:num_iterations
+        old_b = copy(new_model.b)
+        new_model.b = hmc_sampler(new_model.b, f, g, hmc_opts)
+        if old_b != new_model.b
+            accept_count += 1
+        end
+        total_count += 1
+    end
+
+    println("b acceptance rate: $(accept_count/total_count)")
+    model.b = copy(new_model.b)
 end
 
 function sample_W(model::ModelState,
@@ -1707,7 +1778,6 @@ function construct_effects(model::ModelState,
     observed_effects = zeros(Float64, (N,N))
     for i = 1:N
         for j = 1:N
-            #latent_effects[i,j] = (Z[i,:] * W * Z[j,:]')[1]
             observed_effects[i,j] = compute_observed_effects(model, model_spec, data, i, j)
         end
     end

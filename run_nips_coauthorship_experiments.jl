@@ -9,8 +9,8 @@ tree_global_move_prob = 0.5
 Z_sample_prob = 0.25
 
 opts = Dict{ASCIIString, Any}()
-opts["hmc"] = @options L=2 stepsize=0.0003
-hmc_opts = @options L=2 stepsize=0.0003
+hmc_opts = @options numsteps=2 stepsize=0.0003
+opts["hmc"] = hmc_opts
 ref_opts = @options w=0.05 m=1 refractive_index_ratio=1.3
 
 opts["RTJ_sampler"] = hmc_sampler

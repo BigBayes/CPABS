@@ -78,9 +78,10 @@ function run_batch(model_spec::ModelSpecification,
 
     assert(burnin_iterations < num_iterations)
 
-    X_r = zeros((0,0,0))
-    X_p = zeros((0,0))
-    X_c = zeros((0,0))
+    N = size(Y[1],1)
+    X_r = zeros((N,N,0))
+    X_p = zeros((N,0))
+    X_c = zeros((N,0))
 
     datas = Array(Any, num_trials) 
     for i = 1:num_trials

@@ -880,7 +880,47 @@ function intercept_logpdf(model::ModelState,
     total_prob
 end
 
+function ab_logpdf(model::ModelState,
+                  model_spec::ModelSpecification,
+                  data::DataState,
+                  latent_effects::Array{Float64, 2})
 
+    YY = data.Ytrain
+    (N,N) = size(YY[1])
+     
+    b_sigma = model.b_sigma
+    a = model.a
+    b = model.b
+
+    observed_effects = construct_observed_effects(model, model_spec, data)
+    effects = latent_effects + observed_effects
+
+
+    total_prob = 0.0
+    a_gradient = 0.0
+    b_gradient = 0.0
+    total_prob += sum(normal_logpdf(a, b_sigma))
+    a_gradient += normal_logpdf_dx(a, b_sigma)
+    b_gradient += normal_logpdf_dx(b, b_sigma)
+
+
+
+    log_sigmoid_gradient = 0.0
+    for p = 1:length(YY)
+        Y = YY[p]
+        gradient = broadcast(log_logistic_dx, effects, Y)
+        n_inds = find(Y .< 0)
+        gradient[n_inds] = 0.0
+        log_sigmoid_gradient += gradient
+
+        total_prob += sum(broadcast(log_logit, effects, Y))
+    end
+
+    a_gradient += squeeze(sum(log_sigmoid_gradient,1),1)
+    b_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+
+    total_prob, a_gradient, b_gradient
+end
 ###################################
 ###### pdfs for vardim updates ####
 ###################################
@@ -1731,16 +1771,34 @@ function compute_observed_effects(model::ModelState,
     end
 
     if model_spec.use_parenthood
-        observed_effect += model.beta_p' * X_p[i,:] + model.a[i]
+        if length( X_p[i,:]) > 0
+            observed_effect += model.beta_p' * X_p[i,:]
+        end
+        observed_effect += model.a[i]
     end
 
     if model_spec.use_childhood
-        observed_effect += model.beta_c' * X_c[j,:] + model.b[j]
+        if length( X_c[j,:]) > 0
+            observed_effect += model.beta_c' * X_c[j,:]
+        end
+        observed_effect += model.b[j]
     end                                  
 
     observed_effect
 end
 
+function construct_observed_effects(model::ModelState,
+                                    model_spec::ModelSpecification,
+                                    data::DataState)
+    N = size(data.Ytrain[1],1) 
+    observed_effects = zeros(Float64, (N,N))
+    for i = 1:N
+        for j = 1:N
+            observed_effects[i,j] = compute_observed_effects(model, model_spec, data, i, j)
+        end
+    end
+    observed_effects
+end
 # constructs all possible splits of v into 2 sets
 function all_splits(v::Array{Int64})
     # Construct power set U, and for each u \in U, construct w = v \ u
