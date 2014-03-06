@@ -72,6 +72,7 @@ function run_batch(model_spec::ModelSpecification,
                    lambda::Float64,
                    gamma::Float64,
                    w_sigma::Float64,
+                   b_sigma::Float64,
                    num_iterations::Int,
                    burnin_iterations::Int,
                    num_trials::Int,
@@ -108,7 +109,7 @@ function run_batch(model_spec::ModelSpecification,
 
     else
         run_and_save(result_path, id_string, 1, datas[1], 
-             lambda, gamma, w_sigma, model_spec, num_iterations, burnin_iterations)
+             lambda, gamma, w_sigma, b_sigma, model_spec, num_iterations, burnin_iterations)
     end
 
 

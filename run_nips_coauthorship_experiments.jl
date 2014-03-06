@@ -23,12 +23,15 @@ X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
 
+w_sigma = 1.0
+b_sigma = 10.0
+
 symmetric_split = true
 trnpct = 0.8
 lambda = 0.1
 gamma = 2.0
 num_iterations = 500
-run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, 1.0, num_iterations, 200, 10, 
+run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, num_iterations, 200, 10, 
           "NIPS_D$(model_spec.diagonal_W)_L$(lambda)_G$(gamma)_T$(tree_global_move_prob)_P$(trnpct)_N$num_iterations", "../results/nips/")
 
 # split into train/test

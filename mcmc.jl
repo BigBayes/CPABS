@@ -12,6 +12,7 @@ function mcmc(data::DataState,
               lambda::Float64,
               gam::Float64,
               w_sigma::Float64,
+              b_sigma::Float64,
               model_spec::ModelSpecification,
               iterations::Int64,
               burnin_iterations::Int64)
@@ -47,7 +48,7 @@ function mcmc(data::DataState,
     Waug = AugmentedMatrix(2N-1, model_spec.init_W)
     tree = Tree(U)
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
-    model = ModelState(lambda,gam,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
+    model = ModelState(lambda,gam,w_sigma,1.0,b_sigma,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
 
     for i = 1:2N-2 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
@@ -77,7 +78,7 @@ function mcmc(data::DataState,
         end
     end
 
-    model.weights = get_model_weights(W, model_spec)
+    model.weights = copy(W)
     model.augmented_weights = AugmentedMatrix(2N-1, model_spec.init_W, model.weights, U)
 
 
@@ -667,6 +668,7 @@ function sample_Z(model::ModelState,
 
             lpdf, lgrad
         end
+
 
         var_logpdf, var_gradient = gen_logpdfs( 
             x -> (new_model.weights = x;

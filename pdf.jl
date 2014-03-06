@@ -37,8 +37,6 @@ function prior(model::ModelState,
         total_prob = sum(W_pdf(W, w_sigma ))
     end
 
-    total_prob += sum(log(W_jacobian(W)))
-
     total_prob += sum(normal_logpdf(model.beta, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
