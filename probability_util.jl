@@ -12,12 +12,20 @@ function normal_logpdf_dx(x, sigma)
     -x/(sigma*sigma)
 end
 
+function normal_rand(scale)
+    rand(Normal(0.0, scale))
+end
+
 function exp_logpdf(x, scale)
     -x/scale - log(scale)
 end
 
 function exp_logpdf_dx(x, scale)
     -ones(size(x))/scale
+end
+
+function exp_rand(scale)
+    rand(Exponential(scale))
 end
 
 function poisson_logpdf(k,lambda)

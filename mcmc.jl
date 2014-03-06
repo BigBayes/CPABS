@@ -44,7 +44,7 @@ function mcmc(data::DataState,
 
     U = zeros(Int64,2N-1)
     W = randn(0,0)
-    Waug = AugmentedMatrix(2N-1)
+    Waug = AugmentedMatrix(2N-1, model_spec.init_W)
     tree = Tree(U)
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
     model = ModelState(lambda,gam,w_sigma,1.0,w_sigma,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
@@ -63,13 +63,22 @@ function mcmc(data::DataState,
 
     sU = sum(U)
     if model_spec.diagonal_W
-        w = randn(sU)
-        W = diagm(w)
+        W = zeros(sU,sU)
+        for i = 1:size(W,1)
+            W[i,i] = model_spec.init_W
+        end
     else
-        W = randn(sU,sU)
+        W = zeros(sU,sU)
+        for i = 1:length(W)
+            W[i] = model_spec.init_W
+        end
+        if model_spec.symmetric_W
+            symmetrize!(W)
+        end
     end
-    model.weights = W
-    model.augmented_weights = AugmentedMatrix(2N-1, W, U)
+
+    model.weights = get_model_weights(W, model_spec)
+    model.augmented_weights = AugmentedMatrix(2N-1, model_spec.init_W, model.weights, U)
 
 
     #perform some unit tests
@@ -367,7 +376,7 @@ function sample_W(model::ModelState,
     YY = data.Ytrain
     (K,K) = size(model.weights)
     (N,N) = size(YY[1])
-    W = model.weights
+    W = get_W(model, model_spec)
 
     num_W_sweeps = 3
     num_W_slice_steps = 3
@@ -442,7 +451,7 @@ function sample_W_full(model::ModelState,
     YY = data.Ytrain
     (K,K) = size(model.weights)
     (N,N) = size(YY[1])
-    W = copy(model.weights)
+    W = get_W(model, model_spec)
 
     num_W_sweeps = 3
 
@@ -462,13 +471,11 @@ function sample_W_full(model::ModelState,
     temp_model = copy(model) 
 
     function W_logpdf_vectorized(x::Vector{Float64})
-        W_matrix = devectorize(x)
-        temp_model.weights = W_matrix
+        temp_model.weights = devectorize(x) 
         W_full_logpdf(temp_model, model_spec, data, Z, observed_effects)
     end
     function W_logpdf_gradient_vectorized(x::Vector{Float64})
-        W_matrix = devectorize(x)
-        temp_model.weights = W_matrix
+        temp_model.weights = devectorize(x)
         grad = W_full_logpdf_gradient(temp_model, model_spec, data, Z, observed_effects)
         vectorize(grad)
     end
@@ -477,23 +484,23 @@ function sample_W_full(model::ModelState,
     total_count = 0
     hmc_opts = model_spec.options["hmc"] 
 
-    W = vectorize(W) 
+    x = vectorize(model.weights) 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
          
-        W_prev = copy(W)
-        W = hmc_sampler(W, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
-        if W_prev != W
+        x_prev = copy(x)
+        x = hmc_sampler(x, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
+        if x_prev != x
             accept_count +=1
         end
         total_count += 1
     end
     println("W acceptance rate: $(accept_count/total_count)")
-    W = devectorize(W)
-    model.weights = W
+    x = devectorize(x)
+    model.weights = x
 
     inds = get_augmented_submatrix_indices(model.augmented_weights, 1, 0)
-    model.augmented_weights[inds,inds] = W
+    model.augmented_weights[inds,inds] = x
 end
 
 function sample_Z(model::ModelState,
@@ -501,7 +508,7 @@ function sample_Z(model::ModelState,
                   data::DataState,
                   observed_effects::Array{Float64,2})
     println("Sample Z")
-    sample_prior_W = model_spec.sample_prior_W
+    w_sigma = model.w_sigma
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
@@ -619,9 +626,18 @@ function sample_Z(model::ModelState,
         new_model_inds, augW_inds = 
             get_augmented_submatrix_indices(new_model.augmented_weights, node_index, 1)
 
+#        for i = new_model_inds
+#            for j = augW_inds
+#                new_model.augmented_weights[i,j] = 
+#                    get_model_weights(model_spec.sample_prior_W(w_sigma), model_spec)
+#                new_model.augmented_weights[j,i] = 
+#                    get_model_weights(model_spec.sample_prior_W(w_sigma), model_spec)
+#            end
+#        end
+
         new_model.weights = new_model.augmented_weights[new_model_inds, new_model_inds]
 
-        W = new_model.weights
+        W = get_W(new_model, model_spec)
         num_local_mutations = [ x <= L ? L-1 : x == L+1 ? L : L+1 for x = 1:L+2] # [u-1, u-1, u-1, ..., u-1, u, u+1]
 
         function gen_logpdfs(logpdf_grad)
@@ -661,18 +677,18 @@ function sample_Z(model::ModelState,
         rtj_sampler = model_spec.options["RTJ_sampler"] 
         rtj_opts = model_spec.options["RTJ_options"]
                 
-        W = vectorize(W)
+        x = vectorize(new_model.weights)
         for iter = 1:num_W_sweeps
-            W_prev = copy(W)
-            W = rtj_sampler(W, var_logpdf, var_gradient, rtj_opts)
-            if W != W_prev
+            x_prev = copy(x)
+            x = rtj_sampler(x, var_logpdf, var_gradient, rtj_opts)
+            if x != x_prev
                 accept_count += 1 
             end
             total_count += 1
         end
 
 
-        new_model.weights = devectorize(W)
+        new_model.weights = devectorize(x)
         v_logprobs, _ = vardim_splits(new_model, model_spec, data, observed_effects,
                                       num_local_mutations, new_W_index_pointers,
                                       node_index, effective_lambda)
@@ -681,8 +697,8 @@ function sample_Z(model::ModelState,
         new_u = num_local_mutations[sampled_component]
         new_K = K + new_u - L
 
-        oldW = copy(model.weights)
-        augW = copy(new_model.weights)
+        oldW = get_W(model, model_spec)
+        augW = get_W(new_model, model_spec)
 
 
         new_model.tree.nodes[node_index].state = new_u
@@ -692,7 +708,7 @@ function sample_Z(model::ModelState,
             get_augmented_submatrix_indices(new_model.augmented_weights,
                                             node_index,
                                             1)
-        new_model.augmented_weights[new_model_inds, new_model_inds] = augW 
+        new_model.augmented_weights[new_model_inds, new_model_inds] = new_model.weights 
 
         if new_K < K
             deactivate_feature(new_model.augmented_weights,
@@ -725,7 +741,6 @@ function sample_Z_local(model::ModelState,
                         model_logprob::Float64)
 
     println("Sample Z")
-    sample_prior_W = model_spec.sample_prior_W
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
@@ -819,14 +834,14 @@ function sample_Z_local(model::ModelState,
 #        println("numfeatures: ", sum(model.augmented_weights.num_active_features))
 #        println("size(augW): ", size(augW))
 #        println("K: ", K)
-        if !all(model.weights[1:K,1:K] .== augW)
-            println("model_inds: ", inds)
-            println(model.weights[1:K,1:K])
-            println(augW)
-            println(model.augmented_weights.matrix)
-        end
+#        if !all(model.weights[1:K,1:K] .== augW)
+#            println("model_inds: ", inds)
+#            println(model.weights[1:K,1:K])
+#            println(augW)
+#            println(model.augmented_weights.matrix)
+#        end
 
-        assert(all(model.weights[1:K,1:K] .== augW))
+        assert(all(model.weights[1:K,1:K] .== get_model_weights(augW, model_spec)))
 
 
         new_model = copy(model)
@@ -841,7 +856,7 @@ function sample_Z_local(model::ModelState,
         if model_spec.debug
             println("(L,u,ind): ", (L,u,rtl_index))
             Z = ConstructZ(model.tree)
-            W = copy(model.weights)
+            W = get_W(model, model_spec)
             symmetrize!(W)
             verify_latent_effects = Z*W*Z' 
             badinds = findn(abs(verify_latent_effects - latent_effects) .> 10.0^-5)
@@ -969,14 +984,14 @@ function sample_Z_local(model::ModelState,
 #            assert(length(augW_inds) == 1)
 #            k_range = model_spec.diagonal_W ? aug_k : (1:L)
 #            for k = k_range
-#                w_draw = sample_prior_W()
+#                w_draw = sample_prior_W(w_sigma)
 #                new_model.weights[k,aug_k] = w_draw
 #                new_model.augmented_weights[new_model_inds[k], augW_inds[1]] = w_draw 
 #                if model_spec.symmetric_W
 #                    new_model.weights[aug_k,k] = w_draw
 #                    new_model.augmented_weights[augW_inds[1], new_model_inds[k]] = w_draw 
 #                else
-#                    w_draw = sample_prior_W()
+#                    w_draw = sample_prior_W(w_sigma)
 #                    new_model.weights[aug_k,k] = w_draw
 #                    new_model.augmented_weights[augW_inds[1], new_model_inds[k]] = w_draw 
 #                end
@@ -999,7 +1014,7 @@ function sample_Z_local(model::ModelState,
 
         current_model_logprob += sum(adjust_terms[1:2])
 
-        W = new_model.weights
+        W = get_W(new_model, model_spec)
 
 
 #        println("L,u: ", (L,u))
@@ -1281,13 +1296,13 @@ function sample_Z_local(model::ModelState,
 #        println("L: ",L)
         new_W = reshape(copy(W[new_valid_indices]), (new_K, new_K)) 
 
-        oldW = copy(model.weights)
+        oldW = get_W(model, model_spec)
         augW = copy(W)
 
 
         proposed_model = copy(new_model)
         proposed_model.tree.nodes[node_index].state = new_u
-        proposed_model.weights = copy(new_W)
+        proposed_model.weights = get_model_weights(new_W, model_spec)
 
 
         proposed_model_inds, _ = 
@@ -1393,7 +1408,7 @@ function sample_Z_local(model::ModelState,
 
             Z = ConstructZ(model.tree)
 
-            full_latent_effect = Z * model.weights * Z'
+            full_latent_effect = Z * get_W(model, model_spec) * Z'
 
             println("maxdiff latent effect: ", max(abs(full_latent_effect-latent_effects)))
 
@@ -1613,7 +1628,7 @@ function sample_psi(model::ModelState,
 
         old_model = copy(model)
         old_tree = old_model.tree
-        old_W = old_model.weights
+        old_W = get_W(old_model, model_spec)
 
         parent = tree.nodes[prune_index].parent
         if parent == Nil()
@@ -1772,7 +1787,7 @@ function construct_effects(model::ModelState,
                            Z) #sparse or full binary array
 
     YY = data.Ytrain
-    W = model.weights
+    W = get_W(model, model_spec)
     (N,N) = size(YY[1])
     #latent_effects = zeros(Float64, (N,N))
     observed_effects = zeros(Float64, (N,N))

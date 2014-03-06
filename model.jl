@@ -8,6 +8,7 @@ import Base.assign
 # each node denoting features attributed to said node
 type AugmentedMatrix
     matrix::Array{Float64,2}
+    init_value::Float64
 
     num_sets::Int
     feature_pointers::Array{Array{Int,1},1} 
@@ -16,9 +17,9 @@ type AugmentedMatrix
     next_novel_index::Int
 end
 
-AugmentedMatrix(N::Int) = 
-    AugmentedMatrix(zeros(10,10), N, [Int[] for x = 1:N], zeros(Int,N), 1)
-function AugmentedMatrix(N::Int, W::Array{Float64,2}, feature_counts::Array{Int,1})
+AugmentedMatrix(N::Int, init_value::Float64) = 
+    AugmentedMatrix(zeros(10,10), init_value, N, [Int[] for x = 1:N], zeros(Int,N), 1)
+function AugmentedMatrix(N::Int, init_value::Float64, W::Array{Float64,2}, feature_counts::Array{Int,1})
 
     feature_pointers = [Int[] for x = 1:N]
     next_index = 1 
@@ -26,10 +27,11 @@ function AugmentedMatrix(N::Int, W::Array{Float64,2}, feature_counts::Array{Int,
         append!(feature_pointers[i],[next_index:next_index + feature_counts[i] - 1])
         next_index += feature_counts[i]
     end
-    AugmentedMatrix(copy(W), N, feature_pointers, feature_counts, size(W)[1]+1)
+    AugmentedMatrix(copy(W), init_value, N, feature_pointers, feature_counts, size(W)[1]+1)
 end
 
-copy(aug_matrix::AugmentedMatrix) = AugmentedMatrix(copy(aug_matrix.matrix), 
+copy(aug_matrix::AugmentedMatrix) = AugmentedMatrix(copy(aug_matrix.matrix),
+                                                    aug_matrix.init_value, 
                                                     aug_matrix.num_sets,
                                                     deepcopy(aug_matrix.feature_pointers),
                                                     copy(aug_matrix.num_active_features),
@@ -76,9 +78,11 @@ type ModelSpecification
     positive_W::Bool
 
     # Define prior on W
-    sample_prior_W::Function
     W_logpdf::Function
     W_logpdf_gradient::Function
+
+    # Initialization for new parameters
+    init_W::Float64
 
     # Inference Params
     rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
@@ -92,8 +96,9 @@ end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parenthood,
                                    ms.use_childhood, ms.symmetric_W, ms.diagonal_W,
-                                   ms.positive_W, ms.sample_prior_W,
+                                   ms.positive_W, 
                                    ms.W_logpdf, ms.W_logpdf_gradient,
+                                   ms.init_W,
                                    copy(ms.rrj_jump_probabilities), 
                                    ms.global_move_probability,
                                    ms.Z_sample_branch_prob, ms.options,
@@ -281,7 +286,9 @@ function expand_matrix(augmented_matrix::AugmentedMatrix,
                        new_size::Int)
     old_size = size(augmented_matrix.matrix)[1]
     assert(new_size > old_size)
-    A = zeros(new_size, new_size)
+    init_value = augmented_matrix.init_value
+
+    A = init_value*ones(new_size, new_size)
     A[1:old_size,1:old_size] = augmented_matrix.matrix
     augmented_matrix.matrix = A 
 end

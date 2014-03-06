@@ -20,24 +20,24 @@ function prior(model::ModelState,
     w_sigma = model.w_sigma
     b_sigma = model.b_sigma
 
-    
+    W = get_W(model, model_spec) 
     if model_spec.positive_W
-        W = exp(model.weights)
         W_pdf = exp_logpdf
         W_jacobian = (W) -> W
     else
-        W = model.weights
         W_pdf = normal_logpdf
-        W_jacobian = (W) -> 0.0
+        W_jacobian = (W) -> 1.0
     end
  
-    if model_spec.diagonal_W && length(model.weights) > 0
+    if model_spec.diagonal_W && length(W) > 0
         total_prob = sum(W_pdf(diag(W), w_sigma ))
     elseif model_spec.symmetric_W
-        total_prob = sum(tril(W_pdf(model.weights, w_sigma )))
+        total_prob = sum(tril(W_pdf(W, w_sigma )))
     else
-        total_prob = sum(W_pdf(model.weights, w_sigma ))
+        total_prob = sum(W_pdf(W, w_sigma ))
     end
+
+    total_prob += sum(log(W_jacobian(W)))
 
     total_prob += sum(normal_logpdf(model.beta, b_sigma))
     total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
@@ -122,7 +122,7 @@ function likelihood(model::ModelState,
     (N,N) = size(YY[1])
     tree = model.tree
     Z = ConstructZ(tree)
-    W = model.weights
+    W = get_W(model, model_spec)
     beta = model.beta
     beta_p = model.beta_p
     beta_c = model.beta_c
@@ -161,7 +161,7 @@ function test_likelihood_ij(model::ModelState,
     YYtest = data.Ytest
     (N,N) = size(YYtest[1])
     tree = model.tree
-    W = model.weights
+    W = get_W(model, model_spec)
     beta = model.beta
     beta_p = model.beta_p
     beta_c = model.beta_c
@@ -382,7 +382,7 @@ function psi_likelihood_logpdf(model::ModelState,
     YY = data.Ytrain
     (N,N) = size(data.Ytrain[1])
     tree = model.tree
-    W = model.weights
+    W = get_W(model, model_spec)
 
     weight_indices = weight_index_pointers(tree)
 
@@ -777,11 +777,7 @@ function W_full_logpdf(model::ModelState,
     YY = data.Ytrain
     sigma = model.w_sigma
 
-    if model_spec.positive_W
-        W = exp(model.weights)
-    else
-        W = model.weights
-    end
+    W = get_W(model, model_spec)
 
     latent_effects = Z*W*Z' 
     effects = latent_effects + observed_effects
@@ -813,11 +809,7 @@ function W_full_logpdf_gradient(model::ModelState,
     YY = data.Ytrain
     sigma = model.w_sigma
 
-    if model_spec.positive_W
-        W = exp(model.weights)
-    else
-        W = model.weights
-    end
+    W = get_W(model, model_spec)
 
      
     latent_effects = Z*W*Z' 
@@ -845,9 +837,9 @@ function W_full_logpdf_gradient(model::ModelState,
 
     if model_spec.positive_W # W is represented in log space 
         LL_grad = ZLZ.*W
-        return LL_grad + exp_logpdf_dx(W, sigma) + ones(size(W))
+        return LL_grad + exp_logpdf_dx(W, sigma).*W + ones(size(W))
     else
-        LL_grad = ZLZ.*W
+        LL_grad = ZLZ
         return LL_grad + normal_logpdf_dx(W, sigma)
     end
 
@@ -1056,11 +1048,7 @@ function vardim_logpdf(model::ModelState,
     end_index = start_index + L - 1
     new_index = end_index + 1 
 
-    if model_spec.positive_W
-        W = exp(model.weights)
-    else
-        W = copy(model.weights)
-    end
+    W = get_W(model, model_spec)
 
     if u < L
         assert( aug_k < new_index)
@@ -1117,12 +1105,14 @@ function vardim_logpdf(model::ModelState,
         symmetrize!(ZLZ)
     end
 
-
-    gradient = ZLZ.*W
+    if model_spec.positive_W
+        gradient = ZLZ.*W
+    else
+        gradient = ZLZ
+    end
 
     W_logpdf = model_spec.W_logpdf
     W_logpdf_gradient = model_spec.W_logpdf_gradient
-    W_full = model.weights
     (K,K) = size(W)
     sigma = model.w_sigma
 
@@ -1137,7 +1127,12 @@ function vardim_logpdf(model::ModelState,
     end
 
     W_grad = W_logpdf_gradient(W, sigma)
-    gradient += W_grad
+
+    if model_spec.positive_W
+        gradient += W_grad.*W
+    else
+        gradient += W_grad
+    end
 
     logprob += poisson_logpdf(u, effective_lambda)
 
@@ -1239,7 +1234,7 @@ function compute_constant_terms(model::ModelState,
     current_ind = length(U) - 1
 
     current_u = U[current_ind]
-    W = model.weights
+    W = get_W(model, model_spec) 
 
     (K,K) = size(W)
 
@@ -1418,7 +1413,7 @@ function adjust_component_latent_effects(model::ModelState,
         return component_latent_effects
     end
 
-    W = model.weights
+    W = get_W(model, model_spec) 
     (K,K) = size(W)
     (rpK,rpK) = size(relevant_pairs)
 #    println("rpK: ", rpK)
@@ -1463,7 +1458,7 @@ function compute_component_latent_effects(model::ModelState,
         return component_latent_effects
     end
 
-    W = model.weights
+    W = get_W(model, model_spec)
     (K,K) = size(W)
 
     new_k = end_index + 1
@@ -1504,7 +1499,7 @@ function adjust_latent_effects(model::ModelState,
                                aug_k::Int,
                                new_k::Int)
 
-    W = model.weights
+    W = get_W(model, model_spec)
     (K,K) = size(relevant_pairs)
 
     assert(aug_k <= K)
@@ -1572,6 +1567,24 @@ function adjust_latent_effects(model::ModelState,
     new_latent_effects
 end
 
+function get_W(model::ModelState,
+               model_spec::ModelSpecification)
+    if model_spec.positive_W
+        return exp(model.weights)
+    else
+        return copy(model.weights)
+    end
+end
+
+function get_model_weights(W,
+                           model_spec::ModelSpecification)
+    if model_spec.positive_W
+        return log(W)
+    else
+        return copy(W)
+    end
+end
+
 # compute latent effects from scratch
 function compute_latent_effects(model::ModelState,
                                 model_spec::ModelSpecification,
@@ -1586,16 +1599,17 @@ function compute_latent_effects(model::ModelState,
     Z = ConstructZ(tmodel.tree)
     w_index_pointers = weight_index_pointers(model.tree)
     start_index = w_index_pointers[node_index]
-    new_index = start_index + u 
+    new_index = start_index + u
+    W = get_W(model, model_spec)
+ 
     if L < u
         assert( aug_k < new_index)
-        W = delete_row_and_col(model.weights, new_index)
+        W = delete_row_and_col(W, new_index)
         W = delete_row_and_col(W, aug_k)
     elseif L == u
-        W = delete_row_and_col(model.weights, new_index)
+        W = delete_row_and_col(W, new_index)
     elseif L > u
         assert(aug_k == new_index)
-        W = model.weights
     end
 
     if model_spec.symmetric_W
@@ -1696,7 +1710,7 @@ function compute_unaugmented_prob(model::ModelState,
                                   effective_lambda::Float64,
                                   u_index::Int64,
                                   augmented_logprob::Float64)
-    W = model.weights
+    W = get_W(model, model_spec) 
     (K,K) = size(W)
 
     start_index = weight_index_pointers[node_index]

@@ -99,7 +99,7 @@ function run_batch(model_spec::ModelSpecification,
         lambdas = lambda*ones(num_trials)
         gammas = gamma*ones(num_trials)
         sigmas = w_sigma*ones(num_trials)
-        model_specs = [copy(model_spec) for i = 1:num_trials]
+        model_specs = [deepcopy(model_spec) for i = 1:num_trials]
         num_iterses = num_iterations*ones(Int, num_trials)
         burn_iterses = burnin_iterations*ones(Int, num_trials)
 

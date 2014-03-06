@@ -1,3 +1,5 @@
+using Distributions
+
 require("experiment_utils.jl")
 require("mcmc.jl")
 require("hmc.jl")
@@ -6,7 +8,6 @@ require("refractive_sampler.jl")
 include("read_monks_data.jl")
 
 w_sigma = 1.0
-
 opts = Dict{ASCIIString, Any}()
 hmc_opts = @options numsteps=4 stepsize=0.02
 opts["hmc"] = hmc_opts 
@@ -17,9 +18,14 @@ opts["RTJ_options"] = ref_opts
 #opts["RTJ_sampler"] = hmc_sampler
 #opts["RTJ_options"] = hmc_opts
 
+positive_W = true
 
-model_spec = ModelSpecification(false, false, false, false, false, false, ()->rand(Normal(0.0,w_sigma)), normal_logpdf, normal_logpdf_dx, ones(3)/3, 1.0, 1.0, opts, false, false)
-
+if positive_W
+    model_spec = ModelSpecification(false, false, false, false, false, false, exp_logpdf, exp_logpdf_dx, 0.01, ones(3)/3, 1.0, 1.0, opts, false, false)
+    model_spec.positive_W = true
+else
+    model_spec = ModelSpecification(false, false, false, false, false, false, normal_logpdf, normal_logpdf_dx, 0.0, ones(3)/3, 1.0, 1.0, opts, false, false)
+end
 model_spec.use_parenthood = true
 #model_spec.use_childhood = true
 
