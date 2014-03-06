@@ -835,14 +835,19 @@ function W_full_logpdf_gradient(model::ModelState,
     end
 
     ZLZ = Z'*log_sigmoid_gradient*Z
-    LL_grad = ZLZ.*W
 
-    
+    if model_spec.symmetric_W
+        ZLZ_L = tril(ZLZ)
+        ZLZ_L[diagind(ZLZ)] = 0.0
+        ZLZ += ZLZ_L'
+        symmetrize!(ZLZ)
+    end
 
     if model_spec.positive_W # W is represented in log space 
+        LL_grad = ZLZ.*W
         return LL_grad + exp_logpdf_dx(W, sigma) + ones(size(W))
     else
-        ngrad = normal_logpdf_dx(W, sigma)
+        LL_grad = ZLZ.*W
         return LL_grad + normal_logpdf_dx(W, sigma)
     end
 
@@ -899,11 +904,6 @@ function ab_logpdf(model::ModelState,
     total_prob = 0.0
     a_gradient = 0.0
     b_gradient = 0.0
-    total_prob += sum(normal_logpdf(a, b_sigma))
-    a_gradient += normal_logpdf_dx(a, b_sigma)
-    b_gradient += normal_logpdf_dx(b, b_sigma)
-
-
 
     log_sigmoid_gradient = 0.0
     for p = 1:length(YY)
@@ -916,8 +916,18 @@ function ab_logpdf(model::ModelState,
         total_prob += sum(broadcast(log_logit, effects, Y))
     end
 
-    a_gradient += squeeze(sum(log_sigmoid_gradient,1),1)
-    b_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+    if model_spec.use_parenthood
+        total_prob += sum(normal_logpdf(a, b_sigma))
+        a_gradient += normal_logpdf_dx(a, b_sigma)
+        a_gradient += squeeze(sum(log_sigmoid_gradient,1),1)
+    end
+
+    if model_spec.use_childhood
+        total_prob += sum(normal_logpdf(b, b_sigma))
+        b_gradient += normal_logpdf_dx(b, b_sigma)
+        b_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+    end
+
 
     total_prob, a_gradient, b_gradient
 end
@@ -1046,7 +1056,12 @@ function vardim_logpdf(model::ModelState,
     end_index = start_index + L - 1
     new_index = end_index + 1 
 
-    W = copy(model.weights)
+    if model_spec.positive_W
+        W = exp(model.weights)
+    else
+        W = copy(model.weights)
+    end
+
     if u < L
         assert( aug_k < new_index)
         W[:,new_index] = 0.0
@@ -1093,7 +1108,17 @@ function vardim_logpdf(model::ModelState,
         gradient += LL_grad 
     end
 
-    gradient = Z'*gradient*Z
+    ZLZ = Z'*gradient*Z
+
+    if model_spec.symmetric_W
+        ZLZ_L = tril(ZLZ)
+        ZLZ_L[diagind(ZLZ)] = 0.0
+        ZLZ += ZLZ_L'
+        symmetrize!(ZLZ)
+    end
+
+
+    gradient = ZLZ.*W
 
     W_logpdf = model_spec.W_logpdf
     W_logpdf_gradient = model_spec.W_logpdf_gradient
@@ -1771,17 +1796,21 @@ function compute_observed_effects(model::ModelState,
     end
 
     if model_spec.use_parenthood
-        if length( X_p[i,:]) > 0
-            observed_effect += model.beta_p' * X_p[i,:]
+        if length( X_p[j,:]) > 0
+            observed_effect += model.beta_p' * X_p[j,:]
         end
-        observed_effect += model.a[i]
+        observed_effect += model.a[j]
     end
 
     if model_spec.use_childhood
-        if length( X_c[j,:]) > 0
-            observed_effect += model.beta_c' * X_c[j,:]
+        if length( X_c[i,:]) > 0
+            observed_effect += model.beta_c' * X_c[i,:]
         end
-        observed_effect += model.b[j]
+        if model_spec.symmetric_W
+            observed_effect += model.a[i]
+        else
+            observed_effect += model.b[i]
+        end
     end                                  
 
     observed_effect

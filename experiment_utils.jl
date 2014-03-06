@@ -2,7 +2,8 @@ require("model.jl")
 require("data_utils.jl")
 function train_test_split(YY::Array{Array{Float64, 2},1},
                           train_pct::Float64,
-                          symmetric_split::Bool)
+                          symmetric_split::Bool,
+                          rand_seed::Int64)
     assert(train_pct <= 1.0 && train_pct >= 0.0)
     Y = YY[1] 
     Ytri = triu(Y)
@@ -12,6 +13,7 @@ function train_test_split(YY::Array{Array{Float64, 2},1},
     else
         y_inds = find(ones(size(Y))-eye(size(Y)[1]))
     end
+    srand(rand_seed)
     shuffle!(y_inds)
     train_end = ifloor(train_pct * length(y_inds))
 
@@ -85,7 +87,7 @@ function run_batch(model_spec::ModelSpecification,
 
     datas = Array(Any, num_trials) 
     for i = 1:num_trials
-        Ytrain, Ytest = train_test_split(Y, train_pct, symmetric_split)
+        Ytrain, Ytest = train_test_split(Y, train_pct, symmetric_split, i)
         datas[i] = DataState(Ytrain, Ytest, copy(X_r), copy(X_p), copy(X_c))
     end
 
