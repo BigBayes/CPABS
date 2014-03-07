@@ -4,6 +4,32 @@ function incomplete_gamma(t::Float64, b::Float64)
     quadgk(x -> x^(t-1)*exp(-x), zero(t), b, reltol=100*eps(t))[1]
 end
 
+# Upper order form -- push zeros upwards, giving leftwards columns priority 
+function uof(Z::Matrix)
+    (N,K) = size(Z)
+
+    function lt(v1, v2)
+        for i = 1:length(v1)
+            if v1[i] < v2[i]
+                return true
+            elseif v2[i] < v1[i]
+                return false
+            end
+        end
+        return false
+    end
+
+    Zarray = Array(Vector{Int},N)
+    for i = 1:N
+        Zarray[i] = Z[i,:][:]
+    end
+
+    perm = sortperm(Zarray, lt=lt)
+
+    Znew = Z[perm,:]   
+    Znew, perm
+end
+
 # Utility probability functions
 function normal_logpdf(x, sigma)
     -x.*x/(2sigma*sigma) - 0.5log(2pi) - log(sigma)

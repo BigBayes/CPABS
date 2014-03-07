@@ -1,4 +1,5 @@
 using Distributions
+require("probability_util.jl")
 
 function generate_Z(N, lambda, gam)
 
@@ -52,11 +53,26 @@ function generate_Z(N, lambda, gam)
         end
         if Kr > 0
             Zr = zeros(N, Kr)
-            Z[right_points, :] = 1
+            Zr[right_points, :] = 1
             Z = [Z Zr]
         end
 
     end
 
-    Z
+    uof(Z)[1]
+end
+
+function generate_synthetic_data(N, lambda, gamma, w_sigma)
+    Z = generate_Z(N, lambda, gamma)
+
+    (N,K) = size(Z)
+    W = rand(Normal(0,w_sigma),(K,K))
+
+    effects = Z*W*Z'
+
+    pY = exp(broadcast(log_predictive,effects))
+
+    Y = broadcast(p->rand(Bernoulli(p)), pY)
+
+    return Z, W, Y
 end
