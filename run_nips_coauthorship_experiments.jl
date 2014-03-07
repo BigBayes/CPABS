@@ -13,9 +13,9 @@ opts = Dict{ASCIIString, Any}()
 positive_W = true
 
 if positive_W
-    hmc_opts = @options numsteps=2 stepsize=0.0003
+    hmc_opts = @options numsteps=4 stepsize=0.0002
     opts["hmc"] = hmc_opts
-    ref_opts = @options w=0.1 m=2 refractive_index_ratio=1.3
+    ref_opts = @options w=0.2 m=2 refractive_index_ratio=1.3
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
@@ -24,7 +24,7 @@ if positive_W
 else
     hmc_opts = @options numsteps=2 stepsize=0.0003
     opts["hmc"] = hmc_opts
-    ref_opts = @options w=0.05 m=1 refractive_index_ratio=1.3
+    ref_opts = @options w=0.1 m=2 refractive_index_ratio=1.3
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
@@ -46,7 +46,7 @@ model_spec.use_childhood = true
 
 trnpct = 0.8
 lambda = 1.0
-gamma = 1.0
+gamma = 1.5
 num_iterations = 500
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, num_iterations, 200, 10, 
           "NIPS_D$(model_spec.diagonal_W)_S$(model_spec.positive_W)_L$(lambda)_G$(gamma)_T$(tree_global_move_prob)_P$(trnpct)_N$num_iterations", "../results/nips/")

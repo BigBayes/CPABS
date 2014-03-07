@@ -32,16 +32,31 @@ function prior(model::ModelState,
     if model_spec.diagonal_W && length(W) > 0
         total_prob = sum(W_pdf(diag(W), w_sigma ))
     elseif model_spec.symmetric_W
-        total_prob = sum(tril(W_pdf(W, w_sigma )))
+        total_prob = sum(triu(W_pdf(W, w_sigma )))
     else
         total_prob = sum(W_pdf(W, w_sigma ))
     end
 
-    total_prob += sum(normal_logpdf(model.beta, b_sigma))
-    total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
-    total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
-    total_prob += sum(normal_logpdf(model.a, b_sigma))
-    total_prob += sum(normal_logpdf(model.b, b_sigma))
+    if length(model.beta) > 0
+        total_prob += sum(normal_logpdf(model.beta, b_sigma))
+    end
+
+    if length(model.beta_p) > 0
+        total_prob += sum(normal_logpdf(model.beta_p, b_sigma))
+    end
+
+    if length(model.beta_c) > 0
+        total_prob += sum(normal_logpdf(model.beta_c, b_sigma))
+    end
+
+    if model_spec.use_parenthood
+        total_prob += sum(normal_logpdf(model.a, b_sigma))
+    end
+
+    if model_spec.use_childhood && !model_spec.symmetric_W
+        total_prob += sum(normal_logpdf(model.b, b_sigma))
+    end
+
     total_prob += normal_logpdf(model.c, b_sigma)
 
     gam = model.gamma
@@ -791,11 +806,24 @@ function W_full_logpdf(model::ModelState,
         log_probs += log_probs_t
     end
 
+    prior_terms = 0.0
+
     if model_spec.positive_W # W is represented in log space 
-        return sum(sum(log_probs)) + sum(exp_logpdf(W, sigma)) + sum(model.weights)
+        prior_terms =  exp_logpdf(W, sigma) + model.weights
     else
-        return sum(sum(log_probs)) + sum(normal_logpdf(W, sigma))
+        prior_terms = normal_logpdf(W, sigma)
     end
+
+    prior_term = 0.0
+    if model_spec.diagonal_W
+        prior_term = sum(diag(prior_terms))
+    elseif model_spec.symmetric_W
+        prior_term = sum(triu(prior_terms))
+    else
+        prior_term = sum(prior_terms)
+    end
+
+    return sum(sum(log_probs)) + prior_term
 end
 
 function W_full_logpdf_gradient(model::ModelState,
@@ -833,13 +861,23 @@ function W_full_logpdf_gradient(model::ModelState,
         symmetrize!(ZLZ)
     end
 
-    if model_spec.positive_W # W is represented in log space 
+    LL_grad = 0.0
+    prior_grad = 0.0
+    if model_spec.positive_W
         LL_grad = ZLZ.*W
-        return LL_grad + exp_logpdf_dx(W, sigma).*W + ones(size(W))
+        prior_grad = exp_logpdf_dx(W, sigma).*W + ones(size(W))
     else
         LL_grad = ZLZ
-        return LL_grad + normal_logpdf_dx(W, sigma)
+        prior_grad = normal_logpdf_dx(W, sigma)
+    end 
+
+    if model_spec.diagonal_W
+        prior_grad = diagm(diag(prior_grad))
+    elseif model_spec.symmetric_W
+        prior_grad = triu(prior_grad)
     end
+
+    return LL_grad + prior_grad
 
 end
 ###################################
