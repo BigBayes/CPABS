@@ -913,9 +913,13 @@ function ab_logpdf(model::ModelState,
     end
 
     if model_spec.use_childhood
-        total_prob += sum(normal_logpdf(b, b_sigma))
-        b_gradient += normal_logpdf_dx(b, b_sigma)
-        b_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+        if model_spec.symmetric_W
+            a_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+        else
+            total_prob += sum(normal_logpdf(b, b_sigma))
+            b_gradient += normal_logpdf_dx(b, b_sigma)
+            b_gradient += squeeze(sum(log_sigmoid_gradient,2),2)
+        end
     end
 
 
@@ -1786,10 +1790,10 @@ function compute_relevant_pairs(model_spec::ModelSpecification,
     [I', J']
 end
 
-function symmetrize!(A::Array)
-    triu_inds = find(triu(ones(size(A)),1))
-    A[triu_inds] = tril(A,1)'[triu_inds];
-end
+#function symmetrize!(A::Array)
+#    triu_inds = find(triu(ones(size(A)),1))
+#    A[triu_inds] = tril(A,1)'[triu_inds];
+#end
 
 # Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
 function compute_observed_effects(model::ModelState,

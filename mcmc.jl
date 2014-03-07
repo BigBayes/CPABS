@@ -240,7 +240,7 @@ function mcmc_sweep(model::ModelState,
         sample_a(model, model_spec, data, latent_effects)
     end
 
-    if model_spec.use_childhood
+    if model_spec.use_childhood && !model_spec.symmetric_W
         sample_b(model, model_spec, data, latent_effects)
     end
 
@@ -460,7 +460,7 @@ function sample_W_full(model::ModelState,
         A = ones(K,K)
         triu_inds = find(triu(A))
         vectorize = x -> x[triu_inds]
-        devectorize = x -> (A = zeros(K,K); A[triu_inds] = x; symmetrize(A)) 
+        devectorize = x -> (A = zeros(K,K); A[triu_inds] = x; symmetrize!(A); A) 
     elseif model_spec.diagonal_W
         vectorize = x -> diag(x)
         devectorize = x -> diagm(x)
@@ -488,7 +488,7 @@ function sample_W_full(model::ModelState,
     x = vectorize(model.weights) 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
-         
+        
         x_prev = copy(x)
         x = hmc_sampler(x, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
         if x_prev != x
@@ -578,7 +578,7 @@ function sample_Z(model::ModelState,
             A = ones(K+1,K+1)
             triu_inds = find(triu(A))
             vectorize = x -> x[triu_inds]
-            devectorize = x -> (A = zeros(K+1,K+1); A[triu_inds] = x; symmetrize!(A)) 
+            devectorize = x -> (A = zeros(K+1,K+1); A[triu_inds] = x; symmetrize!(A); A) 
         elseif model_spec.diagonal_W
             vectorize = x -> diag(x)
             devectorize = x -> diagm(x)

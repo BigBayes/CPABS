@@ -21,19 +21,20 @@ function train_test_split(YY::Array{Array{Float64, 2},1},
 
     train_mask = zeros(size(Y))
     train_mask[y_train_inds] = 1
+    test_mask = 1 - train_mask
 
     if symmetric_split
-        train_mask = triu(train_mask)' + triu(train_mask,1)
+        train_mask = triu(train_mask,1)
+        test_mask = triu(test_mask,1)    
     end
-    test_mask = 1 - train_mask
 
     Ytrain = deepcopy(YY)
     Ytest = deepcopy(YY)
 
     for i = 1:length(YY)
 
-        Ytrain[i][find(test_mask)] = -1
-        Ytest[i][find(train_mask)] = -1
+        Ytrain[i][find(1-train_mask)] = -1
+        Ytest[i][find(1-test_mask)] = -1
 
         # remove diagonal terms
         diag_mask = diagm(ones(size(Y)[1]))
@@ -100,12 +101,13 @@ function run_batch(model_spec::ModelSpecification,
         lambdas = lambda*ones(num_trials)
         gammas = gamma*ones(num_trials)
         sigmas = w_sigma*ones(num_trials)
+        b_sigmas = b_sigma*ones(num_trials)
         model_specs = [deepcopy(model_spec) for i = 1:num_trials]
         num_iterses = num_iterations*ones(Int, num_trials)
         burn_iterses = burnin_iterations*ones(Int, num_trials)
 
         pmap(run_and_save, result_paths, id_strings, trials, datas, 
-             lambdas, gammas, sigmas, model_specs, num_iterses, burn_iterses)
+             lambdas, gammas, sigmas, b_sigmas, model_specs, num_iterses, burn_iterses)
 
     else
         run_and_save(result_path, id_string, 1, datas[1], 

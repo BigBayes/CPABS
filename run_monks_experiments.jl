@@ -17,7 +17,7 @@ opts["RTJ_options"] = ref_opts
 #opts["RTJ_sampler"] = hmc_sampler
 #opts["RTJ_options"] = hmc_opts
 
-positive_W = true
+positive_W = false
 
 if positive_W
     model_spec = ModelSpecification(false, false, false, false, false, false, exp_logpdf, exp_logpdf_dx, log(0.01), ones(3)/3, 1.0, 1.0, opts, false, false)
@@ -25,6 +25,8 @@ if positive_W
 else
     model_spec = ModelSpecification(false, false, false, false, false, false, normal_logpdf, normal_logpdf_dx, 0.0, ones(3)/3, 1.0, 1.0, opts, false, false)
 end
+
+#model_spec.symmetric_W = true
 model_spec.use_parenthood = true
 #model_spec.use_childhood = true
 
@@ -33,7 +35,7 @@ X_p = zeros((0,0))
 X_c = zeros((0,0))
 
 w_sigma = 1.0
-b_sigma = 10.0
+b_sigma = 1.0
 
 trnpct = 0.8
 symmetric_split = false
