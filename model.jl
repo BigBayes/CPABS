@@ -92,6 +92,7 @@ type ModelSpecification
 
     debug::Bool
     verbose::Bool
+    plot::Bool
 end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parenthood,
@@ -102,7 +103,7 @@ copy(ms::ModelSpecification) = ModelSpecification(ms.use_pairwise, ms.use_parent
                                    copy(ms.rrj_jump_probabilities), 
                                    ms.global_move_probability,
                                    ms.Z_sample_branch_prob, ms.options,
-                                   ms.debug, ms.verbose)
+                                   ms.debug, ms.verbose, ms.plot)
 
 # Data container
 type DataState

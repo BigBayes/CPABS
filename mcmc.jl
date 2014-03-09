@@ -2,6 +2,7 @@ require("model.jl")
 require("tree.jl")
 require("probability_util.jl")
 require("pdf.jl")
+require("plot_utils.jl")
 
 require("slicesampler.jl")
 require("refractive_sampler.jl")
@@ -174,6 +175,10 @@ function mcmc(data::DataState,
 
         mcmc_sweep(model, model_spec, data)
 
+        if model_spec.plot
+            ZZ, UU, WW = model2array(model)
+            dendrogram(ZZ,UU)
+        end
 
         if iter > burnin_iterations
             Z = ConstructZ(model.tree) 
