@@ -1,19 +1,49 @@
 using Winston
 import Winston.Interval
-function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArray{T,2}, clims::Interval)
+function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArray{T,2}, clims::Interval; plot=true)
     p = FramedPlot()
     setattr(p, "xrange", xrange)
     setattr(p, "yrange", reverse(yrange))
     img = Winston.data2rgb(data, clims, Winston.GrayColormap())
     add(p, Image(xrange, reverse(yrange), img))
-    Winston.tk(p)
+
+    if plot
+        Winston.tk(p)
+    else
+        return p
+    end
 end
 
-imagegs(xrange, yrange, data) = imagegs(xrange, yrange, data, (min(data),max(data)))
-imagegs(data) = ((h, w) = size(data); imagegs((0,w), (0,h), max(data)-data))
+imagegs(xrange, yrange, data; plot=true) = imagegs(xrange, yrange, data, (min(data),max(data)), plot=plot)
+imagegs(data; plot=true) = ((h, w) = size(data); imagegs((0,w), (0,h), max(data)-data, plot=plot))
 
-# Format of Z:
-function dendrogram(Z, U)
+# Upper order form -- push zeros upwards, giving leftwards columns priority 
+function uof(Z::Matrix)
+    (N,K) = size(Z)
+
+    function lt(v1, v2)
+        for i = 1:length(v1)
+            if v1[i] < v2[i]
+                return true
+            elseif v2[i] < v1[i]
+                return false
+            end
+        end
+        return false
+    end
+
+    Zarray = Array(Vector{Int},N)
+    for i = 1:N
+        Zarray[i] = Z[i,:][:]
+    end
+
+    perm = sortperm(Zarray, lt=lt)
+
+    Znew = Z[perm,:]   
+    Znew, perm
+end
+
+function dendrogram(Z, U; plot=true)
 
     Nm1, _ = size(Z)
     N = Nm1+1
@@ -107,7 +137,9 @@ function dendrogram(Z, U)
 
     add(p, Points(mutations_x, mutations_y, "type", "diamond"))
 
-    Winston.tk(p)
+    if plot
+        Winston.tk(p)
+    end
     p
 end
 
@@ -123,4 +155,41 @@ function get_mutation_plot_locations(nU, x, y_min, y_max)
         push!(y_inds, y)
     end
     (x_inds, y_inds)
+end
+
+function plot_Z_Y_pY(Z, Y, effects; plot=true)
+
+    Z, perm = uof(Z)
+    N = length(perm)
+
+    perm = reverse(perm)
+    Z = Z[reverse([1:N]),:]
+
+    Y = deepcopy(Y)
+
+    for s = 1:length(Y)
+        YY = Y[s]
+        YY[find(YY .< 0)] = 0
+    end
+
+    Y = mean(Y)
+    Y = Y[perm,perm]
+    pY = broadcast(log_predictive, effects)
+    pY = pY[perm,perm]
+
+    plot_Y = imagegs(Y, plot=false)
+    plot_Z = imagegs(Z, plot=false)
+    plot_pY = imagegs(pY, plot=false)
+
+
+    if plot
+        t = Table(1,3)
+        t[1,1] = plot_Z
+        t[1,2] = plot_pY
+        t[1,3] = plot_Y
+        Winston.tk(t)
+        t
+    else
+        plot_Z, plot_Y, plot_pY
+    end
 end
