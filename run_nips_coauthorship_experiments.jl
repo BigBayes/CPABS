@@ -11,6 +11,9 @@ Z_sample_prob = 0.25
 opts = Dict{ASCIIString, Any}()
 
 positive_W = true
+if !isdefined(:plotting)
+    plotting = false
+end
 
 if positive_W
     hmc_opts = @options numsteps=4 stepsize=0.0002
@@ -19,7 +22,7 @@ if positive_W
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
-    model_spec = ModelSpecification(false, false, false, false, false, false, exp_logpdf, exp_logpdf_dx, log(0.01), ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false)
+    model_spec = ModelSpecification(false, false, false, false, false, false, exp_logpdf, exp_logpdf_dx, log(0.01), ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false,plotting)
     model_spec.positive_W = true
 else
     hmc_opts = @options numsteps=2 stepsize=0.0003
@@ -28,7 +31,7 @@ else
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
-    model_spec = ModelSpecification(false, false, false, false, false, false, normal_logpdf, normal_logpdf_dx, 0.0, ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false)
+    model_spec = ModelSpecification(false, false, false, false, false, false, normal_logpdf, normal_logpdf_dx, 0.0, ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false,plotting)
 end
 model_spec.diagonal_W = false
 
