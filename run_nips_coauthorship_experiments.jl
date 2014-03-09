@@ -10,7 +10,7 @@ Z_sample_prob = 0.25
 
 opts = Dict{ASCIIString, Any}()
 
-positive_W = false
+positive_W = true
 if !isdefined(:plotting)
     plotting = false
 end

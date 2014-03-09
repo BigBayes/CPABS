@@ -2,7 +2,10 @@ require("model.jl")
 require("tree.jl")
 require("probability_util.jl")
 require("pdf.jl")
-require("plot_utils.jl")
+
+try
+    require("plot_utils.jl")
+end
 
 require("slicesampler.jl")
 require("refractive_sampler.jl")
