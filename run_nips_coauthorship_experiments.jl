@@ -46,7 +46,7 @@ model_spec.use_childhood = true
 
 trnpct = 0.8
 lambda = 1.0
-gamma = 1.5
+gamma = 2.0
 num_iterations = 500
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, num_iterations, 200, 10, 
           "NIPS_D$(model_spec.diagonal_W)_S$(model_spec.positive_W)_L$(lambda)_G$(gamma)_T$(tree_global_move_prob)_P$(trnpct)_N$num_iterations", "../results/nips/")
