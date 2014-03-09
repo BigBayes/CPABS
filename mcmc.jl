@@ -177,7 +177,22 @@ function mcmc(data::DataState,
 
         if model_spec.plot
             ZZ, UU, WW = model2array(model)
-            dendrogram(ZZ,UU)
+            p_dendrogram = dendrogram(ZZ,UU, plot=false)
+
+            Z = ConstructZ(model.tree) 
+            Y = data.Ytrain
+            (latent_effects, observed_effects) = 
+                construct_effects(model, model_spec, data, Z)
+            effects = latent_effects + observed_effects 
+
+            p_Z, p_Y, p_pY = plot_Z_Y_pY(Z, Y, effects, plot=false)
+            tbl = Table(2,2)
+            tbl[1,1] = p_dendrogram
+            tbl[2,1] = p_Z
+            tbl[1,2] = p_Y
+            tbl[2,2] = p_pY
+            Winston.tk(tbl)
+ 
         end
 
         if iter > burnin_iterations
