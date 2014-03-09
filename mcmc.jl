@@ -526,12 +526,14 @@ function sample_Z(model::ModelState,
     for i = root_to_leaf
         cur = tree.nodes[i]
         parent = cur.parent    
-
+        cur_mu_prop = cur.rhot
+        
         if i != root.index
             self_direction = find(parent.children .== cur)[1]
-            cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
-            cur_mu_prop *= parent.rhot
+            cur_mu_prop *= self_direction == 1 ? parent.rho : 1-parent.rho
             mu[i] = mu[parent.index]*cur_mu_prop
+        else
+            mu[i] = cur_mu_prop
         end
     end
 
@@ -541,15 +543,10 @@ function sample_Z(model::ModelState,
         tree = model.tree #make sure after copies to model we have the right tree ref
         node_index = root_to_leaf[rtl_index]
         
-        # root node cannot have features above it
-        if node_index == root.index
-            continue
-        end
         if rand() > model_spec.Z_sample_branch_prob
             continue
         end
 
-        parent_index = tree.nodes[node_index].parent.index
 
         if mod(rtl_index,ceil(length(root_to_leaf)/10)) == 0
             percent = ceil(rtl_index/ceil(length(root_to_leaf)/10))*10
@@ -561,8 +558,14 @@ function sample_Z(model::ModelState,
 
         tU = [tree.nodes[i].state for i = 1:2N-1]
 
-        effective_lambda = model.lambda * (mu[parent_index]^model.gamma - mu[node_index]^model.gamma)
+        effective_lambda = 1.0
+        if node_index == root.index
+            effective_lambda = model.lambda * (1.0 - mu[node_index]^model.gamma)
+        else
+            parent_index = tree.nodes[node_index].parent.index
+            effective_lambda = model.lambda * (mu[parent_index]^model.gamma - mu[node_index]^model.gamma)
 
+        end
         new_model = copy(model)
         L = u + randmult(model_spec.rrj_jump_probabilities) - 2
 
@@ -1504,13 +1507,17 @@ function sample_rho_rhot(model::ModelState,
             cur = tree.nodes[i]
             l = tree.nodes[i].children[1].index
             r = tree.nodes[i].children[2].index
+            cur_prob = tree.nodes[i].rhot
             if i != root.index
-                left_prob = tree.nodes[i].rhot*tree.nodes[i].rho
-                right_prob = tree.nodes[i].rhot*(1.0-tree.nodes[i].rho)
+                parent = tree.nodes[i].parent
+                self_direction = find(parent.children .== cur)[1]
+                rho = self_direction == 1 ? parent.rho : 1-parent.rho
 
-                T[l] = T[i] * left_prob^gam
-                T[r] = T[i] * right_prob^gam
+                cur_prob *= rho 
             end
+
+            T[l] = T[i] * cur_prob^gam
+            T[r] = T[i] * cur_prob^gam
         end
     end
 
@@ -1518,18 +1525,21 @@ function sample_rho_rhot(model::ModelState,
         if i > N
             left_child = tree.nodes[i].children[1]
             right_child = tree.nodes[i].children[2]
+            l = left_child.index
+            r = right_child.index
+
             K[i] = K[left_child.index] + K[right_child.index] +
                    left_child.state + right_child.state 
       
 
             if left_child.index > N 
-                left_prob = (1-(tree.nodes[i].rhot*tree.nodes[i].rho)^gam)
+                left_prob = (1-(tree.nodes[l].rhot*tree.nodes[i].rho)^gam)
             else
                 left_prob = 1
             end
 
             if right_child.index > N
-                right_prob = (1-(tree.nodes[i].rhot*(1.0-tree.nodes[i].rho))^gam)
+                right_prob = (1-(tree.nodes[r].rhot*(1.0-tree.nodes[i].rho))^gam)
             else
                 right_prob = 1
             end
@@ -1551,40 +1561,65 @@ function sample_rho_rhot(model::ModelState,
 
             k_l = left_child.state
             k_r = right_child.state
+            k_p = cur.state
+
             N_l = left_child.num_leaves
             N_r = right_child.num_leaves
-             
-            rho = cur.rho
+            N_p = cur.num_leaves
+            
+            nu_p = 1.0
+            if i != root.index
+                parent = cur.parent
+                self_direction = find(parent.children .== cur)[1]
+                nu_p = self_direction == 1 ? parent.rho : 1-parent.rho 
+            end
+
             rhot = cur.rhot
-            nut_l = cur.rhot
-            nut_r = cur.rhot
+            nut_l = left_child.rhot
+            nut_r = right_child.rhot
+ 
+            rho = cur.rho
             nu_l = cur.rho
             nu_r = 1-cur.rho
 
-            T_l = T[l] * T_mult[i]
-            T_r = T[r] * T_mult[i]
+            T_p = T[i] * T_mult[i]
+            S_p = S_f[i] * T_mult[i] / (cur.rhot * nu_p) 
+            p_s = 1-2/(N_l+N_r+1)
 
-            S_l = S_f[l] * T_mult[i] / (nut_l * nu_l)^gam
-            S_r = S_f[r] * T_mult[i] / (nut_r * nu_r)^gam 
+#            println("p_s: $p_s")
+#            println("N_p: $N_p")
+#            println("nu_p: $nu_p")
+#            println("k_p: $k_p")
+#            println("K_p: $(K[i])")
+#            println("T_p: $T_p")
+#            println("S_p: $S_p")
+
+            f = x -> logsumexp( rhot_splits(x, p_s, i, N_p, gam, lambda, nu_p, 
+                                    k_p, K[i], T_p, S_p))
+
+            rhot = rhot == 1.0 ? rand(Uniform(0,1)) : rhot
+            (rhot_u, f_rhot) = slice_sampler(rhot, f, 0.1, 10, 0.0, 1.0)
+
+            f_vals = rhot_splits(rhot_u, p_s, i, N_p, gam, lambda, nu_p,
+                                    k_p, K[i], T_p, S_p)
+
+            f_ind = rand(Categorical(exp_normalize(f_vals)))
+            rhot = f_ind == 1 ? 1.0 : rhot_u
+
+
+
+            T_l = T[l] * T_mult[i] * rhot / cur.rhot
+            T_r = T[r] * T_mult[i] * rhot / cur.rhot
+
+            S_l = S_f[l] * T_mult[i] * (rhot / cur.rhot) / (nut_l * nu_l)^gam
+            S_r = S_f[r] * T_mult[i] * (rhot / cur.rhot) / (nut_r * nu_r)^gam 
      
             f = x -> rho_logpdf(x, l, r, N, gam, lambda, nut_l, nut_r, k_l, k_r, 
                                 K[l], K[r], T[l], T[r], S_l, S_r, N_l, N_r) 
             (rho, f_rho) = slice_sampler(rho, f, 0.1, 10, 0.0, 1.0)
 
 
-            p_s = 2/(N_l+N_r+1)
-            f = x -> logsumexp( rhot_splits(x, p_s, l, r, N, gam, lambda, nu_l, nu_r, 
-                                    k_l, k_r, K[l], K[r], T[l], T[r], S_l, S_r))
 
-            rhot = rhot == 1.0 ? rand(Uniform(0,1)) : rhot
-
-            (rhot_u, f_rhot) = slice_sampler(rhot, f, 0.1, 10, 0.0, 1.0)
-
-            f_vals = rhot_splits(rhot_u, p_s, l, r, N, gam, lambda, nu_l, nu_r,
-                                    k_l, k_r, K[l], K[r], T[l], T[r], S_l, S_r)
-
-            f_ind = rand(Categorical(exp_normalize(f_vals)))
-            rhot = f_ind == 1 ? 1.0 : rhot_u
 
             # Update for T and S
             l_new = rhot*rho

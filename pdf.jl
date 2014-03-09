@@ -81,7 +81,9 @@ function prior(model::ModelState,
             self_direction = find(parent.children .== cur)[1]
             cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
             mu[i] = mu[parent.index]*cur_mu_prop
-            t[i] = t[parent.index]*(parent.rhot*cur_mu_prop)^gam
+            t[i] = t[parent.index]*(cur.rhot*cur_mu_prop)^gam
+        else
+            t[i] = cur.rhot^gam
         end
     end
 
@@ -102,7 +104,7 @@ function prior(model::ModelState,
             psi_term += -log(N_i) - log(N_i-1)
 
             N_i = cur.num_leaves
-            p_s = 2/(N_i+1)
+            p_s = 1-2/(N_i+1)
 
             rhot = tree.nodes[i].rhot
             if rhot == 1.0
@@ -112,11 +114,12 @@ function prior(model::ModelState,
             end
             
         end
+        parent_t = 1.0
         if i != root.index
             parent_t = t[parent.index]
-            inf_term += poisson_logpdf(tree.nodes[i].state, lambda * (parent_t - t[i]))
         end
 
+        inf_term += poisson_logpdf(tree.nodes[i].state, lambda * (parent_t - t[i]))
     end
 
 #    if inf_term < -3.0
@@ -245,11 +248,13 @@ function psi_infsites_logpdf(model::ModelState,
         parent = cur.parent    
         num_leaves = cur.num_leaves
 
+        cur_mu_prop = cur.rhot
         if i != root.index
             self_direction = find(parent.children .== cur)[1]
-            cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
-            cur_mu_prop *= parent.rhot
+            cur_mu_prop *= self_direction == 1 ? parent.rho : 1-parent.rho
             mu_1[i] = mu_1[parent.index]*cur_mu_prop
+        else
+            mu_1[i] = cur.rhot
         end
 
         mu_2[i] = mu_1[i] * pruned_mu_prop 
@@ -259,12 +264,12 @@ function psi_infsites_logpdf(model::ModelState,
         cur = tree.nodes[j]
         parent = cur.parent    
         if j == pruned_index
-            mu_3[parent.index] = 1.0
+            mu_3[parent.index] = parent.rhot
         end
 
         self_direction = find(parent.children .== cur)[1]
         cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
-        cur_mu_prop *= parent.rhot
+        cur_mu_prop *= cur.rhot
         mu_3[j] = mu_3[parent.index]*cur_mu_prop
     end
 
@@ -279,15 +284,17 @@ function psi_infsites_logpdf(model::ModelState,
     subtree_probs = -Inf * ones(2N - 1)
     for i = indices
         graft_node = tree.nodes[i]
+        parent = graft_node.parent
 
-        if i > N 
-            t_graft = t_1[i]
+        t_parent = i == root.index ? 1.0 : t_1[parent.index]
+        if i == root.index
+            graft_rho = 1.0
         else
-            parent = graft_node.parent
             self_direction = find(parent.children .== graft_node)[1]
-            mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho 
-            t_graft = t_1[parent.index] * (mu_prop * parent.rhot)^gam
+            graft_rho = self_direction == 1 ? parent.rho : 1-parent.rho 
         end
+
+        t_graft = t_parent * graft_rho^gam
 
         if length(pruned_indices) > 0
             subtree_probs[i] = 0.0
@@ -344,8 +351,9 @@ function psi_infsites_logpdf(model::ModelState,
             parent = cur.parent
             self_direction = find(parent.children .== cur)[1]
             mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho 
-            pruned_parent_t = parent_t1 * (mu_prop * parent.rhot)^gam
+            pruned_parent_t = parent_t1 * (mu_prop * pruned_parent.rhot)^gam
         end
+
         poisson_mean_after_above = model.lambda * (parent_t1 - pruned_parent_t)
         poisson_mean_after_below = model.lambda * (pruned_parent_t - t_2[i])
 
@@ -650,8 +658,8 @@ function prior_tree(tree::Tree,
             N_i = cur.num_leaves
             assert(N_l + N_r == N_i)
 
-            ps_new = 2/(N_i+pruned_leaves+1)
-            ps_old = 2/(N_i+1)
+            ps_new = 1-2/(N_i+pruned_leaves+1)
+            ps_old = 1-2/(N_i+1)
 
             rhot_prob[i] = cur.rhot == 1.0 ? log(ps_new)-log(ps_old) : 
                                 (log(1-ps_new) + log(ps_new) + (ps_new-1)*log(cur.rhot) -
@@ -669,7 +677,7 @@ function prior_tree(tree::Tree,
         end
 
         total_leaves = num_leaves + pruned_leaves
-        p_s = 2/(total_leaves + 1)
+        p_s = 1-2/(total_leaves + 1)
         rhot = pruned_parent.rhot
         cur_rhot_prob = rhot == 1.0 ? log(p_s) : log(1-p_s) + log(p_s) + (p_s-1)*log(rhot) 
 
@@ -693,23 +701,24 @@ end
 ###### pdfs for rho, rhot updates #
 ###################################
 
-function rhot_logf(rhot, l, r, N, gam, lambda, nu_l, nu_r,
-                   k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r)
-    Rl = l > N ? 1.0-(nu_l*rhot)^gam : 1.0
-    Rr = r > N ? 1.0-(nu_r*rhot)^gam : 1.0
-    k_l*log(Rl) + k_r*log(Rr) + gam*(K_l+K_r)*log(rhot) -
-    lambda*( T_l*Rl + T_r*Rr + 
-            (S_l*nu_l^gam + S_r*nu_r^gam)*rhot^gam )
+function rhot_logf(rhot, p, N, gam, lambda, nu_p,
+                   k_p, K_p, T_p, S_p)
+    Rp = p > N ? 1.0-(nu_p*rhot)^gam : 1.0
+    if Rp == 0.0 && k_p == 0
+        return gam*(K_p)*log(rhot) - lambda*( T_p*Rp + S_p*nu_p^gam*rhot^gam )
+    end
+    k_p*log(Rp) + gam*(K_p)*log(rhot) -
+    lambda*( T_p*Rp + S_p*nu_p^gam*rhot^gam )
 end
 
-function rhot_splits(rhot, p_s, l, r, N, gam, lambda, nu_l, nu_r, 
-                     k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r)
+function rhot_splits(rhot, p_s, p, N, gam, lambda, nu_p, 
+                     k_p, K_p, T_p, S_p)
     f1 = log(p_s) + 
-         rhot_logf(1.0, l, r, N, gam, lambda, nu_l, nu_r, k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r)
+         rhot_logf(1.0, p, N, gam, lambda, nu_p, k_p, K_p, T_p, S_p)
 
     f2 = log(1-p_s)+log(p_s)+(p_s-1)*log(rhot) + 
-         rhot_logf(rhot, l, r, N, gam, lambda, nu_l, nu_r, k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r)
-   
+         rhot_logf(rhot, p, N, gam, lambda, nu_p, k_p, K_p, T_p, S_p)
+ 
     return [f1, f2] 
 end
 

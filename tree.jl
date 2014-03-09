@@ -433,7 +433,23 @@ function tree2array(tree::Tree,
     nodes = tree.nodes
     _2Nm1 = length(nodes)
     N::Int = (_2Nm1+1) / 2
-    times = [ (1-gam)^(tree.nodes[i].num_ancestors) for i = N+1:2N-1]
+
+    times = zeros(N-1)
+
+    for i = 1:N-1
+        index = i+N
+        cur = tree.nodes[index]
+        p = cur.parent
+
+        if p.parent == Nil()
+            times[i] = (cur.rhot)^gam
+        else
+            self_direction = find(p.children .== cur)[1];
+            cur_split = self_direction == 1 ? p.rho : 1-p.rho
+            times[i] = times[p]*(cur.rhot*cur_split)^gam
+        end
+    end
+
     I = sortperm(times)
     II = N+I
 
@@ -465,6 +481,5 @@ function tree2array(tree::Tree,
     end
 
     states = [nodes[i].state for i = sorted_inds]
-
     (Z, states, sorted_inds)
 end
