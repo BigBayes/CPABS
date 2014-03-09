@@ -10,7 +10,7 @@ Z_sample_prob = 0.25
 
 opts = Dict{ASCIIString, Any}()
 
-positive_W = true
+positive_W = false
 if !isdefined(:plotting)
     plotting = false
 end
@@ -18,7 +18,7 @@ end
 if positive_W
     hmc_opts = @options numsteps=4 stepsize=0.0002
     opts["hmc"] = hmc_opts
-    ref_opts = @options w=0.2 m=2 refractive_index_ratio=1.3
+    ref_opts = @options w=0.02 m=2 refractive_index_ratio=1.3
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
@@ -27,7 +27,7 @@ if positive_W
 else
     hmc_opts = @options numsteps=2 stepsize=0.0003
     opts["hmc"] = hmc_opts
-    ref_opts = @options w=0.1 m=2 refractive_index_ratio=1.3
+    ref_opts = @options w=0.01 m=2 refractive_index_ratio=1.3
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
