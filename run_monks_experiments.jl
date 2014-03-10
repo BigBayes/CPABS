@@ -1,5 +1,3 @@
-using Distributions
-
 require("experiment_utils.jl")
 require("mcmc.jl")
 require("hmc.jl")

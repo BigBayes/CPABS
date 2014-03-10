@@ -4,6 +4,10 @@ function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArra
     p = FramedPlot()
     setattr(p, "xrange", xrange)
     setattr(p, "yrange", reverse(yrange))
+    if clims[1] == clims[2] # avoid divide-by-0
+        clims = (clims[1], clims[1]+1)
+    end
+
     img = Winston.data2rgb(data, clims, Winston.GrayColormap())
     add(p, Image(xrange, reverse(yrange), img))
 
@@ -159,6 +163,8 @@ end
 
 function plot_Z_Y_pY(Z, Y, effects; plot=true)
 
+    (N,K) = size(Z)
+
     Z, perm = uof(Z)
     N = length(perm)
 
@@ -174,13 +180,17 @@ function plot_Z_Y_pY(Z, Y, effects; plot=true)
 
     Y = mean(Y)
     Y = Y[perm,perm]
-    pY = broadcast(log_predictive, effects)
+    pY = exp(broadcast(log_predictive, effects))
     pY = pY[perm,perm]
 
     plot_Y = imagegs(Y, plot=false)
-    plot_Z = imagegs(Z, plot=false)
     plot_pY = imagegs(pY, plot=false)
 
+    if K == 0
+        Z = zeros(N,1)
+    end
+
+    plot_Z = imagegs(Z, plot=false)
 
     if plot
         t = Table(1,3)

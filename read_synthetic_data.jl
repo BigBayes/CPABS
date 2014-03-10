@@ -1,10 +1,12 @@
-using MAT
+using HDF5
+using JLD
 
-synthetic_data = matopen("jimmy_synthetic/synthetic_3_julia.mat")
+@load "../data/synthetic/synthetic_data1.jld"
 
-Y = read(synthetic_data["Xnew"]);
-Z = read(synthetic_data["Znew"]);
-W = read(synthetic_data["W"]);
+N = size(Y,1)
+srand(1)
+perm = randperm(N)
+Y = Y[perm,perm]
 
-YY = Array(Array{Int64,2},1)
-YY[1] = convert(Array{Int64},Y)
+YY = Array(Array{Float64,2},1)
+YY[1] = convert(Array{Float64},Y)
