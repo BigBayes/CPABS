@@ -309,6 +309,9 @@ function mcmc_sweep(model::ModelState,
     end
     vardim_time = time() - vardim_time
 
+    Z = ConstructZ(model.tree)
+    sample_W_full(model, model_spec, data, Z, observed_effects)
+
     (K,K) = size(model.weights)
     println("MCMC Timings (psi, rho, W, vardim) = ", (psi_time, rho_time, W_time, vardim_time))
     println("K: ", K)
@@ -479,14 +482,14 @@ function sample_W_full(model::ModelState,
 
     num_W_sweeps = 3
 
-    if model_spec.symmetric_W
+    if model_spec.diagonal_W
+        vectorize = x -> diag(x)
+        devectorize = x -> diagm(x)
+    elseif model_spec.symmetric_W
         A = ones(K,K)
         triu_inds = find(triu(A))
         vectorize = x -> x[triu_inds]
         devectorize = x -> (A = zeros(K,K); A[triu_inds] = x; symmetrize!(A); A) 
-    elseif model_spec.diagonal_W
-        vectorize = x -> diag(x)
-        devectorize = x -> diagm(x)
     else
         vectorize = x -> x[:]
         devectorize = x -> reshape(x, (K,K))
@@ -506,14 +509,14 @@ function sample_W_full(model::ModelState,
 
     accept_count = 0
     total_count = 0
-    hmc_opts = model_spec.options["hmc"] 
-
+    W_sampler = model_spec.options["W_sampler"] 
+    W_opts = model_spec.options["W_options"]
     x = vectorize(model.weights) 
     for iter = 1:num_W_sweeps
         println("W sampling sweep ", iter,"/",num_W_sweeps)
         
         x_prev = copy(x)
-        x = hmc_sampler(x, W_logpdf_vectorized, W_logpdf_gradient_vectorized, hmc_opts)
+        x = W_sampler(x, W_logpdf_vectorized, W_logpdf_gradient_vectorized, W_opts)
         if x_prev != x
             accept_count +=1
         end
@@ -599,15 +602,15 @@ function sample_Z(model::ModelState,
         end
 
         K = K + L - u
-
-        if model_spec.symmetric_W
+        
+        if model_spec.diagonal_W
+            vectorize = x -> diag(x)
+            devectorize = x -> diagm(x)
+        elseif model_spec.symmetric_W
             A = ones(K+1,K+1)
             triu_inds = find(triu(A))
             vectorize = x -> x[triu_inds]
             devectorize = x -> (A = zeros(K+1,K+1); A[triu_inds] = x; symmetrize!(A); A) 
-        elseif model_spec.diagonal_W
-            vectorize = x -> diag(x)
-            devectorize = x -> diagm(x)
         else
             vectorize = x -> x[:]
             devectorize = x -> reshape(x, (K+1,K+1)) 
@@ -656,9 +659,9 @@ function sample_Z(model::ModelState,
 #        for i = new_model_inds
 #            for j = augW_inds
 #                new_model.augmented_weights[i,j] = 
-#                    get_model_weights(model_spec.sample_prior_W(w_sigma), model_spec)
+#                    get_model_weights(normal_rand(w_sigma), model_spec)
 #                new_model.augmented_weights[j,i] = 
-#                    get_model_weights(model_spec.sample_prior_W(w_sigma), model_spec)
+#                    get_model_weights(normal_rand(w_sigma), model_spec)
 #            end
 #        end
 
