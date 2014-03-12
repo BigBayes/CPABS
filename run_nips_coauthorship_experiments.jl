@@ -10,7 +10,7 @@ Z_sample_prob = 0.25
 
 opts = Dict{ASCIIString, Any}()
 
-positive_W = true
+positive_W = false
 if !isdefined(:plotting)
     plotting = false
 end
@@ -18,14 +18,14 @@ end
 if positive_W
     hmc_opts = @options numsteps=4 stepsize=0.0002
     opts["hmc"] = hmc_opts
-    ref_opts = @options w=0.02 m=2 refractive_index_ratio=1.3
+    ref_opts = @options w=0.01 m=2 refractive_index_ratio=1.3
 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
     model_spec = ModelSpecification(false, false, false, false, false, false, exp_logpdf, exp_logpdf_dx, log(0.01), ones(3)/3, tree_global_move_prob, Z_sample_prob, opts, false, false,plotting)
     model_spec.positive_W = true
 else
-    hmc_opts = @options numsteps=2 stepsize=0.0003
+    hmc_opts = @options numsteps=4 stepsize=0.0003
     opts["hmc"] = hmc_opts
     ref_opts = @options w=0.01 m=2 refractive_index_ratio=1.3
 
@@ -39,7 +39,7 @@ X_r = zeros((0,0,0))
 X_p = zeros((0,0))
 X_c = zeros((0,0))
 
-w_sigma = 1.0
+w_sigma = 100.0
 b_sigma = 1.0
 
 model_spec.symmetric_W = true
@@ -48,11 +48,11 @@ model_spec.use_parenthood = true
 model_spec.use_childhood = true
 
 trnpct = 0.8
-lambda = 1.0
-gamma = 2.0
+lambda = 0.1
+gamma = 1.5
 num_iterations = 500
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, num_iterations, 200, 10, 
-          "NIPS_D$(model_spec.diagonal_W)_S$(model_spec.positive_W)_L$(lambda)_G$(gamma)_T$(tree_global_move_prob)_P$(trnpct)_N$num_iterations", "../results/nips/")
+          "NIPS_D$(model_spec.diagonal_W)_POS$(model_spec.positive_W)_L$(lambda)_G$(gamma)_T$(tree_global_move_prob)_P$(trnpct)_N$num_iterations", "../results/nips/")
 
 # split into train/test
 #Ytrain, Ytest = train_test_split(YY, .8)
