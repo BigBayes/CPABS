@@ -19,6 +19,7 @@ if positive_W
     hmc_opts = @options numsteps=4 stepsize=0.0002
     ref_opts = @options w=0.02 m=2 refractive_index_ratio=1.3
 
+    opts["hmc"] = hmc_opts 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
     opts["W_sampler"] = hmc_sampler
@@ -29,6 +30,7 @@ else
     hmc_opts = @options numsteps=2 stepsize=0.0003
     ref_opts = @options w=0.01 m=2 refractive_index_ratio=1.3
 
+    opts["hmc"] = hmc_opts 
     opts["RTJ_sampler"] = refractive_sampler
     opts["RTJ_options"] = ref_opts 
     opts["W_sampler"] = hmc_sampler
