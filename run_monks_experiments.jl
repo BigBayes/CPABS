@@ -12,6 +12,8 @@ ref_opts = @options w=0.2 m=2 refractive_index_ratio=1.3
 
 opts["RTJ_sampler"] = refractive_sampler
 opts["RTJ_options"] = ref_opts
+opts["W_sampler"] = hmc_sampler
+opts["W_options"] = hmc_opts
 #opts["RTJ_sampler"] = hmc_sampler
 #opts["RTJ_options"] = hmc_opts
 

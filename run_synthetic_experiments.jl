@@ -17,6 +17,8 @@ opts["W_options"] = hmc_opts
 #opts["RTJ_sampler"] = hmc_sampler
 #opts["RTJ_options"] = hmc_opts
 
+opts["Z_num_W_sweeps"] = 4
+
 plotting = true
 if !isdefined(:num_trials)
     num_trials=1
@@ -34,6 +36,6 @@ b_sigma = 1.0
 trnpct = 1.0
 symmetric_split = false
 lambda = 0.1
-gamma = 1.5
+gamma = 2.0
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 500, 200, num_trials, "synthetic_L$(lambda)_G$(gamma)_P$(trnpct)", "../results/synthetic/")
 
