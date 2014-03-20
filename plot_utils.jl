@@ -269,3 +269,35 @@ function plot_Z_Y_W(Z, Y, W; plot=true)
         plot_Z, plot_Y, plot_W, plot_Zt
     end
 end
+
+function createZfromTree(tree, features)
+    numActors = size(tree,1) + 1;
+    Z = zeros(numActors, iround(sum(features)));
+    Z, _ = addFeaturesBelow(tree, features, Z, 0, Int64[], 2 * numActors - 1);
+    Z
+end
+
+function addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, currentNode)
+    numActors = size(Z,1);
+
+    for i = 1:features[currentNode]
+        featuresAboveCurrentNode = [featuresAboveCurrentNode, maxFeature+1];
+        maxFeature = maxFeature + 1;
+        if maxFeature == 2
+            1+1;
+        end
+    end
+    
+    if currentNode <= numActors 
+        for i = 1:length(featuresAboveCurrentNode)
+            Z[currentNode, featuresAboveCurrentNode[i]] = 1;
+        end
+        return Z, maxFeature 
+    end
+
+    Z, maxFeature = addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 1])); 
+    Z, maxFeature = addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 2])); 
+    
+    Z, maxFeature 
+end
+

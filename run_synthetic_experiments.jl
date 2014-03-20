@@ -24,7 +24,7 @@ if !isdefined(:num_trials)
     num_trials=1
 end
 
-w_sigma = 100.0
+w_sigma = 1.0
 
 model_spec = ModelSpecification(false, false, false, false, false, false, normal_logpdf, normal_logpdf_dx, 0.0, ones(3)/3, 1.0, 1.0, opts, false, false, plotting)
 X_r = zeros((0,0,0))
