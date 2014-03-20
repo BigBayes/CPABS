@@ -4,9 +4,9 @@ require("probability_util.jl")
 require("pdf.jl")
 
 plot_utils_loaded = true
-try
+if Pkg.installed("Winston") != nothing
     require("plot_utils.jl")
-catch
+else
     println("Failed to load plot_utils.jl: disabling plotting")
     plot_utils_loaded = false
 end
