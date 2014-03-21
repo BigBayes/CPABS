@@ -818,7 +818,7 @@ function W_full_logpdf(model::ModelState,
     prior_terms = 0.0
 
     if model_spec.positive_W # W is represented in log space 
-        prior_terms =  exp_logpdf(W, sigma) + model.weights
+        prior_terms = exp_logpdf(W, sigma) + model.weights
     else
         prior_terms = normal_logpdf(W, sigma)
     end

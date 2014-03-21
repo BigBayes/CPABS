@@ -17,7 +17,7 @@ opts["W_options"] = hmc_opts
 #opts["RTJ_sampler"] = hmc_sampler
 #opts["RTJ_options"] = hmc_opts
 
-positive_W = false
+positive_W = true
 plotting = true
 
 if positive_W
