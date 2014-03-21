@@ -1,6 +1,7 @@
 using Winston
 import Winston.Interval
 import Winston.imagesc
+require("probability_util.jl")
 
 #function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArray{T,2}, clims::Interval; plot=true)
 #    p = FramedPlot()
@@ -167,7 +168,8 @@ function plot_Z_Y_pY(Z, Y, effects; plot=true)
 
     (N,K) = size(Z)
 
-    Z, perm = uof(Z)
+    
+    Z, perm = uof(Z[:, end:-1:1])
     N = length(perm)
 
     perm = reverse(perm)
@@ -194,6 +196,10 @@ function plot_Z_Y_pY(Z, Y, effects; plot=true)
     end
 
     plot_Z = imagesc(Z[end:-1:1,:])
+    setattr(plot_Z,"title", "Z")
+    setattr(plot_pY,"title", "p(Y)")
+    setattr(plot_Y,"title", "Y")
+
 
     if plot
         t = Table(1,3)
@@ -270,34 +276,36 @@ function plot_Z_Y_W(Z, Y, W; plot=true)
     end
 end
 
-function createZfromTree(tree, features)
+function createZfromTree(tree, features; respect_W=false)
     numActors = size(tree,1) + 1;
     Z = zeros(numActors, iround(sum(features)));
-    Z, _ = addFeaturesBelow(tree, features, Z, 0, Int64[], 2 * numActors - 1);
+
+    # map from node to index in Z
+    feature_indices = cumsum(features) - features + 1
+    feature_indices[find(features == 0)] = 0
+
+    Z = addFeaturesBelow(tree, features, Z, feature_indices, Int64[], 2 * numActors - 1);
     Z
 end
 
-function addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, currentNode)
+function addFeaturesBelow(tree, features, Z, feature_indices, featuresAboveCurrentNode, currentNode)
     numActors = size(Z,1);
 
     for i = 1:features[currentNode]
-        featuresAboveCurrentNode = [featuresAboveCurrentNode, maxFeature+1];
-        maxFeature = maxFeature + 1;
-        if maxFeature == 2
-            1+1;
-        end
+        cur_feature = feature_indices[currentNode]+i-1
+        featuresAboveCurrentNode = [featuresAboveCurrentNode, cur_feature];
     end
     
     if currentNode <= numActors 
         for i = 1:length(featuresAboveCurrentNode)
             Z[currentNode, featuresAboveCurrentNode[i]] = 1;
         end
-        return Z, maxFeature 
+        return Z 
     end
 
-    Z, maxFeature = addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 1])); 
-    Z, maxFeature = addFeaturesBelow(tree, features, Z, maxFeature, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 2])); 
+    Z = addFeaturesBelow(tree, features, Z, feature_indices, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 1])); 
+    Z = addFeaturesBelow(tree, features, Z, feature_indices, featuresAboveCurrentNode, iround(tree[currentNode-numActors, 2])); 
     
-    Z, maxFeature 
+    Z 
 end
 
