@@ -50,8 +50,8 @@ function uof(Z::Matrix)
     Znew, perm
 end
 
-function dendrogram(Z, U; plot=true)
-
+function dendrogram(Z, U; plot=true, labels=nothing)
+    U = convert(Array{Int64}, U)
     Nm1, _ = size(Z)
     N = Nm1+1
     # Sort in depth-first-search order so the dendrogram doesn't cross itself 
@@ -143,6 +143,11 @@ function dendrogram(Z, U; plot=true)
     end
 
     add(p, Points(mutations_x, mutations_y, "type", "diamond"))
+
+    if labels != nothing
+        setattr(p.x1, "ticks", locations[1:N])
+        setattr(p.x1, "ticklabels", labels)
+    end
 
     if plot
         Winston.tk(p)
@@ -309,3 +314,28 @@ function addFeaturesBelow(tree, features, Z, feature_indices, featuresAboveCurre
     Z 
 end
 
+function make_monk_labels()
+
+    labels = cell(18);
+    labels[1] = "w";
+    labels[2] = "o";
+    labels[3] = "o";
+    labels[4] = "o";
+    labels[5] = "o";
+    labels[6] = "o";
+    labels[7] = "w";
+
+    labels[8] = "y";
+    labels[9] = "y";
+    labels[10] = "y";
+    labels[11] = "y";
+    labels[12] = "y";
+    labels[13] = "y";
+    labels[14] = "y";
+    labels[15] = "w";
+
+    labels[16] = "+";
+    labels[17] = "+";
+    labels[18] = "+";
+    labels
+end
