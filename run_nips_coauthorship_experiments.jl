@@ -52,7 +52,7 @@ model_spec.use_parenthood = true
 model_spec.use_childhood = true
 
 trnpct = 0.8
-lambda = 0.1
+lambda = 1.0
 gamma = 1.5
 num_iterations = 500
 run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, num_iterations, 200, 10, 

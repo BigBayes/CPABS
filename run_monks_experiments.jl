@@ -48,5 +48,5 @@ if !isdefined(:num_trials)
     num_trials = 10
 end
 
-run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 500, 200, num_trials, "monks_L$(lambda)_G$(gamma)_P$(trnpct)", "../results/monks/")
+run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 1000, 500, num_trials, "monks_L$(lambda)_G$(gamma)_P$(trnpct)_PW$(positive_W)", "../results/monks/")
 

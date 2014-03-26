@@ -80,6 +80,7 @@ function run_batch(model_spec::ModelSpecification,
                    id_string,
                    result_path)
 
+    println("Running with $num_trials trials")
     assert(burnin_iterations < num_iterations)
 
     N = size(Y[1],1)

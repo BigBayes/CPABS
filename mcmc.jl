@@ -3,8 +3,12 @@ require("tree.jl")
 require("probability_util.jl")
 require("pdf.jl")
 
-try
+plot_utils_loaded = true
+if Pkg.installed("Winston") != nothing
     require("plot_utils.jl")
+else
+    println("Failed to load plot_utils.jl: disabling plotting")
+    plot_utils_loaded = false
 end
 
 require("slicesampler.jl")
@@ -178,7 +182,7 @@ function mcmc(data::DataState,
 
         mcmc_sweep(model, model_spec, data)
 
-        if model_spec.plot
+        if model_spec.plot && plot_utils_loaded
             ZZ, UU, WW = model2array(model)
             p_dendrogram = dendrogram(ZZ,UU, plot=false)
 
@@ -539,7 +543,12 @@ function sample_Z(model::ModelState,
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
+
     num_W_sweeps = 4
+    if haskey(model_spec.options, "Z_num_W_sweeps")
+        num_W_sweeps = model_spec.options["Z_num_W_sweeps"]
+    end
+
     num_W_slice_steps = 1
     # Sample new features from root to leaf
     root = FindRoot(tree, 1) 
