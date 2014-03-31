@@ -456,7 +456,7 @@ function tree2array(tree::Tree,
     end
 
     I = sortperm(times)
-    II = N+I
+    II = N.+I
 
     #maps from new to original indices
     sorted_inds = [[1:N], II]

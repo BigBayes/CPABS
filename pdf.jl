@@ -156,7 +156,7 @@ function likelihood(model::ModelState,
     #                println("likelihood latent effect: ", squeeze(Z[i,:] * W * Z[j,:]')[1] )
     #            end
                 oe = compute_observed_effects(model, model_spec, data, i, j)
-                logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
+                logit_arg = (Z[i,:] * W * Z[j,:]' .+ oe)[1]
                             
                 
                 total_prob += log_logit(logit_arg, Y[i,j])
@@ -223,7 +223,7 @@ function psi_infsites_logpdf(model::ModelState,
     tree_states = Array(Tuple,0)
 
     i = 1
-    while contains(subtree_indices, i)
+    while in(i, subtree_indices)
         i += 1
     end
     root = FindRoot(tree, i)
@@ -357,7 +357,7 @@ function psi_infsites_logpdf(model::ModelState,
         poisson_mean_after_above = model.lambda * (parent_t1 - pruned_parent_t)
         poisson_mean_after_below = model.lambda * (pruned_parent_t - t_2[i])
 
-        if contains(path, i)
+        if in(i, path)
             (U, V) = all_splits([features_start:features_end])
             for j = 1:length(U)
                 u = U[j]
@@ -414,7 +414,7 @@ function psi_likelihood_logpdf(model::ModelState,
     #println("subtree_leaves: ", subtree_leaves)
 
     i = 1
-    while contains(subtree_indices, i)
+    while in(i, subtree_indices)
         i += 1
     end
     root = FindRoot(tree, i)
@@ -620,7 +620,7 @@ function prior_tree(tree::Tree,
     subtree_indices = GetSubtreeIndicies(tree, pruned_index)
 
     i = 1
-    while contains(subtree_indices, i)
+    while in(i,subtree_indices)
         i += 1
     end
     root = FindRoot(tree, i)
@@ -812,7 +812,7 @@ function W_full_logpdf(model::ModelState,
         log_probs_t = broadcast(log_logistic, effects, Y) 
         n_inds = find(Y .< 0)
         log_probs_t[n_inds] = 0.0
-        log_probs += log_probs_t
+        log_probs .+= log_probs_t
     end
 
     prior_terms = 0.0
@@ -851,7 +851,7 @@ function W_full_logpdf_gradient(model::ModelState,
 
     effects = latent_effects + observed_effects
 
-    log_sigmoid_gradient = 0.0
+    log_sigmoid_gradient = zeros(size(YY[1]))
     for p = 1:length(YY)
         Y = YY[p]
 
@@ -939,8 +939,8 @@ function ab_logpdf(model::ModelState,
 
 
     total_prob = 0.0
-    a_gradient = 0.0
-    b_gradient = 0.0
+    a_gradient = zeros(size(a))
+    b_gradient = zeros(size(b))
 
     log_sigmoid_gradient = 0.0
     for p = 1:length(YY)
@@ -948,7 +948,7 @@ function ab_logpdf(model::ModelState,
         gradient = broadcast(log_logistic_dx, effects, Y)
         n_inds = find(Y .< 0)
         gradient[n_inds] = 0.0
-        log_sigmoid_gradient += gradient
+        log_sigmoid_gradient .+= gradient
 
         total_prob += sum(broadcast(log_logit, effects, Y))
     end
@@ -1132,7 +1132,7 @@ function vardim_logpdf(model::ModelState,
     effects = ZWZ + observed_effects
 
     logprob = 0.0
-    gradient = 0.0
+    gradient = zeros(size(YY[1]))
     for s = 1:length(YY)
         Y = YY[s]
         LL = broadcast(log_logit, effects, Y)
@@ -1254,7 +1254,7 @@ function vardim_multiplier_terms(model_spec::ModelSpecification,
     end
 
     logprobs = zeros(length(u))
-    logprobs += log(model_spec.rrj_jump_probabilities[u - u[1] + 1])
+    logprobs += log(model_spec.rrj_jump_probabilities[u .- u[1] .+ 1])
     # for u with K < L == u[end-1], we need the 1/L term
     logprobs -= [u[x] < u[end-1] ? log(u[end-1]) : 0.0 for x = 1:length(u)]
 
@@ -1929,7 +1929,7 @@ function weight_index_pointers(tree::Tree)
     weight_indices = cumsum(U)
     weight_indices[2:end] = weight_indices[1:end-1]
     weight_indices[1] = 0
-    weight_indices += 1
+    weight_indices .+= 1
 
     weight_indices
 end

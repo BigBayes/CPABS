@@ -56,7 +56,7 @@ function mcmc(data::DataState,
     Waug = AugmentedMatrix(2N-1, model_spec.init_W)
     tree = Tree(U)
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
-    model = ModelState(lambda,gam,w_sigma,1.0,b_sigma,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
+    model = ModelState(lambda,gam,w_sigma,b_sigma,1.0,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
 
     for i = 1:2N-2 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
@@ -266,7 +266,6 @@ function mcmc_sweep(model::ModelState,
     if model_spec.use_parenthood
         sample_a(model, model_spec, data, latent_effects)
     end
-
     if model_spec.use_childhood && !model_spec.symmetric_W
         sample_b(model, model_spec, data, latent_effects)
     end
@@ -340,7 +339,7 @@ function sample_intercept(model::ModelState,
         (c, gx0) = slice_sampler(c, g, 1.0, 10, -Inf, Inf, gx0)
     end
 
-    observed_effects += c - model.c
+    observed_effects .+= c - model.c
     model.c = c
 end
 
@@ -1727,7 +1726,7 @@ function sample_psi(model::ModelState,
         if rand() < model_spec.global_move_probability
             subtree_indices = GetSubtreeIndicies(tree, prune_index)
             i = 1
-            while contains(subtree_indices, i)
+            while in(i,subtree_indices)
                 i += 1
             end
             root = FindRoot(tree, i)
@@ -1759,7 +1758,7 @@ function sample_psi(model::ModelState,
 
         subtree_indices = GetSubtreeIndicies(tree, prune_index)
         i = 1
-        while contains(subtree_indices, i)
+        while in(i, subtree_indices)
             i += 1
         end
         root = FindRoot(tree, i)
@@ -1835,18 +1834,23 @@ function sample_psi(model::ModelState,
             local_diff = likelihoods[state_index] + priors[state_index] -
                          likelihoods[A[1]] - priors[A[1]]
 
+            all_local_diff =  likelihoods[state_index] + priors[state_index] .- likelihoods[A] .- priors[A]
+
+            min_local_diff, ai = findmin(abs(full_diff .- all_local_diff))
+
             #if (tree_LL-old_LL) + (tree_prior-old_prior) < -8
-            if abs(full_diff - local_diff) > 0.1 && length(A) == 1 
+            if min_local_diff > 0.1 
                 println("full_diff: $full_diff")
                 println("local_diff: $local_diff")
+                println("min_local_diff: $min_local_diff")
 
                 println("prior_diff: $((tree_prior-old_prior))")
-                println("local_prior_diff: $(priors[state_index] - priors[A[1]])")
+                println("local_prior_diff: $(priors[state_index] - priors[A[ai]])")
 
                 println("prior_err: $(abs((tree_prior-old_prior) - (priors[state_index] - priors[A[1]])))")
 
                 println("LL_diff: $(tree_LL-old_LL)")
-                println("local_LL_diff: $(likelihoods[state_index] - likelihoods[A[1]])")
+                println("local_LL_diff: $(likelihoods[state_index] - likelihoods[A[ai]])")
                 assert(false)
             end
         end

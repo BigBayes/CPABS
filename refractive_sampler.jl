@@ -5,7 +5,7 @@ function refractive_sampler(init_x::Vector{Float64},
                             f::Function,
                             grad_f::Function,
                             opts::Options) 
-  @defaults opts w=.01 refractive_index_ratio=nothing m=10 sample_m=false w_dist=nothing 
+  @defaults opts w=.01 refractive_index_ratio=nothing m=10 w_dist=nothing 
   
 
   if w_dist != nothing
@@ -17,14 +17,10 @@ function refractive_sampler(init_x::Vector{Float64},
 #  end
 
   if w <= 0
-    error("Negative w not allowed")
+    error("w must be positive")
   end
   if m <= 0
     error("Limit on steps must be positive")
-  end
-
-  if sample_m
-    m = rand(Poisson(m))
   end
 
 
@@ -62,9 +58,16 @@ function refractive_sampler(init_x::Vector{Float64},
     end
     grad = grad_f(x)
 
-
     grad_norm = sqrt(dot(grad,grad))
+ 
     grad = grad/grad_norm
+
+    if grad_norm == 0.0
+        if iteration <= m
+            x += w*p
+        end
+        continue 
+    end
 
     Cg = grad_norm*w
     if dot(p, grad) > 0.0

@@ -21,7 +21,7 @@ require("probability_util.jl")
 #    end
 #end
 #
-imagesc(xrange, yrange, data) = imagesc(xrange, yrange, data, (min(data), min(data) == max(data) ? max(data)+1 : max(data)))
+imagesc(xrange, yrange, data) = imagesc(xrange, yrange, data, (minimum(data), minimum(data) == maximum(data) ? maximum(data)+1 : maximum(data)))
 #imagegs(data; plot=true) = ((h, w) = size(data); imagegs((0,w), (0,h), max(data)-data, plot=plot))
 
 # Upper order form -- push zeros upwards, giving leftwards columns priority 

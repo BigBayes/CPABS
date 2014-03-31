@@ -222,8 +222,8 @@ function graft_tree!(model::ModelState,
     aug_W = model.augmented_weights
     # augmented_weights feature offsets are relative, given ones are absolute
     all_features = [graftpoint_features, parent_features]
-    offset = length(all_features) > 0 ? -min(all_features) + 1 : 0
-    aug_parent_features = parent_features + offset 
+    offset = length(all_features) > 0 ? -minimum(all_features) + 1 : 0
+    aug_parent_features = parent_features .+ offset 
     move_features(aug_W, aug_parent_features, graftnode.index, parent.index)
 
     graftnode.state = length(graftpoint_features)

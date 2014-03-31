@@ -7,7 +7,7 @@ end
 
 # Utility probability functions
 function normal_logpdf(x, sigma)
-    -x.*x/(2sigma*sigma) - 0.5log(2pi) - log(sigma)
+    -x.*x/(2sigma*sigma) .- 0.5log(2pi) .- log(sigma)
 end
 function normal_logpdf_dx(x, sigma)
     -x/(sigma*sigma)
@@ -18,7 +18,7 @@ function normal_rand(scale)
 end
 
 function exp_logpdf(x, scale)
-    -x/scale - log(scale)
+    -x/scale .- log(scale)
 end
 
 function exp_logpdf_dx(x, scale)
@@ -74,18 +74,18 @@ end
 
 # Probability Manipulation
 
-function logsumexp(x)
-    max_x = max(x)
-    xp = x - max_x
-    log(sum(exp(xp))) + max_x
-end
+#function logsumexp(x)
+#    max_x = maximum(x)
+#    xp = x - max_x
+#    log(sum(exp(xp))) + max_x
+#end
 
 function logsumexp_d_dx(x,xp)
     #zeros in shape of xp[1]
     xout = xp[1]-xp[1]
 
-    max_x = max(x)
-    xs = x - max_x
+    max_x = maximum(x)
+    xs = x .- max_x
 
     exp_xs = exp(xs)
     sum_exp_xs = sum(exp_xs)
@@ -100,7 +100,7 @@ function logsumexp_d_dx(x,xp)
 end
 
 function exp_normalize(x)
-    xp = x - max(x)
+    xp = x .- maximum(x)
     exp_x = exp(xp)
     exp_x / sum(exp_x)
 end

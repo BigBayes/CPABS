@@ -21,7 +21,7 @@ function train_test_split(YY::Array{Array{Float64, 2},1},
 
     train_mask = zeros(size(Y))
     train_mask[y_train_inds] = 1
-    test_mask = 1 - train_mask
+    test_mask = 1 .- train_mask
 
     if symmetric_split
         train_mask = triu(train_mask,1)
@@ -33,8 +33,8 @@ function train_test_split(YY::Array{Array{Float64, 2},1},
 
     for i = 1:length(YY)
 
-        Ytrain[i][find(1-train_mask)] = -1
-        Ytest[i][find(1-test_mask)] = -1
+        Ytrain[i][find(1.-train_mask)] = -1
+        Ytest[i][find(1.-test_mask)] = -1
 
         # remove diagonal terms
         diag_mask = diagm(ones(size(Y)[1]))
