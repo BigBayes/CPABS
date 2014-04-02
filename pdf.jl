@@ -139,12 +139,18 @@ function likelihood(model::ModelState,
     tree = model.tree
     Z = ConstructZ(tree)
     W = get_W(model, model_spec)
+    A = model.a
+    B = model.b
+    C = model.c
+
     beta = model.beta
     beta_p = model.beta_p
     beta_c = model.beta_c
  
     total_prob = 0.0
     total_test_prob = 0.0
+
+ #   effects = Z*W*Z' .+ A' .+ B .+ C
 
     for s = 1:length(data.Ytrain)
         Y = data.Ytrain[s]
@@ -157,13 +163,20 @@ function likelihood(model::ModelState,
     #            end
                 oe = compute_observed_effects(model, model_spec, data, i, j)
                 logit_arg = (Z[i,:] * W * Z[j,:]' .+ oe)[1]
-                            
+                    
+#                if abs(effects[i,j] - logit_arg) > 0.1
+#                    println("effects ij: $(effects[i,j])")
+#                    println("logit_arg: $logit_arg")
+#
+#                    @assert false     
+#                end
                 
                 total_prob += log_logit(logit_arg, Y[i,j])
                 total_test_prob += log_logit(logit_arg, Ytest[i,j])
             end
         end
     end
+
     (total_prob, total_test_prob)
 end
 
