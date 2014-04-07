@@ -353,13 +353,15 @@ function sample_a(model::ModelState,
     f = a -> (new_model.a = a; ab_logpdf(new_model, model_spec, data, latent_effects)[1])
     g = a -> (new_model.a = a; ab_logpdf(new_model, model_spec, data, latent_effects)[2])
 
-    hmc_opts = @options numsteps=4 stepsize=0.02
+    ab_sampler = model_spec.options["ab_sampler"]
+    ab_opts = model_spec.options["ab_options"] 
+
     total_count = 0
     accept_count = 0
     num_iterations = 6
     for iteration = 1:num_iterations
         old_a = copy(new_model.a)
-        new_model.a = hmc_sampler(new_model.a, f, g, hmc_opts)
+        new_model.a = ab_sampler(new_model.a, f, g, ab_opts)
         if old_a != new_model.a
             accept_count += 1
         end
@@ -379,13 +381,15 @@ function sample_b(model::ModelState,
     f = b -> (new_model.b = b; ab_logpdf(new_model, model_spec, data, latent_effects)[1])
     g = b -> (new_model.b = b; ab_logpdf(new_model, model_spec, data, latent_effects)[3])
 
-    hmc_opts = @options numsteps=4 stepsize=0.02
+    ab_sampler = model_spec.options["ab_sampler"]
+    ab_opts = model_spec.options["ab_options"] 
+
     total_count = 0
     accept_count = 0
     num_iterations = 6
     for iteration = 1:num_iterations
         old_b = copy(new_model.b)
-        new_model.b = hmc_sampler(new_model.b, f, g, hmc_opts)
+        new_model.b = ab_sampler(new_model.b, f, g, ab_opts)
         if old_b != new_model.b
             accept_count += 1
         end

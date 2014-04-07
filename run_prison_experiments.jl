@@ -8,12 +8,14 @@ include("read_prison_data.jl")
 opts = Dict{ASCIIString, Any}()
 hmc_opts = @options numsteps=4 stepsize=0.05
 opts["hmc"] = hmc_opts 
-ref_opts = @options w=0.02 m=2 refractive_index_ratio=1.3
+ref_opts = @options w=0.05 m=2 refractive_index_ratio=1.3
 
 opts["RTJ_sampler"] = refractive_sampler
 opts["RTJ_options"] = ref_opts
 opts["W_sampler"] = hmc_sampler
 opts["W_options"] = hmc_opts
+opts["ab_sampler"] = hmc_sampler
+opts["ab_options"] = hmc_opts
 
 positive_W = false
 if !isdefined(:plotting)
