@@ -169,11 +169,16 @@ function get_mutation_plot_locations(nU, x, y_min, y_max)
     (x_inds, y_inds)
 end
 
-function plot_Z_Y_pY(Z, Y, effects; plot=true)
+function plot_Z_Y_pY(Z, Y, effects; plot=true, sortK=true)
 
     (N,K) = size(Z)
 
-    
+    if sortK
+        mk = sum(Z,1)
+        perm_K = sortperm(mk[:])
+        Z = Z[:,perm_K]
+    end
+ 
     Z, perm = uof(Z[:, end:-1:1])
     N = length(perm)
 

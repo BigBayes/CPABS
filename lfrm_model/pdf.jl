@@ -199,7 +199,7 @@ function test_likelihood_ij(model::ModelState,
     total_test_prob = 0.0
   
     oe = compute_observed_effects(model, model_spec, data, i, j)
-    logit_arg = (Z[i,:] * W * Z[j,:]' + oe)[1]
+    logit_arg = (Z[i,:] * W * Z[j,:]' .+ oe)[1]
     LL = 0.0
     for s = 1:length(YYtest)
         Ytest = YYtest[s]
@@ -845,7 +845,7 @@ function W_full_logpdf(model::ModelState,
         prior_term = sum(prior_terms)
     end
 
-    return sum(sum(log_probs)) + prior_term
+    return (sum(sum(log_probs)), prior_term)
 end
 
 function W_full_logpdf_gradient(model::ModelState,
@@ -899,7 +899,7 @@ function W_full_logpdf_gradient(model::ModelState,
         prior_grad = triu(prior_grad)
     end
 
-    return LL_grad + prior_grad
+    return (LL_grad, prior_grad)
 
 end
 ###################################

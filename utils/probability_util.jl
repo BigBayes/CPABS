@@ -69,7 +69,7 @@ end
 
 
 function log_predictive(effect)
-    -log(1+exp(-effect))
+    -log(1.+exp(-effect))
 end
 
 # Probability Manipulation
@@ -213,7 +213,7 @@ end
 function averaged_prediction(logit_arg::Array{Float64, 1})
 
     logprobs = log_predictive(logit_arg)
-    logprob = logsumexp(logprobs) - log(length(logprobs))
+    logprob = logsumexp(logprobs) .- log(length(logprobs))
     (exp(logprob), logprob)
 end
 

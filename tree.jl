@@ -488,3 +488,37 @@ function tree2array(tree::Tree,
     states = [nodes[i].state for i = sorted_inds]
     (Z, states, sorted_inds)
 end
+
+function total_branch_length(tree::Tree,
+                             gam::Float64)
+    nodes = tree.nodes
+    _2Nm1 = length(nodes)
+    N::Int = (_2Nm1+1) / 2
+
+    times = zeros(N-1)
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    total_length = 0.0
+
+    for i = reverse(indices)
+        cur = tree.nodes[i]
+        p = cur.parent
+        if i <= N
+            continue
+        end
+
+        if p == Nil()
+            times[i-N] = (cur.rhot)^gam
+            total_length += 1-times[i-N]
+        else
+            self_direction = find(p.children .== cur)[1];
+            cur_split = self_direction == 1 ? p.rho : 1-p.rho
+            times[i-N] = times[p.index-N]*(cur.rhot*cur_split)^gam
+            total_length += times[p.index-N] - times[i-N]
+        end
+    end
+
+    return total_length
+end

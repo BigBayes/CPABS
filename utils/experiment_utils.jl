@@ -49,7 +49,7 @@ end
 function run_and_save(result_path, id_string, trial, mcmc_args...)
     results = mcmc(mcmc_args...)
     trial_string = "$(id_string)_$(trial)"
-    models = results[end]
+    models = results[9]
     model = models[end]
     data = mcmc_args[1]
     datas = Array(Any,2)
@@ -60,11 +60,12 @@ function run_and_save(result_path, id_string, trial, mcmc_args...)
     trees_array = [model2array(models[i])[1] for i = 1:length(models)]
     features_array = [model2array(models[i])[2] for i = 1:length(models)]
     weights_array = [model2array(models[i])[3] for i = 1:length(models)]
-    save("$result_path/metrics_$trial_string.jla", results[1:end-1])
+    save("$result_path/metrics_$trial_string.jla", results[1:8])
     save("$result_path/trees_$trial_string.jla", trees_array)
     save("$result_path/features_$trial_string.jla", features_array)
     save("$result_path/weights_$trial_string.jla", weights_array)
     save("$result_path/data_$trial_string.jla", datas)
+    results
 end
 
 function run_batch(model_spec::ModelSpecification,

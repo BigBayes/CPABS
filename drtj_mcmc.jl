@@ -16,15 +16,14 @@ require("refractive_sampler.jl")
 require("hmc.jl")
 
 #@profile begin
-function mcmc(data::DataState,
-              lambda::Float64,
-              gam::Float64,
-              w_sigma::Float64,
-              b_sigma::Float64,
-              model_spec::ModelSpecification,
-              iterations::Int64,
-              burnin_iterations::Int64)
 
+function instantiate_new_model(data::DataState,
+                               lambda::Float64,
+                               gam::Float64,
+                               w_sigma::Float64,
+                               b_sigma::Float64,
+                               model_spec::ModelSpecification,
+                               K::Int)
     YY = data.Ytrain
     X_r = data.X_r
     X_p = data.X_p
@@ -58,19 +57,37 @@ function mcmc(data::DataState,
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
     model = ModelState(lambda,gam,w_sigma,b_sigma,1.0,tree,W,Waug,[0.0],[0.0],[0.0],init_a,init_b,0.0)
 
-    for i = 1:2N-2 # the root should have no features
+    effective_lambdas = zeros(2N-2)
+    for i = 1:2N-1 # the root should have no features
         num_ancestors = tree.nodes[i].num_ancestors
         #hard code lambda for initialization so we always start with some features
         effective_lambda = 4 * (0.3)^(num_ancestors-1)
-        U[i] = effective_lambda > 10.0^-5 ? randpois(effective_lambda) : 0
+        effective_lambdas[i] = effective_lambda
 
-        if U[i] > 0
-            U[i] = 1
+    end
+
+    if K >= 2N-1
+        U = ones(2N-1)
+    else 
+        for i = 1:K
+            U_index = -1
+            while U_index < 0
+                U_index = rand(Categorical(effective_lambdas))
+                U_index = U[U_index] == 1 ? -1 : U_index 
+            end
+            U[U_index] = 1
         end
+
+    end
+
+    for i = 1:2N-1
         tree.nodes[i].state = U[i] 
     end
 
     sU = sum(U)
+
+    @assert K == sU
+
     if model_spec.diagonal_W
         W = zeros(sU,sU)
         for i = 1:size(W,1)
@@ -88,6 +105,20 @@ function mcmc(data::DataState,
 
     model.weights = copy(W)
     model.augmented_weights = AugmentedMatrix(2N-1, model_spec.init_W, model.weights, U)
+
+    return model
+end
+
+
+function drtj_mcmc(data::DataState,
+                   lambda::Float64,
+                   gam::Float64,
+                   w_sigma::Float64,
+                   b_sigma::Float64,
+                   model_spec::ModelSpecification,
+                   iterations::Int64,
+                   burnin_iterations::Int64,
+                   init_K::Int)
 
 
     #perform some unit tests
@@ -144,6 +175,11 @@ function mcmc(data::DataState,
 
     ###
 
+    models = Array(ModelState,init_K)
+    for k = 1:init_K
+        models[k] =  instantiate_new_model(data, lambda, gam, w_sigma, b_sigma, model_spec, k)
+    end
+
     # if not diagonal, initialize using a diagonal model
     diagonal = model_spec.diagonal_W
 #    model_spec.diagonal_W = true
@@ -162,10 +198,12 @@ function mcmc(data::DataState,
 
     iters = Int[]
 
-    models = Array(ModelState,0)
+    MCMC_models = Array(ModelState,0)
     debug = model_spec.debug 
     model_spec.debug = false
 
+    K = init_K
+    model = models[init_K]
     local tbl
 
     println("Init K: $(size(model.weights,1))")
@@ -182,7 +220,8 @@ function mcmc(data::DataState,
             model_spec.diagonal_W = diagonal
         end
 
-        mcmc_sweep(model, model_spec, data)
+        K = mcmc_sweep(models, K, model_spec, data)
+        model = models[K]
 
         if model_spec.plot && plot_utils_loaded
             ZZ, UU, WW = model2array(model)
@@ -227,7 +266,7 @@ function mcmc(data::DataState,
         end
 
         if mod(iter, 10) == 0 || iter == iterations
-            push!(models,copy(model))
+            push!(MCMC_models,copy(model))
             push!(iters, iter)
             if iter > burnin_iterations
                 (train_error, test_error, auc) = error_and_auc(logit_args, data)
@@ -245,21 +284,26 @@ function mcmc(data::DataState,
     end
 
     if model_spec.plot && plot_utils_loaded
-        (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, models, tbl )
+        (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, MCMC_models, tbl )
     else
-        (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, models )
+        (iters, train_errors, test_errors, avg_test_LLs, aucs, Ks, trainLLs, testLLs, MCMC_models )
     end
 end
 
 
-function mcmc_sweep(model::ModelState,
+function mcmc_sweep(models::Vector{ModelState},
+                    K::Int,
                     model_spec::ModelSpecification,
                     data::DataState)
 
+    model = models[K]
     YY = data.Ytrain
     (N,N) = size(YY[1])
     tree = model.tree
     Z = ConstructZ(tree)
+
+    (N,K_Z) = size(Z)
+    @assert K == K_Z
 
     (latent_effects, observed_effects) = 
         construct_effects(model, model_spec, data, Z)
@@ -312,18 +356,54 @@ function mcmc_sweep(model::ModelState,
     tree_LL, test_LL = likelihood(model, model_spec, data, [1:N])
     println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
 
-    vardim_time = time()
-    if rand() > 0.0
-        sample_Z(model, model_spec, data, observed_effects)
-    end
-    vardim_time = time() - vardim_time
 
-    Z = ConstructZ(model.tree)
-    sample_W_full(model, model_spec, data, Z, observed_effects)
+    K = drtj(models, K, model_spec, data)
+    model = models[K]
 
-    (K,K) = size(model.weights)
+#    vardim_time = time()
+#    if rand() > 0.0
+#        sample_Z(model, model_spec, data, observed_effects)
+#    end
+#    vardim_time = time() - vardim_time
+#
+#    Z = ConstructZ(model.tree)
+#    sample_W_full(model, model_spec, data, Z, observed_effects)
+
     println("MCMC Timings (psi, rho, W, vardim) = ", (psi_time, rho_time, W_time, vardim_time))
     println("K: ", K)
+    return K
+end
+
+function compute_drtj_constant_term(models::Vector{ModelState}, M::Int, L::Int)
+    Lrange = L == 1 ? (1:2) : (L-1:L+1)
+
+    log_probability = 0.0
+    for K = Lrange
+        if K == M
+            continue
+        end
+
+
+    end
+
+end
+
+function drtj(models::Vector{ModelState},
+              K::Int,
+              model_spec::ModelSpecification,
+              data::DataState)
+
+    L = rand(1:3)-2 + K
+    if L < 1
+        return K
+    end
+
+    Lrange = L == 1 ? (1:2) : (L-1:L+1)
+    for M = Lrange
+        
+    end 
+
+    return K
 end
 
 function sample_intercept(model::ModelState,
@@ -486,7 +566,8 @@ function sample_W_full(model::ModelState,
                        model_spec::ModelSpecification,
                        data::DataState,
                        Z,#sparse or full 2d array
-                       observed_effects::Array{Float64,2})
+                       observed_effects::Array{Float64,2};
+                       drtj_constant::Float64 = 0.0)
 
     YY = data.Ytrain
     (K,K) = size(model.weights)
@@ -512,12 +593,28 @@ function sample_W_full(model::ModelState,
 
     function W_logpdf_vectorized(x::Vector{Float64})
         temp_model.weights = devectorize(x) 
-        W_full_logpdf(temp_model, model_spec, data, Z, observed_effects)
+        (ll_term, prior_term) = W_full_logpdf(temp_model, model_spec, data, Z, observed_effects)
+        if drtj_constant == 0.0
+            return ll_term + prior_term
+        else
+            p1 = ll_term + prior_term
+            p2 = prior_term + drtj_constant
+            return logsumexp([p1,p2])
+        end
     end
     function W_logpdf_gradient_vectorized(x::Vector{Float64})
         temp_model.weights = devectorize(x)
-        grad = W_full_logpdf_gradient(temp_model, model_spec, data, Z, observed_effects)
-        vectorize(grad)
+        (ll_grad, prior_grad) = W_full_logpdf_gradient(temp_model, model_spec, data, Z, observed_effects)
+        if drtj_constant == 0.0
+            return vectorize(ll_grad+prior_grad)
+        else
+            (ll_term, prior_term) = W_full_logpdf(temp_model, model_spec, data, Z, observed_effects)
+            p1 = ll_term + prior_term
+            p2 = prior_term + drtj_constant
+            g1 = vectorize(ll_grad + prior_grad)
+            g2 = vectorize(prior_grad)
+            return logsumexp_d_dx([p1,p2], [g1,g2]) 
+        end
     end
 
     accept_count = 0

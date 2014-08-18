@@ -39,12 +39,12 @@ if !isdefined(:trnpct)
     trnpct = 0.8
 end
 symmetric_split = false
-lambda = 0.1
+lambda = 0.2
 gamma = 2.0
 
 if !isdefined(:num_trials)
     num_trials = 10
 end
 
-run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 1000, 500, num_trials, "prison_L$(lambda)_G$(gamma)_P$(trnpct)_PW$(positive_W)", "../results/prison/")
+results = run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 1000, 500, num_trials, "prison_L$(lambda)_G$(gamma)_P$(trnpct)_PW$(positive_W)", "../results/prison/")
 
