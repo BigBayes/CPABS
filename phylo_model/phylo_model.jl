@@ -7,7 +7,9 @@ import Base.assign
 type ModelState
     lambda::Float64
     gamma::Float64
-    tree::Tree{Float64} # Tree state holds the \eta variables, represented as gamma draws
+    alpha::Float64
+
+    tree::Tree{Vector{Float64}} # Tree state holds the \eta variables (one eta variable for each observed sample)
     Z::Vector{Int64} # Assignment of datapoints to nodes
 end
 
@@ -27,5 +29,32 @@ copy(ms::ModelSpecification) = ModelSpecification(ms.rrj_jump_probabilities, ms.
                                                   ms.verbose, ms.plot)
 
 type DataState
-    read_frequencies::Vector{Float64}
+    reference_counts::Matrix{Float64}
+    total_counts::Matrix{Float64}
+    mu_r::Vector{Float64}
+    mu_v::Vector{Float64}
+end
+
+# Find ancestor to whose population t belongs
+# As we assume the right children are the "new" subpopulations,
+# tau will be the most recent ancestor such that the path from tau to
+# t contains tau's right child
+function tau(t::TreeNode{T})
+    @assert t != Nil()
+    p = t.parent
+    if p == Nil()
+        return p
+    end
+
+    c = t 
+    while p.children[2] != c
+        c = p
+        p = p.parent
+
+        if p == Nil()
+            return p
+        end
+    end 
+
+    return p
 end
