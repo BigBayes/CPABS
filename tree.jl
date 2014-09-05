@@ -6,7 +6,7 @@ abstract Node
 type Nil <: Node
 end
 
-type TreeNode{T <: Real} <: Node
+type TreeNode{T} <: Node
     state::T
     parent::Node
     children::Array{Node,1}
@@ -24,7 +24,7 @@ function TreeNode{T}(state::T, ind::Int64)
 end
 
 show(tree_node::TreeNode) = print(tree_node.index)
-copy(tree_node::TreeNode) = TreeNode(copy(tree_node.state), tree_node.index)
+copy(tree_node::TreeNode) = TreeNode(deepcopy(tree_node.state), tree_node.index)
 function ==(n1::TreeNode, n2::TreeNode)
     b1 = n1.state == n2.state && n1.index == n2.index
     if n1.parent == Nil() || n2.parent == Nil()
@@ -148,6 +148,96 @@ function Tree(U::Array{Int64,1})
     end 
 
     tree 
+end
+
+function Tree(U::Array{Vector{Float64},1})
+    (_2nm1,) = size(U)
+    N::Int64 = (_2nm1+1)/2
+    tree = Tree{Vector{Float64}}()
+    tree.nodes = Array(TreeNode{Vector{Float64}},2N-1)
+
+    for i = 1:N
+        tree.nodes[i] = TreeNode(U[i],i)
+        tree.nodes[i].children[1] = Nil();
+        tree.nodes[i].children[2] = Nil();
+    end
+    coalescing_nodes = [1:N]
+    coalescing_nodes_remaining = N
+
+    for i = N+1:2N-1
+        tree.nodes[i] = TreeNode(U[i], i)
+
+        #coalesce pairs uniformly at random
+        l_ind = rand(1:coalescing_nodes_remaining)
+        l = coalescing_nodes[l_ind]
+        r_ind = l_ind
+        while r_ind == l_ind
+            r_ind = rand(1:coalescing_nodes_remaining)
+        end
+        r = coalescing_nodes[r_ind]
+
+        #update the set of nodes remaining
+        m_ind = min(l_ind,r_ind)
+        x_ind = max(l_ind,r_ind)
+        splice!(coalescing_nodes, x_ind)
+        splice!(coalescing_nodes, m_ind)
+        push!(coalescing_nodes, i)
+        coalescing_nodes_remaining -= 1
+   
+#        println("i,l,r: $i $l $r")
+#        println("tree.nodes[i]: $(tree.nodes[i])") 
+#        println("tree.nodes[l]: $(tree.nodes[l])") 
+#        println("tree.nodes[r]: $(tree.nodes[r])") 
+#
+ 
+        tree.nodes[l].parent = tree.nodes[i]
+        tree.nodes[r].parent = tree.nodes[i]
+
+        tree.nodes[i].children = [tree.nodes[l], tree.nodes[r]]
+
+        tree.nodes[i].num_leaves = tree.nodes[l].num_leaves +
+                                   tree.nodes[r].num_leaves 
+    end
+
+
+    tree.nodes[2N-1].num_ancestors = 1
+    for i = 2N-2:-1:1
+        tree.nodes[i].num_ancestors = tree.nodes[i].parent.num_ancestors + 1
+    end 
+
+    tree 
+end
+
+function copy(tree::Tree{Vector{Float64}})
+    n = length(tree.nodes)
+    new_tree = Tree{Vector{Float64}}()
+    new_tree.nodes = Array(TreeNode{Vector{Float64}}, n)  
+    for i = 1:n
+        new_tree.nodes[i] = copy(tree.nodes[i])
+        new_tree.nodes[i].num_ancestors = tree.nodes[i].num_ancestors
+        new_tree.nodes[i].num_leaves = tree.nodes[i].num_leaves
+        new_tree.nodes[i].rho = tree.nodes[i].rho
+        new_tree.nodes[i].rhot = tree.nodes[i].rhot
+    end
+
+    for i = 1:n
+        if tree.nodes[i].parent == Nil()
+            p = Nil()
+        else
+            p = new_tree.nodes[tree.nodes[i].parent.index]
+        end
+
+        if tree.nodes[i].children[1] == Nil()
+            l = Nil()
+            r = Nil()
+        else
+            l = new_tree.nodes[tree.nodes[i].children[1].index]
+            r = new_tree.nodes[tree.nodes[i].children[2].index]
+        end
+        new_tree.nodes[i].parent = p
+        new_tree.nodes[i].children = [l, r]
+    end
+    new_tree
 end
 
 
@@ -343,6 +433,46 @@ function GetSubtreeIndicies{T}(tree::Tree{T},
     subtree_indices
 end
 
+# Self inclusive
+function GetAncestors{T}(tree::Tree{T},
+                         node_index::Int64)
+    ancestors = Array(TreeNode, 0)
+
+    cur = tree.nodes[node_index]
+
+    while cur != Nil()
+        push!(ancestors, cur)
+        cur = cur.parent
+    end
+
+    return ancestors
+end
+
+function GetDescendants{T}(tree::Tree{T})
+    descendants = Array(TreeNode, 0)
+    stack = Array(TreeNode, 0)
+
+    cur = tree.nodes[node_index]
+    push!(stack, cur)
+
+    while length(stack) > 0 
+        c = pop!(stack)
+        push!(descendants, c)
+
+        r = c.children[1]
+        l = c.children[2]
+
+        if r != Nil()
+            push!(stack, r)
+        end
+
+        if l != Nil()
+            push!(stack, l)
+        end
+    end
+
+    return descendants
+end
 # stack will contain a leaves to root ordering of nodes in the pruned tree
 function GetLeafToRootOrdering{T}(tree::Tree{T},
                                   root_index::Int64)

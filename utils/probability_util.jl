@@ -1,5 +1,3 @@
-require("model.jl")
-
 function incomplete_gamma(t::Float64, b::Float64)
     quadgk(x -> x^(t-1)*exp(-x), zero(t), b, reltol=100*eps(t))[1]
 end
@@ -136,11 +134,9 @@ end
 
 # Prediction
 
-# test metrics.  AUC computation trick found in Konstantina Palla's ILA code
 function error_and_auc(logit_args::Array{ Array{Float64, 1}, 2},
-                       data::DataState)
+                       YY::Array{ Array{Float64, 2}, 1})
 
-    YY = data.Ytrain
     (N,N) = size(YY[1])
 
 #    minargs = min( [ min(logit_args[i,j]) for i = 1:N, j = 1:N])

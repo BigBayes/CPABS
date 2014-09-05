@@ -1,7 +1,7 @@
 using Winston
 import Winston.Interval
 import Winston.imagesc
-require("probability_util.jl")
+require("utils/probability_util.jl")
 
 #function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArray{T,2}, clims::Interval; plot=true)
 #    p = FramedPlot()

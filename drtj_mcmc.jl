@@ -269,7 +269,7 @@ function drtj_mcmc(data::DataState,
             push!(MCMC_models,copy(model))
             push!(iters, iter)
             if iter > burnin_iterations
-                (train_error, test_error, auc) = error_and_auc(logit_args, data)
+                (train_error, test_error, auc) = error_and_auc(logit_args, data.YY)
                 println("Train, Test, AUC: ", (train_error, test_error, auc))
 
                 push!(train_errors, train_error)

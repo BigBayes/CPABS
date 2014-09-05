@@ -10,9 +10,7 @@ import NumericExtensions.evaluate, NumericExtensions.result_type
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
                   data::DataState)
-    YY = data.Ytrain
-    (N,N) = size(YY[1])
-    prior(model,model_spec)+likelihood(model,model_spec,data,[1:N])[1]
+    prior(model,model_spec)+likelihood(model,model_spec,data)
 end
 
 function prior(model::ModelState,
@@ -58,10 +56,10 @@ function prior(model::ModelState,
         cur = tree.nodes[i]
         parent = cur.parent
         if i > N
-            left_child = tree.nodes[i].children[1]
-            right_child = tree.nodes[i].children[2]
-            left_prob = tree.nodes[i].rho
-            right_prob = 1.0-tree.nodes[i].rho
+            left_child = tree.nodes[i].children[2]
+            right_child = tree.nodes[i].children[1]
+            left_prob = 1.0-tree.nodes[i].rho
+            right_prob = tree.nodes[i].rho
     
             N_i = cur.num_leaves
             psi_term += (left_child.num_leaves-1) * log(left_prob)
@@ -82,7 +80,7 @@ function prior(model::ModelState,
             tau_t = tau_node == Nil() ? 1.0 : t[tau_node.index]
             Tau[i-N] = tau_t - t[i]
 
-            for s = 1:length(tree.nodes[i].state[s])
+            for s = 1:length(tree.nodes[i].state)
                 eta_term += logpdf(Beta(alpha*right_prob,alpha*left_prob), cur.state[s]) 
             end
         end
@@ -96,7 +94,7 @@ function prior(model::ModelState,
 
     U = zeros(N-1)
     for i=1:length(Z)
-        U[Z[i]] += 1
+        U[Z[i]-N] += 1
     end 
     U = U .- 1
     if any(U .< 0) # There must be one point assigned to each cluster
@@ -110,14 +108,13 @@ function prior(model::ModelState,
         assignment_term += U[i]*log(Tau[i])
     end
 
-    total_prob + psi_term + eta_term + assignment_term
+    psi_term + eta_term + assignment_term
 end
 
 
 function likelihood(model::ModelState,
                     model_spec::ModelSpecification,
-                    data::DataState,
-                    indices::Array{Int64,1})
+                    data::DataState)
 
     AA = data.reference_counts
     DD = data.total_counts
@@ -129,18 +126,19 @@ function likelihood(model::ModelState,
     total_test_prob = 0.0
 
     tree = model.tree
+    gam = model.gamma
+    Z = model.Z
+
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
+
 
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
 
-    num_samples = length(AA)
-    num_mutations = length(mu_r)
+    num_mutations, num_samples = size(AA)
 
-    mu = ones(2N - 1)
     t = ones(2N - 1)
-    v = zeros(2N - 1)
 
     B = zeros(2N - 1, num_samples)
 
@@ -151,18 +149,15 @@ function likelihood(model::ModelState,
         if i != root.index
             self_direction = find(parent.children .== cur)[1]
             cur_mu_prop = self_direction == 1 ? parent.rho : 1-parent.rho
-            mu[i] = mu[parent.index]*cur_mu_prop
             t[i] = t[parent.index]*(cur.rhot*cur_mu_prop)^gam
-            v[i] = t[parent.index]-t[i]
 
             for s = 1:num_samples
                 # the eta variable held by a node is the eta for the right child
-                eta_self = self_direction == 1 ? (1 - parent.state[s]) : parent.state[s]
-                B[i,s] = B[parent.index]*eta_self
+                eta_self = self_direction == 1 ? parent.state[s] : (1 - parent.state[s])
+                B[i,s] = B[parent.index,s]*eta_self
             end
         else
             t[i] = cur.rhot^gam
-            v[i] = 1.0-t[i]
             B[i,:] = 1.0
         end
 
@@ -196,11 +191,13 @@ function psi_infsites_logpdf(model::ModelState,
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
 
     Z = model.Z
     U = zeros(N-1)
     for i=1:length(Z)
-        U[Z[i]] += 1
+        U[Z[i]-N] += 1
     end 
     U = U .- 1
 
@@ -211,7 +208,7 @@ function psi_infsites_logpdf(model::ModelState,
     subtree_indices = GetSubtreeIndicies(tree, pruned_index)
 
     total_probs = Float64[]
-    tree_states = Array(Tuple,0)
+    tree_states = Array(Int64,0)
 
     i = 1
     while in(i, subtree_indices)
@@ -231,7 +228,7 @@ function psi_infsites_logpdf(model::ModelState,
 
     self_direction = find(pruned_parent.children .== pruned_node)[1]
 
-    pruned_mu_prop = self_direction == 1 ? (1-pruned_parent.rho) : pruned_parent.rho
+    pruned_mu_prop = self_direction == 1 ? pruned_parent.rho : (1-pruned_parent.rho) 
     pruned_mu_prop *= pruned_parent.rhot
 
     for i = reverse(indices)
@@ -281,8 +278,8 @@ function psi_infsites_logpdf(model::ModelState,
     for i = indices
         cur = tree.nodes[i]
         if i > N
-            l = cur.children[1].index
-            r = cur.children[2].index
+            l = cur.children[2].index
+            r = cur.children[1].index
         
             U_sub[i] = U_sub[l] + U_sub[r] + U[i-N] 
         end
@@ -297,8 +294,8 @@ function psi_infsites_logpdf(model::ModelState,
         end
 
         if i > N
-            l = cur.children[1].index
-            r = cur.children[2].index
+            l = cur.children[2].index
+            r = cur.children[1].index
 
             Tau[l] = Tau[i]
             Tau[r] = i 
@@ -310,8 +307,8 @@ function psi_infsites_logpdf(model::ModelState,
             Tau[j] = 0
         end
         if j > N
-            l = cur.children[1].index
-            r = cur.children[2].index
+            l = cur.children[2].index
+            r = cur.children[1].index
 
             Tau[l] = Tau[j]
             Tau[r] = j
@@ -343,16 +340,16 @@ function psi_infsites_logpdf(model::ModelState,
     for i = indices
         cur = tree.nodes[i]
         if i > N
-            l = cur.children[1].index
-            r = cur.children[2].index
-            L_sub = L[i] + L_sub[l] + L_sub[r]
+            l = cur.children[2].index
+            r = cur.children[1].index
+            L_sub[i] = L[i] + L_sub[l] + L_sub[r]
         else
-            L_sub = L[i]
+            L_sub[i] = L[i]
         end
     end
 
     sum_L = sum(L)
-
+    sum_U = sum(U)
 
     for i = indices
         if !( i in path)
@@ -386,11 +383,11 @@ function psi_infsites_logpdf(model::ModelState,
         subtree_probs -= sum_U * log(L_graft)
 
         push!(total_probs, psi_probs[i] + subtree_probs)
-        if isnan(total_probs)
+        if isnan(total_probs[end])
             println("psi prob ", psi_probs[i])
             println("subtree_probs ", subtree_probs)
         end
-        # (node above which to attach, features moved below graft point, features moved above)
+        # node above which to attach
         push!(tree_states, i)                
     end
 
@@ -414,13 +411,14 @@ function psi_observation_logpdf(model::ModelState,
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
 
-    num_samples = length(AA)
-    num_mutations = length(mu_r)
+    num_mutations, num_samples = size(AA)
 
     Z = model.Z
 
-    C = Array(Int64[], max(Z))
+    C = [Int64[] for x = 1:maximum(Z)]
 
     for i = 1:length(Z)
         push!(C[Z[i]], i)
@@ -429,7 +427,7 @@ function psi_observation_logpdf(model::ModelState,
     subtree_indices = GetSubtreeIndicies(tree, pruned_index)
 
     total_probs = Float64[]
-    tree_states = Array(Tuple,0)
+    tree_states = Array(Int64,0)
 
     i = 1
     while in(i, subtree_indices)
@@ -445,8 +443,8 @@ function psi_observation_logpdf(model::ModelState,
     for i = reverse(indices)
         cur = tree.nodes[i]
         if i > N
-            l = cur.children[1].index
-            r = cur.children[2].index
+            l = cur.children[2].index
+            r = cur.children[1].index
             for s = 1:num_samples
                 eta = cur.state[s]
                 Eta[l,s] = (1-eta)*Eta[i,s]
@@ -459,10 +457,10 @@ function psi_observation_logpdf(model::ModelState,
     for j = reverse(pruned_indices)
         cur = tree.nodes[j]
         if j == pruned_index
-            pruned_Eta[j] = cur.parent.state
+            pruned_Eta[j,:] = cur.parent.state
         elseif j > N
-            l = cur.children[1].index
-            r = cur.children[2].index
+            l = cur.children[2].index
+            r = cur.children[1].index
           
             for s = 1:num_samples 
                 eta = cur.state[s]
@@ -482,7 +480,7 @@ function psi_observation_logpdf(model::ModelState,
         for j = pruned_indices
             if j > N
                 cur = tree.nodes[j]
-                r = cur.children[2]
+                r = cur.children[1]
 
                 for s = 1:num_samples
                     phi_j = Eta[i,s] * pruned_Eta[j,s]
@@ -500,7 +498,7 @@ function psi_observation_logpdf(model::ModelState,
         for j = child_indices
             if j > N
                 cur = tree.nodes[j]
-                r = cur.children[2]
+                r = cur.children[1]
 
                 for s = 1:num_samples
                     Eta_l = 1.0 - pruned_Eta[pruned_index,s]
@@ -521,7 +519,7 @@ function psi_observation_logpdf(model::ModelState,
         end 
 
         push!(total_probs, subtree_probs)
-        if isnan(total_probs)
+        if isnan(total_probs[end])
             println("subtree_probs ", subtree_probs)
         end
         push!(tree_states, i)                
@@ -557,8 +555,7 @@ function prior_tree(tree::Tree,
 
     self_direction = find(pruned_parent.children .== pruned_node)[1]
 
-    pruned_mu_prop = self_direction == 1 ? (1-pruned_parent.rho) : pruned_parent.rho
-
+    pruned_mu_prop = self_direction == 1 ? pruned_parent.rho : (1-pruned_parent.rho) 
     pruned_leaves = pruned_node.num_leaves
     
     for i = reverse(indices)
@@ -572,12 +569,12 @@ function prior_tree(tree::Tree,
         else
             parent_rhot_prob = rhot_prob[parent.index]
             self_direction = find(parent.children .== cur)[1]
-            cur_prob = self_direction == 1 ? prob_left[parent.index] : prob_right[parent.index]
+            cur_prob = self_direction == 1 ? prob_right[parent.index] : prob_left[parent.index]
         end
 
         if i > N
-            N_l = cur.children[1].num_leaves
-            N_r = cur.children[2].num_leaves
+            N_l = cur.children[2].num_leaves
+            N_r = cur.children[1].num_leaves
             N_i = cur.num_leaves
             assert(N_l + N_r == N_i)
 
@@ -589,11 +586,11 @@ function prior_tree(tree::Tree,
                                  log(1-ps_old) - log(ps_old) - (ps_old-1)*log(cur.rhot))
             rhot_prob[i] += parent_rhot_prob
 
-            prob_right[i] = pruned_leaves * log(1-cur.rho) -
+            prob_right[i] = pruned_leaves * log(cur.rho) -
                             log(N_i+pruned_leaves) - log(N_i+pruned_leaves-1) +
                             log(N_i) + log(N_i-1) +
                             cur_prob
-            prob_left[i] = pruned_leaves * log(cur.rho) - 
+            prob_left[i] = pruned_leaves * log(1-cur.rho) - 
                            log(N_i+pruned_leaves) - log(N_i+pruned_leaves-1) +
                            log(N_i) + log(N_i-1) +
                            cur_prob
@@ -621,43 +618,259 @@ end
 
 
 ###################################
-###### pdfs for rho, rhot updates #
+###### pdfs for nu, nutd updates #
 ###################################
 
-function rhot_logf(rhot, p, N, gam, lambda, nu_p,
-                   k_p, K_p, T_p, S_p)
-    Rp = p > N ? 1.0-(nu_p*rhot)^gam : 1.0
-    if Rp == 0.0 && k_p == 0
-        return gam*(K_p)*log(rhot) - lambda*( T_p*Rp + S_p*nu_p^gam*rhot^gam )
-    end
-    k_p*log(Rp) + gam*(K_p)*log(rhot) -
-    lambda*( T_p*Rp + S_p*nu_p^gam*rhot^gam )
-end
+function nu_tilde_r_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r, xi; node="r")
 
-function rhot_splits(rhot, p_s, p, N, gam, lambda, nu_p, 
-                     k_p, K_p, T_p, S_p)
-    f1 = log(p_s) + 
-         rhot_logf(1.0, p, N, gam, lambda, nu_p, k_p, K_p, T_p, S_p)
-
-    f2 = log(1-p_s)+log(p_s)+(p_s-1)*log(rhot) + 
-         rhot_logf(rhot, p, N, gam, lambda, nu_p, k_p, K_p, T_p, S_p)
+    p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
  
+    f1 = log(xi) + p_z
+
+    f2 = node == "r" ? log(1-xi)+log(xi)+(xi-1)*log(nutd_r) + p_z :
+                       log(1-xi)+log(xi)+(xi-1)*log(nutd_l) + p_z
     return [f1, f2] 
 end
 
 
-function rho_logpdf(rho, l, r, N, gam, lambda, nut_l, nut_r,
-                    k_l, k_r, K_l, K_r, T_l, T_r, S_l, S_r, N_l, N_r)
+function nu_logpdf(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r,
+                    eta, alpha, N_l, N_r)
 
-    Rl = l > N ? 1.0-(nut_l*rho)^gam : 1.0
-    Rr = r > N ? 1.0-(nut_r*(1-rho))^gam : 1.0
+    p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+    p_eta = p_eta_given_nu(eta, nu, alpha)
+    p_nu = p_nu_Nl_Nr(nu, N_l, N_r)
 
-    k_l*log(Rl) + k_r*log(Rr) + 
-    (gam*K_l+N_l)*log(rho) + (gam*K_r+N_r)*log(1-rho) -
-    lambda*( T_l*Rl + T_r*Rr + 
-             S_l*(nut_l*rho)^gam + S_r*(nut_r*(1-rho))^gam )
+    p_z + p_eta + p_nu
 end
 
+function p_nu_Nl_Nr(nu, N_l, N_r)
+    (N_r-1)log(nu) + (N_l-1)log(1-nu) - log(N_l+N_r) - log(N_l+N_r-1)
+end
+
+function p_eta_given_nu(eta, nu, alpha)
+    S = length(eta)
+
+    log_pdf = S*lbeta(alpha*nu, alpha*(1-nu))
+
+    leta_1 = sum(log(eta))
+    leta_2 = sum(log(1-eta))
+
+    logpdf += (alpha*nu-1)*leta_1 + (alpha*(1-nu)-1)*leta_2
+    logpdf
+end
+
+function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+    log_pdf = gam*U_r*log(nutd_r*nu) + gam*U_l*log(nutd_l*(1-nu)) + gam*U_l*log(nutd_l)+gam*U_r*log(nutd_r) - 
+              U*log( (nu*nutd_r)^gam * C_r + ((1-nu)*nutd_l)^gam * C_l + D )
+
+    rrg = ((1-nu)*nutd_l)^gam
+    for i = P_l
+        log_pdf += u[i]*log(1-rrg*K_l[i])
+    end
+
+    rrg = (nu*nutd_r)^gam
+    for i = P_r
+        log_pdf += u[i]*log(1-rrg*K_r[i])
+    end
+    
+    log_pdf
+end
+
+
+###################################
+###### pdfs for eta updates #######
+###################################
+
+function eta_logpdf(model::ModelState,
+                    model_spec::ModelSpecification,
+                    data::DataState)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    alpha = model.alpha
+    Z = model.Z
+
+    C = [Int64[] for x = 1:maximum(Z)]
+    for i = 1:length(Z)
+        push!(C[Z[i]], i)
+    end
+
+    AA = data.reference_counts
+    DD = data.total_counts
+    mu_r = data.mu_r
+    mu_v = data.mu_v
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    log_pdf = 0.0
+
+    for j = indices
+        if j > N
+            cur = tree.nodes[j]
+            eta = cur.state
+            nu_r = cur.parent == Nil() ? 1.0 : cur.parent.rho
+
+            log_pdf += (alpha*nu_r-1)*sum(log(eta)) + (alpha*(1-nu_r)-1)*sum(log(1 .- eta))
+          
+            phi = ones(length(eta))
+            An = GetAncestors(cur)
+            for a = An
+                p = a.parent
+                if p != Nil()
+                    a_direction = find(p.children .== a)[1]
+                    eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
+                    phi .*= eta_a
+                end
+            end
+            for i = C[j]
+                r = (1.-phi)*mu_r[i] + phi*mu_v[i]
+                logr = log(r)
+                log1mr = log(1.-r) 
+                for s = 1:length(eta)
+                    log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
+                end
+            end
+
+        end 
+
+    end
+
+    log_pdf
+end
+
+function eta_log_gradient(model::ModelState,
+                          model_spec::ModelSpecification,
+                          data::DataState)
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    alpha = model.alpha
+    Z = model.Z
+
+    C = [Int64[] for x=1:maximum(Z)]
+
+    for i = 1:length(Z)
+        push!(C[Z[i]], i)
+    end
+
+    AA = data.reference_counts
+    DD = data.total_counts
+    mu_r = data.mu_r
+    mu_v = data.mu_v
+
+    (M,S) = size(AA)
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    gradient = zeros(N-1, S)
+    phi = ones(N-1, S)
+
+    for j = indices
+        if j > N
+            cur = tree.nodes[j]
+          
+            An = GetAncestors(cur)
+            for a = An
+                p = a.parent
+                if p != Nil()
+                    a_direction = find(p.children .== a)[1]
+                    eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
+                    phi[j-N, :] .*= eta_a
+                end
+            end
+        end
+    end
+   
+    for k = indices
+        if k > N
+            
+            cur = tree.nodes[k]
+            parent = cur.parent
+            nu_k = parent == Nil() ? 1.0 : cur.parent.rho
+            self_direction = find(parent.children .== cur)[1]
+            eta_p = parent.eta
+            eta_k = self_direction == 1 ? eta_p : 1.-eta_p 
+    
+            for s = 1:S
+                gradient[k-N,s] += (alpha*nu_k-1)/eta_k[s] + (alpha*(1-nu_k)-1)/(1-eta_k[s])
+            end         
+
+ 
+            De = GetDescendants(cur)
+            for j = De
+                p = j.parent
+                phi_j_k = phi[j,:] ./ eta_k
+                for i = C[j]
+                    r = (1 .- phi[k,:]).*mu_r[j] + phi[k,:].*mu_v[j]
+                    for s = 1:S
+                        gradient[k-N,s] +=  AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k/r[s] +
+                                            (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k/(1-r[s])
+                    end
+                end
+            end
+        end 
+
+    end
+    gradient
+end
+
+###################################
+##### pdf for Z assignment update #
+###################################
+
+function z_logpdf(model::ModelState,
+                  model_spec::ModelSpecification,
+                  data::DataState,
+                  index::Int64,
+                  U::Vector{Int64},
+                  times::Vector{Float64},
+                  Tau::Vector{TreeNode},
+                  phi::Vector{Float64})
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    alpha = model.alpha
+    Z = model.Z
+
+    current_k = Z[index]
+
+    # We cannot move this mutation as it would create an empty cluster
+    if U[current_k-N] == 0
+        result = -Inf*ones(N-1)
+        result[current_k] = 0.0
+        return result
+    end
+
+    AA = data.reference_counts
+    DD = data.total_counts
+    mu_r = data.mu_r
+    mu_v = data.mu_v
+
+    (M,S) = size(AA)
+
+    An = GetAncestors(cur)
+
+    log_pdf = zeros(N-1)
+
+    for k = N+1:2N-1
+        v_k = times[Tau[k].index] - times[k]
+
+        n_k = U[k-N]
+        q_k = (1 + (n_k-1)*v_k)/n_k
+        log_pdf[k] = log(q_k)
+
+        for s = 1:S
+            r_ks = (1-phi[k,s])*mu_r[index] + phi[k,s]*mu_v[index]
+            log_pdf[k] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks) 
+        end
+
+    end
+    log_pdf 
+end
 
 ###################################
 ###### pdfs for vardim updates ####
@@ -1602,24 +1815,6 @@ function all_splits(v::Array{Int64})
     (U,reverse(U))
 end
 
-# Pointers to the beginning of a node's weights in model.weights
-function weight_index_pointers(tree::Tree)
-    n = length(tree.nodes) 
-
-    U = zeros(Int64, n)
-    for i = 1:n
-        U[i] = tree.nodes[i].state
-    end
-
-    # Index pointing to starting location in W for the features found
-    # above particular nodes
-    weight_indices = cumsum(U)
-    weight_indices[2:end] = weight_indices[1:end-1]
-    weight_indices[1] = 0
-    weight_indices .+= 1
-
-    weight_indices
-end
 
 #end #profile
 
