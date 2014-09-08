@@ -228,6 +228,9 @@ function psi_infsites_logpdf(model::ModelState,
 
     self_direction = find(pruned_parent.children .== pruned_node)[1]
 
+    # We should only be pruning right children
+    @assert self_direction == 1
+
     pruned_mu_prop = self_direction == 1 ? pruned_parent.rho : (1-pruned_parent.rho) 
     pruned_mu_prop *= pruned_parent.rhot
 
@@ -356,7 +359,7 @@ function psi_infsites_logpdf(model::ModelState,
             continue
         end
         cur = tree.nodes[i]
-
+        parent = cur.parent 
 
         pruned_subtree_mu_prop = mu_1[i]
         grafted_subtree_mu_prop = pruned_mu_prop
@@ -371,11 +374,27 @@ function psi_infsites_logpdf(model::ModelState,
             end
         end
 
+
         child_indices = GetLeafToRootOrdering(tree, i)
         for j = child_indices
-            if j > N
-                L_new = L[i] + pruned_subtree_mu_prop^gam * (t_1[i] - t_1[j])
+            if j > N 
+                tau_index = Tau[j]
+                if tau_index == 0
+                    tau_t = 1.0
+                else
+                    tau_t = t_1[tau_index]
+                    if tau_t <= t_1[i]
+                        tau_t *= grafted_subtree_mu_prop^gam
+                    end
+                end
+
+                L_new = tau_t - grafted_subtree_mu_prop^gam * t_1[j]
                 # need to compute the difference here as these terms aren't the same for each i
+                t_prob = U[j-N]*(log(L_new) - log(L[j]))
+                if isnan(t_prob)
+                    println("L_new: $L_new, L[j]: $(L[j])")
+                    println("i: $i, j: $j")
+                end
                 subtree_probs += U[j-N]*(log(L_new) - log(L[j]))
             end
         end 

@@ -62,20 +62,20 @@ end
 # Like tau, but returns the full path from t to tau(t)
 function tau_path(t::TreeNode)
     @assert t != Nil()
-    path = Array(TreeNode,0)
+    path = Array(Node,0)
     push!(path,t)
     p = t.parent
     if p == Nil()
-        push!(path,p)
+        push!(path,t)
         return path
     end
 
     c = t 
     while p.children[1] != c
+        push!(path,c)
         c = p
-        p = p.parent
-        push!(path,p)
 
+        p = p.parent
         if p == Nil()
             return path
         end

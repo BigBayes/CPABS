@@ -31,9 +31,22 @@ function mcmc(data::DataState,
     (M,S) = size(data.reference_counts)
     eta = [rand(S) for i = 1:2N-1]
     tree = Tree(eta)
+
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
 
+
+    # initial root node must have nutd < 1.0
+    root = FindRoot(tree,1)
+    tree.nodes[root.index].rhot = 0.9
+
+
     Z = rand(1:N-1, M) + N
+    # choose one mutation at random for each cluster to ensure they are nonempty
+    perm = randperm(M)
+    for k = 1:N-1
+        Z[perm[k]] = k + N
+    end
+
 
     model = ModelState(lambda,gam,alpha,tree,Z)
 
@@ -156,46 +169,50 @@ function sample_nu_nutd(model::ModelState,
     u = zeros(2N-1)
     U_i = zeros(2N-1)
 
-    Tau = Array(TreeNode, 2N-1)
-    P = Array(Array{TreeNode}, 2N-1)
+    Tau = Array(Node, 2N-1)
+    P = Array(Array{Node}, 2N-1)
     #Self inclusive
-    ancestors = Array(Array{TreeNode}, 2N-1)
+    ancestors = Array(Array{Node}, 2N-1)
     K = zeros(2N-1, 2N-1)
 
-    Pki = Array(Array{TreeNode}, 2N-1)
-    An_i = Array(Array{TreeNode}, 2N-1)
-    An_tau = Array(Array{TreeNode}, 2N-1)
+    Pki = [Array(Node,0) for i = 1:2N-1]
+    An_i = [Array(Node,0) for i = 1:2N-1]
+    An_tau = [Array(Node,0) for i = 1:2N-1]
 
     A_I = zeros(2N-1)
     A_tau = zeros(2N-1)
 
-    An_ni = Array(Array{TreeNode}, 2N-1)
-    An_ntau = Array(Array{TreeNode}, 2N-1)
+    An_ni = [Array(Node,0) for i = 1:2N-1]
+    An_ntau = [Array(Node,0) for i = 1:2N-1]
 
     B_I = zeros(2N-1)
     B_tau = zeros(2N-1)
 
-    C = Array(Int64[], max(Z))
+    C = [Int64[] for x=1:maximum(Z)]
     for i = 1:length(Z)
         push!(C[Z[i]], i)
     end
 
-
     for i = indices
         cur = tree.nodes[i]
         P[i] = tau_path(cur)
-        Tau[i] = P[i][end]
-        ancestors[i] = GetAncestors(i)
-        u[i] = length(C[i])-1 
-        @assert u[i] >= 0
+        Tau[i] = tau(cur)
+        ancestors[i] = GetAncestors(tree,i)
+        u[i] = length(C[i])-1
+        @assert u[i] >= 0 || i <= N
     end
 
     for i = indices
-        for j = ancestors[Tau[i]]
-            U_i[i] += u[j]
+        tau = Tau[i]
+
+        An = tau == Nil() ? [] : ancestors[tau.index]
+
+        for j in An
+            U_i[i] += u[j.index]
         end 
     end
 
+    println("blah1") 
     for i = indices
         for k = P[i]
             push!(Pki[k.index], tree.nodes[i])
@@ -203,26 +220,32 @@ function sample_nu_nutd(model::ModelState,
         for k = ancestors[i]
             push!(An_i[k.index], tree.nodes[i])
         end
-        for k = ancestors[Tau[i]]
+        tau = Tau[i]
+        An = tau == Nil() ? [] : ancestors[tau.index]
+        for k = An
             push!(An_tau[k.index], tree.nodes[i])
         end
 
         for k = indices
-            if k.index > N
-                left_child = k.children[2]
-                right_child = k.children[1]
+            cur = tree.nodes[k]
+            if k > N
+                left_child = cur.children[2]
+                right_child = cur.children[1]
                 l = left_child.index
                 r = right_child.index
                 if !(l in ancestors[i]) && !(r in ancestors[i])
-                    push!(An_ni[k.index], tree.nodes[i])
+                    push!(An_ni[k], tree.nodes[i])
                 end
-                if !(l in ancestors[Tau[i]]) && !(r in ancestors[Tau[i]])
-                    push!(An_ntau[k.index], tree.nodes[i])
+                tau = Tau[i]
+                An = tau == Nil() ? [] : ancestors[tau.index]
+                if !(l in An) && !(r in An)
+                    push!(An_ntau[k], tree.nodes[i])
                 end
             end 
         end
     end
 
+    println("blah2") 
 
     for i = reverse(indices)
         if i > N
@@ -404,7 +427,10 @@ function sample_psi(model::ModelState,
 
 
     println("psi: ")
-    for prune_index = 1:N # only prune leaves, it's much faster
+    for parent_prune_index = N+1:2N-1
+         
+        parent = tree.nodes[parent_prune_index]
+        prune_index = parent.children[1].index
 
         if model_spec.debug
             old_prior = prior(model, model_spec)
@@ -419,10 +445,6 @@ function sample_psi(model::ModelState,
         old_model = copy(model)
         old_tree = old_model.tree
 
-        parent = tree.nodes[prune_index].parent
-        if parent == Nil()
-            continue
-        end
 
         grandparent = tree.nodes[prune_index].parent.parent
         if grandparent == Nil()
@@ -446,6 +468,7 @@ function sample_psi(model::ModelState,
         end
         root = FindRoot(tree, i)
         path = GetLeafToRootOrdering(tree, root.index)
+        
 
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_observation_logpdf(model, model_spec, data, prune_index, path)
@@ -480,7 +503,7 @@ function sample_psi(model::ModelState,
 
         graft_index = pstates[state_index]
 
-        InsertIndexIntoTree(model.tree, prune_index, graft_index) 
+        InsertIndexIntoTree!(model.tree, prune_index, graft_index) 
 
 
         if model_spec.debug 
