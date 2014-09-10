@@ -81,7 +81,7 @@ function prior(model::ModelState,
             Tau[i-N] = tau_t - t[i]
 
             for s = 1:length(tree.nodes[i].state)
-                eta_term += logpdf(Beta(alpha*right_prob,alpha*left_prob), cur.state[s]) 
+                eta_term += logpdf(Beta(alpha*right_prob+1,alpha*left_prob+1), cur.state[s]) 
             end
         end
         parent_t = 1.0
@@ -695,12 +695,12 @@ end
 function p_eta_given_nu(eta, nu, alpha)
     S = length(eta)
 
-    log_pdf = S*lbeta(alpha*nu, alpha*(1-nu))
+    log_pdf = S*lbeta(alpha*nu+1, alpha*(1-nu)+1)
 
     leta_1 = sum(log(eta))
     leta_2 = sum(log(1-eta))
 
-    log_pdf += (alpha*nu-1)*leta_1 + (alpha*(1-nu)-1)*leta_2
+    log_pdf += (alpha*nu)*leta_1 + (alpha*(1-nu))*leta_2
     log_pdf
 end
 
@@ -776,9 +776,13 @@ function eta_logpdf(model::ModelState,
             eta = cur.state
             nu_r = cur.parent == Nil() ? 1.0 : cur.parent.rho
 
-            println("eta: $eta")
-            log_pdf += (alpha*nu_r-1)*sum(log(eta)) + (alpha*(1-nu_r)-1)*sum(log(1 .- eta))
-          
+            log_pdf += (alpha*nu_r)*sum(log(eta)) + (alpha*(1-nu_r))*sum(log(1 .- eta))
+            if log_pdf == Inf
+                println("eta: $eta")
+                @assert false
+            end         
+
+ 
             phi = ones(size(eta))
             An = GetAncestors(tree, cur.index)
             for a = An
@@ -795,6 +799,10 @@ function eta_logpdf(model::ModelState,
                 log1mr = log(1.-r) 
                 for s = 1:length(eta)
                     log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
+                    if log_pdf == Inf
+                        println("r: $r")
+                        @assert false
+                    end         
                 end
             end
 
@@ -844,6 +852,11 @@ function eta_log_gradient(model::ModelState,
                     a_direction = find(p.children .== a)[1]
                     eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
                     phi[j-N, :] .*= eta_a'
+
+                    # return gradient = 0 if prior is 0
+                    if any(eta_a .== 0.0) || any(eta_a .== 1.0)
+                        return gradient
+                    end
                 end
             end
         end
@@ -864,7 +877,7 @@ function eta_log_gradient(model::ModelState,
             eta_k = self_direction == 1 ? eta_p : 1.-eta_p 
  
             for s = 1:S
-                gradient[k-N,s] += (alpha*nu_k-1)/eta_k[s] + (alpha*(1-nu_k)-1)/(1-eta_k[s])
+                gradient[k-N,s] += (alpha*nu_k)/eta_k[s] + (alpha*(1-nu_k))/(1-eta_k[s])
             end         
 
  
@@ -872,7 +885,10 @@ function eta_log_gradient(model::ModelState,
             for d = De
                 j = d.index
                 if j > N
-                    phi_j_k = phi[j-N,:] ./ eta_k'
+                    phi_j_k = phi[j-N,:]
+                    for s = 1:S
+                        phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / eta_k[s]
+                    end
                     for i = C[j]
                         r = (1 .- phi[k-N,:]).*mu_r[j] + phi[k-N,:].*mu_v[j]
                         for s = 1:S
@@ -898,8 +914,8 @@ function z_logpdf(model::ModelState,
                   index::Int64,
                   U::Vector{Int64},
                   times::Vector{Float64},
-                  Tau::Vector{TreeNode},
-                  phi::Vector{Float64})
+                  Tau::Vector{Int64},
+                  phi::Matrix{Float64})
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -912,7 +928,7 @@ function z_logpdf(model::ModelState,
     # We cannot move this mutation as it would create an empty cluster
     if U[current_k-N] == 0
         result = -Inf*ones(N-1)
-        result[current_k] = 0.0
+        result[current_k-N] = 0.0
         return result
     end
 
@@ -923,20 +939,21 @@ function z_logpdf(model::ModelState,
 
     (M,S) = size(AA)
 
-    An = GetAncestors(cur)
+    An = GetAncestors(tree, current_k)
 
     log_pdf = zeros(N-1)
 
     for k = N+1:2N-1
-        v_k = times[Tau[k].index] - times[k]
+        tau_t = Tau[k] == 0 ? 1.0 : times[Tau[k]]
+        v_k = tau_t - times[k]
 
-        n_k = U[k-N]
+        n_k = U[k-N]+1
         q_k = (1 + (n_k-1)*v_k)/n_k
-        log_pdf[k] = log(q_k)
+        log_pdf[k-N] = log(q_k)
 
         for s = 1:S
             r_ks = (1-phi[k,s])*mu_r[index] + phi[k,s]*mu_v[index]
-            log_pdf[k] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks) 
+            log_pdf[k-N] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks)
         end
 
     end

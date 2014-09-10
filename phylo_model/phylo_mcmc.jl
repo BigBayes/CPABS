@@ -2,6 +2,7 @@ require("phylo_model/phylo_model.jl")
 require("tree.jl")
 require("utils/probability_util.jl")
 require("phylo_model/pdf.jl")
+require("samplers/transformation.jl")
 
 plot_utils_loaded = true
 if Pkg.installed("Winston") != nothing
@@ -80,7 +81,7 @@ function mcmc(data::DataState,
 
             tbl = Table(1,1)
             tbl[1,1] = p_dendrogram
-            Winston.tk(tbl)
+            Winston.display(tbl)
  
         end
 
@@ -613,11 +614,14 @@ function sample_eta(model::ModelState,
         eta_log_gradient(model, model_spec, data)
     end
 
-    opts = @options numsteps=8 stepsize=0.1
+    opts = @options numsteps=8 stepsize=0.1 transformation=ReducedNaturalTransformation
 
     for i = 1:hmc_iterations
         eta = hmc_sampler(eta, eta_density, eta_grad, opts)
+        println("eta: $eta")
     end
+
+    
  
     for j = N+1:2N-1
         tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
@@ -638,20 +642,20 @@ function sample_assignments(model::ModelState,
     phi = compute_phis(model)
 
     Z = model.Z
-    U = zeros(N-1)
+    U = zeros(Int64, N-1)
     for i=1:length(Z)
-        U[Z[i]] += 1
+        U[Z[i]-N] += 1
     end 
     U = U .- 1
 
     for iter = 1:num_iterations    
         for i = 1:M
-            cur_z = Z[i]
+            cur_z = Z[i]-N
             z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi)
             new_z = rand(Categorical(exp_normalize(z_probs)))
             U[cur_z] -= 1
             U[new_z] += 1
-            Z[i] = new_z
+            Z[i] = new_z+N
         end
     end
 end

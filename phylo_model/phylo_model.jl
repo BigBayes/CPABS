@@ -120,7 +120,8 @@ function compute_taus(model::ModelState)
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
 
-    Tau = zeros(2N-1)
+    Tau = zeros(Int64, 2N-1)
+    root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
 
     for i = reverse(indices)
@@ -148,7 +149,8 @@ function compute_phis(model::ModelState)
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
 
-    Tau = zeros(2N-1)
+    B = zeros(2N-1,S)
+    root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
 
     for i = reverse(indices)

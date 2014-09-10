@@ -1,5 +1,6 @@
 require("Options")
 using OptionsMod
+require("samplers/transformation.jl")
 
 function hmc_sampler(x::Vector{Float64},
                      U::Function,
@@ -7,9 +8,18 @@ function hmc_sampler(x::Vector{Float64},
                      opts::Options)
 
 
-  @defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 
+  @defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 transformation=identity_transformation
 
-  current_U = U(x)
+  T = transformation.transformation_function
+  T_inv = transformation.transformation_inverse
+  T_grad = transformation.transformed_gradient
+  T_logjacobian = transformation.transformation_logjacobian
+
+  # the x passed in is assumed to live in the orginal space, so transform to the space 
+  # suitable for inference 
+  x = T_inv(x)
+
+  current_U = U(T(x)) + T_logjacobian(x)
 
   local epsilon = stepsize
   local L = numsteps
@@ -21,7 +31,7 @@ function hmc_sampler(x::Vector{Float64},
   p = randn(length(q))  # independent standard normal variates
   current_p = deepcopy(p)
 
-  gradient = grad_U(x)
+  gradient = T_grad(x, grad_U(T(x)))
   # Make a half step for momentum at the beginning
   p = p + epsilon * gradient / 2
 
@@ -31,22 +41,22 @@ function hmc_sampler(x::Vector{Float64},
 
     q = q + epsilon * p
 
-    Ux = U(q)
+    Ux = U(T(q)) + T_logjacobian(q)
     if !isfinite(Ux)
         break
     end
 
     # Make a full step for the momentum, except at end of trajectory
     if i!=L
-        gradient = grad_U(q) 
+        gradient = T_grad(q, grad_U(T(q)) )
         p = p + epsilon * gradient
     end
 
   end
 
   # Make a half step for momentum at the end.
-  proposed_U = U(q)
-  gradient = grad_U(q) 
+  proposed_U = U(T(q)) + T_logjacobian(q)
+  gradient = T_grad(q, grad_U(T(q)))
 
   p = p + epsilon * gradient / 2
 
@@ -74,9 +84,9 @@ function hmc_sampler(x::Vector{Float64},
 
 
   if rand() < accept_prob 
-    return q 
+    return T(q)
   else
-    return current_q
+    return T(current_q)
   end
 
 
