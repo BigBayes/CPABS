@@ -129,7 +129,7 @@ function mcmc_sweep(model::ModelState,
 
     hmc_iterations = 5
     eta_time = time()
-    sample_eta(model, model_spec, hmc_iterations)
+    sample_eta(model, model_spec, data, hmc_iterations)
     eta_time = time() - eta_time
 
     tree_prior = prior(model,model_spec) 
@@ -168,6 +168,7 @@ function sample_nu_nutd(model::ModelState,
 
     u = zeros(2N-1)
     U_i = zeros(2N-1)
+    U = sum(u)
 
     Tau = Array(Node, 2N-1)
     P = Array(Array{Node}, 2N-1)
@@ -269,8 +270,8 @@ function sample_nu_nutd(model::ModelState,
             end
 
             rhot = cur.rhot
-            nut_l = left_child.rhot
-            nut_r = right_child.rhot
+            nutd_l = left_child.rhot
+            nutd_r = right_child.rhot
  
             nu_r = cur.rho
             nu_l = 1-cur.rho
@@ -288,7 +289,7 @@ function sample_nu_nutd(model::ModelState,
                             K[a,j] *= (k.rhot)^gam
                         else
                             k_direction = find(k.parent.children .== k)[1]
-                            nu_k = self_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
                             K[a,j] *= (k.rhot*nu_k)^gam
                         end
 
@@ -307,7 +308,7 @@ function sample_nu_nutd(model::ModelState,
                             prod *= k.rhot^gam
                         else
                             k_direction = find(k.parent.children .== k)[1]
-                            nu_k = self_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
                             prod *= (k.rhot*nu_k)^gam
                         end
                     end
@@ -317,7 +318,8 @@ function sample_nu_nutd(model::ModelState,
                 for n = An_tau[a]
                     j = n.index
                     prod = 1.0
-                    for k = ancestors[Tau[j]]
+                    An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
+                    for k = An_k
                         if k.index == a
                             continue
                         end
@@ -325,7 +327,7 @@ function sample_nu_nutd(model::ModelState,
                             prod *= k.rhot^gam
                         else
                             k_direction = find(k.parent.children .== k)[1]
-                            nu_k = self_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
                             prod *= (k.rhot*nu_k)^gam
                         end
                     end
@@ -346,7 +348,7 @@ function sample_nu_nutd(model::ModelState,
                         prod *= k.rhot^gam
                     else
                         k_direction = find(k.parent.children .== k)[1]
-                        nu_k = self_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                        nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
                         prod *= (k.rhot*nu_k)^gam
                     end
                 end
@@ -356,7 +358,8 @@ function sample_nu_nutd(model::ModelState,
             for n = An_ntau[i]
                 j = n.index
                 prod = 1.0
-                for k = ancestors[Tau[j]]
+                An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
+                for k = An_k
                     if k == l || k == r
                         continue
                     end
@@ -364,7 +367,7 @@ function sample_nu_nutd(model::ModelState,
                         prod *= k.rhot^gam
                     else
                         k_direction = find(k.parent.children .== k)[1]
-                        nu_k = self_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                        nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
                         prod *= (k.rhot*nu_k)^gam
                     end
                 end
@@ -375,10 +378,13 @@ function sample_nu_nutd(model::ModelState,
             C_r = A_tau[r] - A_I[r]
             D = B_tau[i] - B_I[i]
 
+            p_s = 1 - 2/(N_l+N_r+1)
 
             # Sample nutd_l
             f = x -> logsumexp( nu_tilde_splits(nu_r, x, nutd_r, gam, U, U_i[l], U_i[r], u, 
                                     K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], p_s, node="l"))
+
+
 
             nutd_l = nutd_l == 1.0 ? rand(Uniform(0,1)) : nutd_l
             (nutd_u, f_nutd) = slice_sampler(nutd_l, f, 0.1, 10, 0.0, 1.0)
@@ -468,7 +474,7 @@ function sample_psi(model::ModelState,
         end
         root = FindRoot(tree, i)
         path = GetLeafToRootOrdering(tree, root.index)
-        
+      
 
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_observation_logpdf(model, model_spec, data, prune_index, path)
@@ -504,6 +510,8 @@ function sample_psi(model::ModelState,
         graft_index = pstates[state_index]
 
         InsertIndexIntoTree!(model.tree, prune_index, graft_index) 
+
+        println("graft_index: $graft_index")
 
 
         if model_spec.debug 
@@ -582,24 +590,25 @@ function sample_eta(model::ModelState,
 
     tree  = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
-    eta = zeros(N-1)
+    M, S = size(data.reference_counts)
+    eta = zeros(S*(N-1))
 
     num_iterations = 10
 
     for j = N+1:2N-1
-        eta[j-N] = tree.nodes[j].eta
+        eta[1 + (j-N-1)*S : (j-N)*S] = tree.nodes[j].state
     end
 
     function eta_density(eta::Vector{Float64})
         for j = N+1:2N-1
-            tree.nodes[j].eta = eta[j-N]
+            tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
         eta_logpdf(model, model_spec, data)
     end
 
     function eta_grad(eta::Vector{Float64})
         for j = N+1:2N-1
-            tree.nodes[j].eta = eta[j-N]
+            tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
         eta_log_gradient(model, model_spec, data)
     end
@@ -611,7 +620,7 @@ function sample_eta(model::ModelState,
     end
  
     for j = N+1:2N-1
-        tree.nodes[j].eta = eta[j-N]
+        tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
     end
 end
 

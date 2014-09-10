@@ -374,7 +374,6 @@ function psi_infsites_logpdf(model::ModelState,
             end
         end
 
-
         child_indices = GetLeafToRootOrdering(tree, i)
         for j = child_indices
             if j > N 
@@ -391,13 +390,28 @@ function psi_infsites_logpdf(model::ModelState,
                 L_new = tau_t - grafted_subtree_mu_prop^gam * t_1[j]
                 # need to compute the difference here as these terms aren't the same for each i
                 t_prob = U[j-N]*(log(L_new) - log(L[j]))
-                if isnan(t_prob)
-                    println("L_new: $L_new, L[j]: $(L[j])")
-                    println("i: $i, j: $j")
-                end
                 subtree_probs += U[j-N]*(log(L_new) - log(L[j]))
             end
         end 
+
+        # one term remains for the "pruned parent"
+        # tau of the pruned parent is the same as that of the graftpoint i
+        tau_index = Tau[i]
+        tau_t = tau_index == 0 ? 1.0 : t_1[tau_index]
+
+        if parent != Nil()
+            i_direction = find(parent.children .== cur)[1]
+            nu_i = i_direction == 1 ? parent.rho : 1-parent.rho
+            pruned_parent_t = (pruned_parent.rhot * nu_i * mu_1[parent.index])^gam
+        else
+            pruned_parent_t = pruned_parent.rhot^gam
+        end
+
+        L_pruned_parent = tau_t - pruned_parent_t
+
+        pruned_parent_term = L_pruned_parent == 0.0 ? -Inf : U[pruned_parent.index-N]*log(L_pruned_parent)
+        subtree_probs += pruned_parent_term 
+
 
         subtree_probs -= sum_U * log(L_graft)
 
@@ -640,7 +654,7 @@ end
 ###### pdfs for nu, nutd updates #
 ###################################
 
-function nu_tilde_r_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r, xi; node="r")
+function nu_tilde_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r, xi; node="r")
 
     p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
  
@@ -648,6 +662,18 @@ function nu_tilde_r_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_
 
     f2 = node == "r" ? log(1-xi)+log(xi)+(xi-1)*log(nutd_r) + p_z :
                        log(1-xi)+log(xi)+(xi-1)*log(nutd_l) + p_z
+
+    if isnan(f1)
+        println("f1")
+    elseif isnan(f2)
+        println("p_z: $p_z")
+        if node == "r"
+            println("r.  xi: $xi, nutd_r: $nutd_r")
+        else
+            println("l.  xi: $xi, nutd_l: $nutd_l")
+        end
+    end
+
     return [f1, f2] 
 end
 
@@ -674,22 +700,41 @@ function p_eta_given_nu(eta, nu, alpha)
     leta_1 = sum(log(eta))
     leta_2 = sum(log(1-eta))
 
-    logpdf += (alpha*nu-1)*leta_1 + (alpha*(1-nu)-1)*leta_2
-    logpdf
+    log_pdf += (alpha*nu-1)*leta_1 + (alpha*(1-nu)-1)*leta_2
+    log_pdf
 end
 
 function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+
+    if nu == 0.0 || nu == 1.0 || nutd_r == 0.0 || nutd_l == 0.0
+        return -Inf
+    end
+
     log_pdf = gam*U_r*log(nutd_r*nu) + gam*U_l*log(nutd_l*(1-nu)) + gam*U_l*log(nutd_l)+gam*U_r*log(nutd_r) - 
               U*log( (nu*nutd_r)^gam * C_r + ((1-nu)*nutd_l)^gam * C_l + D )
 
     rrg = ((1-nu)*nutd_l)^gam
-    for i = P_l
-        log_pdf += u[i]*log(1-rrg*K_l[i])
+    for c = P_l
+        if c != Nil()
+            i = c.index
+            if 1-rrg*K_l[i] == 0.0
+                log_pdf += -Inf
+            else 
+                log_pdf += u[i]*log(1-rrg*K_l[i])
+            end
+        end
     end
 
     rrg = (nu*nutd_r)^gam
-    for i = P_r
-        log_pdf += u[i]*log(1-rrg*K_r[i])
+    for c = P_r
+        if c != Nil()
+            i = c.index 
+            if 1-rrg*K_r[i] == 0.0
+                log_pdf += -Inf
+            else 
+                log_pdf += u[i]*log(1-rrg*K_r[i])
+            end
+        end
     end
     
     log_pdf
@@ -731,10 +776,11 @@ function eta_logpdf(model::ModelState,
             eta = cur.state
             nu_r = cur.parent == Nil() ? 1.0 : cur.parent.rho
 
+            println("eta: $eta")
             log_pdf += (alpha*nu_r-1)*sum(log(eta)) + (alpha*(1-nu_r)-1)*sum(log(1 .- eta))
           
-            phi = ones(length(eta))
-            An = GetAncestors(cur)
+            phi = ones(size(eta))
+            An = GetAncestors(tree, cur.index)
             for a = An
                 p = a.parent
                 if p != Nil()
@@ -791,49 +837,55 @@ function eta_log_gradient(model::ModelState,
         if j > N
             cur = tree.nodes[j]
           
-            An = GetAncestors(cur)
+            An = GetAncestors(tree, cur.index)
             for a = An
                 p = a.parent
                 if p != Nil()
                     a_direction = find(p.children .== a)[1]
                     eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
-                    phi[j-N, :] .*= eta_a
+                    phi[j-N, :] .*= eta_a'
                 end
             end
         end
     end
-   
+ 
     for k = indices
         if k > N
             
             cur = tree.nodes[k]
             parent = cur.parent
-            nu_k = parent == Nil() ? 1.0 : cur.parent.rho
+            if parent == Nil()
+                continue
+            end
+
+            nu_k = cur.parent.rho
             self_direction = find(parent.children .== cur)[1]
-            eta_p = parent.eta
+            eta_p = parent.state
             eta_k = self_direction == 1 ? eta_p : 1.-eta_p 
-    
+ 
             for s = 1:S
                 gradient[k-N,s] += (alpha*nu_k-1)/eta_k[s] + (alpha*(1-nu_k)-1)/(1-eta_k[s])
             end         
 
  
-            De = GetDescendants(cur)
-            for j = De
-                p = j.parent
-                phi_j_k = phi[j,:] ./ eta_k
-                for i = C[j]
-                    r = (1 .- phi[k,:]).*mu_r[j] + phi[k,:].*mu_v[j]
-                    for s = 1:S
-                        gradient[k-N,s] +=  AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k/r[s] +
-                                            (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k/(1-r[s])
+            De = GetDescendants(tree, cur.index)
+            for d = De
+                j = d.index
+                if j > N
+                    phi_j_k = phi[j-N,:] ./ eta_k'
+                    for i = C[j]
+                        r = (1 .- phi[k-N,:]).*mu_r[j] + phi[k-N,:].*mu_v[j]
+                        for s = 1:S
+                            gradient[k-N,s] +=  AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
+                                                (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
+                        end
                     end
                 end
             end
         end 
 
     end
-    gradient
+    gradient[:]
 end
 
 ###################################
@@ -1231,608 +1283,6 @@ function compute_constant_terms(model::ModelState,
     logprobs
 end
 
-# Adjust model_logprob when L != u
-# Assumes model.augmented_weights is up to date!
-function adjust_model_logprob(model::ModelState,
-                              model_spec::ModelSpecification,
-                              data::DataState,
-                              relevant_pairs::Array{Array{Int64, 2}, 2},
-                              current_latent_effects::Array{Float64, 2},
-                              latent_effects::Array{Float64, 2},
-                              observed_effects::Array{Float64, 2},
-                              aug_k::Int,
-                              u::Int,
-                              L::Int,
-                              weight_index_pointers::Array{Int64, 1},
-                              node_index::Int64,
-                              effective_lambda::Float64)
-
-    if L < 0
-        return (0.0, 0.0, 0.0)
-    end
-
-    YY = data.Ytrain
-
-    augW = model.augmented_weights
-    aug_inds, _ = get_augmented_submatrix_indices(augW, node_index, 1)
-
-    W = augW[aug_inds, aug_inds]
-    (K,K) = size(W)
-
-    start_index = weight_index_pointers[node_index]
-    end_index = start_index + model.tree.nodes[node_index].state - 1
-    new_index = end_index + 1
-
-    aug_terms = 0.0
-    prior_terms = 0.0
-    likelihood_terms = 0.0
-    if model_spec.diagonal_W
-        if L < u
-            removed_ind = aug_k
-            aug_terms += aug_logpdf(W[new_index,new_index], model.nu)
-            aug_terms += aug_logpdf(W[removed_ind, removed_ind], model.nu)
-            prior_terms -= normal_logpdf(W[removed_ind, removed_ind], model.w_sigma)
-
-            rpairs = relevant_pairs[removed_ind, removed_ind]
-            for p = 1:size(rpairs)[2]
-                i = rpairs[1,p]
-                j = rpairs[2,p]
-
-                le = latent_effects[i,j]
-                oe = observed_effects[i,j]
-                old_le = current_latent_effects[i,j]
-                for s = 1:length(YY)
-                    Y = YY[s]
-                    likelihood_terms += log_logit(le + oe, Y[i,j])
-                    likelihood_terms -= log_logit(old_le + oe, Y[i,j])
-                end
-            end 
-        elseif L == u
-            aug_terms += aug_logpdf(W[new_index,new_index], model.nu)
-        else 
-            prior_terms += normal_logpdf(W[new_index,new_index], model.w_sigma)
-            rpairs = relevant_pairs[new_index, new_index]
-            for p = 1:size(rpairs)[2]
-                i = rpairs[1,p]
-                j = rpairs[2,p]
-
-                le = latent_effects[i,j]
-                oe = observed_effects[i,j]
-                old_le = current_latent_effects[i,j]
-                for s = 1:length(YY)
-                    Y = YY[s]
-                    likelihood_terms += log_logit(le + oe, Y[i,j])
-                    likelihood_terms -= log_logit(old_le + oe, Y[i,j])
-                end 
-            end 
-        end
-    else
-        for k1 = 1:K # start_index:new_index
-            k2_range = k1 != new_index ? new_index :
-                       model_spec.symmetric_W ? (1:k1) : 
-                       (1:K)
-            for k2 = k2_range
-                if L <= u
-                    aug_terms += aug_logpdf(W[k1,k2], model.nu)
-                else
-                    prior_terms += normal_logpdf(W[k1,k2], model.w_sigma)
-                end
-            end
-        end
-
-        c_latent_effects = copy(current_latent_effects)
-
-        if L < u || L > u
-            assert( L < u || aug_k == new_index)
-            for k1 = 1:K
-                if model_spec.symmetric_W
-                    k2_range = k1 == aug_k ? (1:k1) :
-                               k1 < aug_k ? aug_k : []
-                else
-                    k2_range = k1 == aug_k ? (1:K) : aug_k
-                end
-                for k2 = k2_range
-                    if k1 != new_index && k2 != new_index
-                        aug_terms += aug_logpdf(W[k1,k2], model.nu)
-                        prior_terms -= normal_logpdf(W[k1,k2], model.w_sigma)
-                    end
-
-                    rpairs = relevant_pairs[k1,k2]
-                    for p = 1:size(rpairs)[2]
-                        i = rpairs[1,p]
-                        j = rpairs[2,p]
-
-                        le = latent_effects[i,j]
-                        oe = observed_effects[i,j]
-                        old_le = c_latent_effects[i,j]
-                        # dirty hack to prevent double counting (ie from visiting the same
-                        # pair more than once)
-                        c_latent_effects[i,j] = le
-                        for s = 1:length(YY)
-                            Y = YY[s]
-                            likelihood_terms += log_logit(le + oe, Y[i,j])
-                            likelihood_terms -= log_logit(old_le + oe, Y[i,j])
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    prior_terms += poisson_logpdf(L,effective_lambda) - 
-                   poisson_logpdf(u,effective_lambda)
-
-    (prior_terms, likelihood_terms, aug_terms)
-end
-
-
-
-function adjust_component_latent_effects(model::ModelState,
-                                         model_spec::ModelSpecification,
-                                         latent_effects::Array{Float64,2},
-                                         relevant_pairs::Array{Array{Int64,2},2},
-                                         u::Int,
-                                         start_index::Int,
-                                         end_index::Int)
-
-    if u < 0
-        component_latent_effects = Array(Array{Float64,2}, 1)
-        component_latent_effects[1] = latent_effects
-        return component_latent_effects
-    end
-
-    W = get_W(model, model_spec) 
-    (K,K) = size(W)
-    (rpK,rpK) = size(relevant_pairs)
-#    println("rpK: ", rpK)
-#    println("K: ", K)
-    assert( rpK == K )
-
-    new_k = end_index + 1
-    component_latent_effects = Array(Array{Float64,2}, u+2)
-
-
-    for u_ind = 1:u+2
-        if u_ind <= u
-            removed_k = start_index + u_ind - 1
-            assert(removed_k <= K)
-
-            component_latent_effects[u_ind] =
-                adjust_latent_effects(model, model_spec, latent_effects, relevant_pairs,
-                                      u, u-1, removed_k,new_k)
-        elseif u_ind == u+1
-            component_latent_effects[u_ind] = copy(latent_effects)
-        elseif u_ind == u+2
-            assert(new_k <= K)
-            component_latent_effects[u_ind] =
-                adjust_latent_effects(model, model_spec, latent_effects, relevant_pairs,
-                                      u, u+1, new_k, new_k)
-        end
-    end
-
-    component_latent_effects
-end
-
-function compute_component_latent_effects(model::ModelState,
-                                          model_spec::ModelSpecification,
-                                          u::Int,
-                                          start_index::Int,
-                                          end_index::Int,
-                                          node_index::Int)
-
-    if u < 0
-        component_latent_effects = Array(Array{Float64,2}, 1)
-        component_latent_effects[1] = latent_effects
-        return component_latent_effects
-    end
-
-    W = get_W(model, model_spec)
-    (K,K) = size(W)
-
-    new_k = end_index + 1
-    component_latent_effects = Array(Array{Float64,2}, u+2)
-
-
-    for u_ind = 1:u+2
-        if u_ind <= u
-            removed_k = start_index + u_ind - 1
-            assert(removed_k <= K)
-
-            component_latent_effects[u_ind] =
-                compute_latent_effects(model, model_spec, 
-                                      u, u-1, removed_k, node_index)
-        elseif u_ind == u+1
-            component_latent_effects[u_ind] = 
-                compute_latent_effects(model, model_spec, 
-                                       u, u, 0, node_index)
-        elseif u_ind == u+2
-            assert(new_k <= K)
-            component_latent_effects[u_ind] =
-                compute_latent_effects(model, model_spec, 
-                                      u, u+1, new_k, node_index)
-        end
-    end
-
-    component_latent_effects
-end
-
-
-# adjusts latent effects when L != u 
-function adjust_latent_effects(model::ModelState,
-                               model_spec::ModelSpecification,
-                               latent_effects::Array{Float64,2},
-                               relevant_pairs::Array{Array{Int64,2},2},
-                               u::Int,
-                               L::Int,
-                               aug_k::Int,
-                               new_k::Int)
-
-    W = get_W(model, model_spec)
-    (K,K) = size(relevant_pairs)
-
-    assert(aug_k <= K)
-    assert(new_k <= K)
-    new_latent_effects = copy(latent_effects)
-    if L == u - 1
-        assert(aug_k < new_k || new_k == 0)
-
-        removed_k = aug_k
-        k_range0 = [1:K]
-        # latent effects assumes new dimensions haven't been added, so don't remove them!
-        if new_k != 0 # only need to worry about new dimension if we have one
-            splice!(k_range0, new_k)
-        end
-
-        k_range = model_spec.diagonal_W ? removed_k : k_range0
-
-        for k = k_range
-            for p = 1:size(relevant_pairs[k, removed_k])[2]
-                i = relevant_pairs[k, removed_k][1,p]
-                j = relevant_pairs[k, removed_k][2,p]
-                new_latent_effects[i,j] -= W[k, removed_k]
-
-            end
-            if k != removed_k
-                for p = 1:size(relevant_pairs[removed_k, k])[2]
-                    i = relevant_pairs[removed_k, k][1,p]
-                    j = relevant_pairs[removed_k, k][2,p]
-                    new_latent_effects[i,j] -= W[removed_k, k]
-                end
-            end
-        end
-
-    elseif L == u + 1
-        new_k = aug_k
-        k_range = model_spec.diagonal_W ? new_k : (1:K)
-        
-        for k = k_range
-
-            if model_spec.symmetric_W
-                kmin = min(k,new_k)
-                kmax = max(k,new_k)
-
-                if kmax > kmin
-                    assert(size(relevant_pairs[kmin,kmax])[2] == 0)
-                end
-            end
-
-            for p = 1:size(relevant_pairs[k, new_k])[2]
-                i = relevant_pairs[k, new_k][1,p]
-                j = relevant_pairs[k, new_k][2,p]
-                new_latent_effects[i,j] += W[k, new_k]
-            end
-            if k != new_k
-                for p = 1:size(relevant_pairs[new_k, k])[2]
-                    i = relevant_pairs[new_k, k][1,p]
-                    j = relevant_pairs[new_k, k][2,p]
-                    new_latent_effects[i,j] += W[new_k, k]
-                end
-            end
-        end
-
-    end
-
-    new_latent_effects
-end
-
-function get_W(model::ModelState,
-               model_spec::ModelSpecification)
-    if model_spec.positive_W
-        return exp(model.weights)
-    else
-        return copy(model.weights)
-    end
-end
-
-function get_model_weights(W,
-                           model_spec::ModelSpecification)
-    if model_spec.positive_W
-        return log(W)
-    else
-        return copy(W)
-    end
-end
-
-# compute latent effects from scratch
-function compute_latent_effects(model::ModelState,
-                                model_spec::ModelSpecification,
-                                u::Int,
-                                L::Int,
-                                aug_k::Int,
-                                node_index::Int;
-                                include_gradient::Bool=false)
-
-    tmodel = copy(model)
-    tmodel.tree.nodes[node_index].state = L
-    Z = ConstructZ(tmodel.tree)
-    w_index_pointers = weight_index_pointers(model.tree)
-    start_index = w_index_pointers[node_index]
-    new_index = start_index + u
-    W = get_W(model, model_spec)
- 
-    if L < u
-        assert( aug_k < new_index)
-        W = delete_row_and_col(W, new_index)
-        W = delete_row_and_col(W, aug_k)
-    elseif L == u
-        W = delete_row_and_col(W, new_index)
-    elseif L > u
-        assert(aug_k == new_index)
-    end
-
-    if model_spec.symmetric_W
-        W = copy(W)
-        symmetrize!(W)
-    end
-
-    Z*W*Z'
-end
-
-function compute_all_relevant_pairs(model_spec::ModelSpecification,
-                                    data::DataState,
-                                    K::Int,
-                                    Z)
-
-    YY = data.Ytrain
-    Ynn = zeros(size(YY[1]))
-    Ynn[find(YY[1] .>= 0)] = 1
-    Ynn = sparse(Ynn)
-    relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
-
-    for k1 = 1:K
-        k2_range = model_spec.diagonal_W ? k1 :
-                   model_spec.symmetric_W ? (1:k1) :
-                   (1:K)
-        for k2 = k2_range
-            relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Z,k1,k2)
-        end
-    end 
-
-    return relevant_pairs
-end
-
-# Compute relevant pairs for newly introduced weight parameters
-# should be called without changing model.tree from the original
-function compute_new_relevant_pairs(model::ModelState,
-                                    model_spec::ModelSpecification,
-                                    data::DataState,
-                                    relevant_pairs::Array{Array{Int64,2},2},
-                                    node_index::Int,
-                                    start_index::Int,
-                                    end_index::Int)
-    (K,K) = size(relevant_pairs)
-    K += 1
-    N::Int = (length(model.tree.nodes)+1)/2
-    new_k = end_index + 1
-
-#    println("new_k: ", new_k)
-#    println("K: ", K)
-    assert(new_k <= K)
-
-    tree = model.tree
-    Z = ConstructZ(tree)
-    # construct new Z col
-    #println("construct Znew")
-    leaves = GetLeaves(tree, node_index)
-    Zk = zeros(Int64, N)
-    Zk[leaves] = 1
-
-    Znew = zeros(Int64, (N, K))
-    Znew[:,1:end_index] = Z[:,1:end_index]
-    Znew[:,end_index+1] = Zk
-    Znew[:,end_index+2:end] = Z[:,end_index+1:end]        
-    Znew = sparse(Znew)
-
-    new_relevant_pairs = [zeros(Int64,(0,0)) for x = 1:K, y = 1:K]
-    nonzero_element_indices = [x <= end_index ? x : x + 1 for x in 1:K-1]
-
-    YY = data.Ytrain
-    Ynn = zeros(size(YY[1]))
-    Ynn[find(YY[1] .>= 0)] = 1
-    Ynn = sparse(Ynn)
-
-    new_relevant_pairs[nonzero_element_indices, nonzero_element_indices] = copy(relevant_pairs)
-    k1_range = model_spec.diagonal_W ? (start_index:end_index+1) : (1:K)
-    for k1 = k1_range
-        k2 = new_k
-        if model_spec.symmetric_W
-            k11 = max(k1,k2)
-            k22 = min(k1,k2)
-            new_relevant_pairs[k11,k22] = compute_relevant_pairs(model_spec,Ynn,Znew,k11,k22)
-        else
-            new_relevant_pairs[k1,k2] = compute_relevant_pairs(model_spec,Ynn,Znew,k1,k2)
-            new_relevant_pairs[k2,k1] = compute_relevant_pairs(model_spec,Ynn,Znew,k2,k1)
-        end
-    end
-    new_relevant_pairs
-end
-
-function compute_unaugmented_prob(model::ModelState,
-                                  model_spec::ModelSpecification,
-                                  relevant_pairs::Array{Array{Int64, 2}, 2},
-                                  latent_effects::Array{Array{Float64, 2}, 1},
-                                  observed_effects::Array{Float64, 2},
-                                  U::Array{Int64, 1},
-                                  weight_index_pointers::Array{Int64, 1},
-                                  node_index::Int64,
-                                  effective_lambda::Float64,
-                                  u_index::Int64,
-                                  augmented_logprob::Float64)
-    W = get_W(model, model_spec) 
-    (K,K) = size(W)
-
-    start_index = weight_index_pointers[node_index]
-    end_index = start_index + model.tree.nodes[node_index].state - 1
-    new_index = end_index + 1
-
-    u = U[u_index]
-
-    current_u = U[end-1]
-
-#    println(U)
-#    println(u_index)
-    assert(current_u == model.tree.nodes[node_index].state)
-
-    unaugmented_logprob = augmented_logprob
-    if model_spec.diagonal_W
-        if u < current_u
-            removed_ind = start_index + u_index - 1
-            unaugmented_logprob -= aug_logpdf(W[removed_ind,removed_ind], model.nu)
-            unaugmented_logprob -= aug_logpdf(W[new_index,new_index], model.nu)
-        elseif u == current_u 
-            unaugmented_logprob -= aug_logpdf(W[new_index,new_index], model.nu)
-        end #if u => current_u, no changes are necessary
-    else
-        if u < current_u
-            removed_ind = start_index + u_index - 1
-            for k1 = 1:K
-                if model_spec.symmetric_W
-                    @assert removed_ind < new_index
-                    k2_range = k1 == removed_ind || k1 == new_index ? (1:k1) : 
-                               k1 < removed_ind ? [] :
-                               k1 < new_index ? removed_ind :
-                               [removed_ind, new_index]
-                    
-                else
-                    k2_range = k1 == removed_ind || k1 == new_index ? 
-                               (1:K) : [removed_ind, new_index]
-                end
-
-                for k2 = k2_range
-                    unaugmented_logprob -= aug_logpdf(W[k1,k2],model.nu)
-                end
-            end
-        elseif u == current_u
-            for k1 = 1:K
-                if model_spec.symmetric_W
-                    k2_range = k1 == new_index ? (1:k1) : 
-                               k1 < new_index ? [] :
-                               new_index
-                else
-                    k2_range = k1 == new_index ? (1:K) : new_index
-                end
-                for k2 = k2_range
-                    unaugmented_logprob -= aug_logpdf(W[k1,k2],model.nu)
-                end
-            end
-        end
-    end 
-
-    unaugmented_logprob
-end
-
-# Find all pairs i,j such that Z[i,k1]*Z[j,k2] = 1
-function compute_relevant_pairs(model_spec::ModelSpecification,
-                                mask, #sparse or full binary array, so we only inlude training data
-                                Z, #sparse or full binary array
-                                k1::Int64,
-                                k2::Int64)
-    ZZ = Z[:,k1]*Z[:,k2]'
-    if model_spec.symmetric_W
-        ZZ = ZZ + ZZ' - ZZ .* ZZ'
-    end
-    #ZZ = ZZ.*mask #only need pairs from Ytrain
-    (I, J) = findn(ZZ)
-    [I', J']
-end
-
-#function symmetrize!(A::Array)
-#    triu_inds = find(triu(ones(size(A)),1))
-#    A[triu_inds] = tril(A,1)'[triu_inds];
-#end
-
-# Doesn't quite handle the symmetric case yet (eg the a[i] and b[j])
-function compute_observed_effects(model::ModelState,
-                                  model_spec::ModelSpecification,
-                                  data::DataState,
-                                  i::Int64,
-                                  j::Int64)
-
-    X_r = data.X_r
-    X_p = data.X_p
-    X_c = data.X_c
-    observed_effect = model.c
-
-    if model_spec.use_pairwise
-        observed_effect += model.beta' * X_r[i,j,:]
-    end
-
-    if model_spec.use_parenthood
-        if length( X_p[j,:]) > 0
-            observed_effect += model.beta_p' * X_p[j,:]
-        end
-        observed_effect += model.a[j]
-    end
-
-    if model_spec.use_childhood
-        if length( X_c[i,:]) > 0
-            observed_effect += model.beta_c' * X_c[i,:]
-        end
-        if model_spec.symmetric_W
-            observed_effect += model.a[i]
-        else
-            observed_effect += model.b[i]
-        end
-    end                                  
-
-    observed_effect
-end
-
-function construct_observed_effects(model::ModelState,
-                                    model_spec::ModelSpecification,
-                                    data::DataState)
-    N = size(data.Ytrain[1],1) 
-    observed_effects = zeros(Float64, (N,N))
-    for i = 1:N
-        for j = 1:N
-            observed_effects[i,j] = compute_observed_effects(model, model_spec, data, i, j)
-        end
-    end
-    observed_effects
-end
-# constructs all possible splits of v into 2 sets
-function all_splits(v::Array{Int64})
-    # Construct power set U, and for each u \in U, construct w = v \ u
-    # Then the set of (u,w) will be all possible splits of v
-
-    assert(length(v) < 20)
-
-    U = Vector{Int64}[]
-    
-    # Construct power set U
-    for i = 0:2^(length(v))-1
-        x = i
-        u = Int64[]
-        for j = 1:length(v)
-            if bool(x & 1)
-                push!(u, v[j])
-            end
-            x = x >> 1
-        end
-        push!(U, u)
-    end
-    (U,reverse(U))
-end
 
 
 #end #profile

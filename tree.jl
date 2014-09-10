@@ -448,7 +448,8 @@ function GetAncestors{T}(tree::Tree{T},
     return ancestors
 end
 
-function GetDescendants{T}(tree::Tree{T})
+function GetDescendants{T}(tree::Tree{T},
+                           node_index::Int64)
     descendants = Array(TreeNode, 0)
     stack = Array(TreeNode, 0)
 
