@@ -246,28 +246,36 @@ function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
     parent = self.parent
     grandparent = parent.parent
 
-    assert(grandparent != Nil())
+    if grandparent != Nil()
+        #is the parent the left or right child of grandparent
+        parent_direction = find( grandparent.children .== parent )[1]
+        parent_sibling = 
+            grandparent.children[find( grandparent.children .!= parent)[1]]
 
-    #is the parent the left or right child of grandparent
-    parent_direction = find( grandparent.children .== parent )[1]
-    parent_sibling = 
-        grandparent.children[find( grandparent.children .!= parent)[1]]
+        self_direction = find( parent.children .== self)[1]
+        sibling_direction = find( parent.children .!= self)[1]
+        sibling = parent.children[sibling_direction]
 
-    self_direction = find( parent.children .== self)[1]
-    sibling_direction = find( parent.children .!= self)[1]
-    sibling = parent.children[sibling_direction]
+        grandparent.children[parent_direction] = sibling
+        sibling.parent = grandparent
 
-    grandparent.children[parent_direction] = sibling
-    sibling.parent = grandparent
+        parent.parent = Nil()
+        parent.children[sibling_direction] = Nil()
 
-    parent.parent = Nil()
-    parent.children[sibling_direction] = Nil()
+        UpdateDescendantCounts!(tree, grandparent)
 
-    UpdateDescendantCounts!(tree, grandparent)
+        UpdateSubtreeAncestorCounts!(tree, sibling)
+        UpdateSubtreeAncestorCounts!(tree, parent)
+    else
+        self_direction = find( parent.children .== self)[1]
+        sibling_direction = find( parent.children .!= self)[1]
+        sibling = parent.children[sibling_direction]
 
-    UpdateSubtreeAncestorCounts!(tree, sibling)
-    UpdateSubtreeAncestorCounts!(tree, parent)
-
+        sibling.parent = Nil()
+        UpdateDescendantCounts!(tree, sibling)
+        UpdateSubtreeAncestorCounts!(tree, sibling)
+        UpdateSubtreeAncestorCounts!(tree, parent)
+    end
     nothing 
 end
 

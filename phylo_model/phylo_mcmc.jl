@@ -81,7 +81,7 @@ function mcmc(data::DataState,
 
             tbl = Table(1,1)
             tbl[1,1] = p_dendrogram
-            Winston.display(tbl)
+            #Winston.display(tbl)
  
         end
 
@@ -444,8 +444,8 @@ function sample_psi(model::ModelState,
             old_LL = likelihood(model, model_spec, data)
         end
 
-        if mod(prune_index,ceil(N/10)) == 0
-            percent = ceil(prune_index/ceil(N/10))*10
+        if mod(parent_prune_index-N+1,ceil(N/10)) == 0
+            percent = ceil((parent_prune_index-N+1)/ceil(N/10))*10
             println(" ",percent , "% ")
         end
 
@@ -463,6 +463,10 @@ function sample_psi(model::ModelState,
         else
             original_sibling = parent.children[1]
         end
+
+
+        correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
+        correct_logprobs = correct_priors + correct_likelihoods
 
         PruneIndexFromTree!(model.tree, prune_index)
 
@@ -482,6 +486,24 @@ function sample_psi(model::ModelState,
 
         logprobs = priors + likelihoods
         probs = exp_normalize(logprobs)
+
+
+
+        priors = priors .- maximum(priors)
+        likelihoods = likelihoods .- maximum(likelihoods)
+        logprobs = logprobs .- maximum(logprobs)
+
+        correct_priors = correct_priors .- maximum(correct_priors)
+        correct_likelihoods = correct_likelihoods .- maximum(correct_likelihoods)
+        correct_logprobs = correct_logprobs - maximum(correct_logprobs)
+       
+        println("states: $pstates") 
+        println("priors (efficient): $priors")
+        println("priors (correct): $correct_priors")
+        println("likelihoods (efficient): $likelihoods")
+        println("likelihoods (correct): $correct_likelihoods")
+        println("logprobs (efficient): $logprobs")
+        println("logprobs (correct): $correct_logprobs")
 
         if any(isnan(probs))
             nan_ind = find(isnan(probs))[1]
@@ -584,6 +606,8 @@ function sample_psi(model::ModelState,
     end
 end
 
+
+
 function sample_eta(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
@@ -618,7 +642,6 @@ function sample_eta(model::ModelState,
 
     for i = 1:hmc_iterations
         eta = hmc_sampler(eta, eta_density, eta_grad, opts)
-        println("eta: $eta")
     end
 
     
