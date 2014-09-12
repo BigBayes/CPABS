@@ -163,9 +163,8 @@ function likelihood(model::ModelState,
         if i > N
             left_prob = 1.0-tree.nodes[i].rho
             right_prob = tree.nodes[i].rho
-            right_child = tree.nodes[i].children[1]
             for s = 1:length(tree.nodes[i].state)
-                eta_term += logpdf(Beta(alpha*right_prob+1,alpha*left_prob+1), right_child.state[s]) 
+                eta_term += logpdf(Beta(alpha*right_prob+1,alpha*left_prob+1), tree.nodes[i].state[s]) 
             end
         end
 
