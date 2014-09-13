@@ -95,7 +95,7 @@ function prior(model::ModelState,
         U[Z[i]-N] += 1
     end 
     U = U .- 1
-    if any(U .< 0) # There must be one point assigned to each cluster
+    if any(U .< 0) # There must be at least one point assigned to each cluster
         return -Inf
     end
 
@@ -172,12 +172,17 @@ function likelihood(model::ModelState,
 
     for j = 1:num_mutations
         z = Z[j]
-
+        cur_eta = tree.nodes[z].state
         for s = 1:num_samples
-            phi_z = B[z,s]
+            phi_z = B[z,s]*cur_eta[s]
             reference_allele_prob = (1-phi_z)*mu_r[j] + phi_z*mu_v[j]
             total_prob += logpdf(Binomial(DD[j,s], reference_allele_prob), AA[j,s])
         end
+        if j == 10
+            println("z=10 cur_eta: $cur_eta")
+            println("z=10 phi: $((B[z,:]' .* cur_eta)')")
+        end
+        
     end
 
     total_prob + eta_term
@@ -527,7 +532,7 @@ function psi_observation_logpdf(model::ModelState,
                 r = cur.children[1]
 
                 for s = 1:num_samples
-                    phi_j = Eta[i,s] * pruned_Eta[j,s]
+                    phi_j = Eta[i,s] * pruned_Eta[j,s] * cur.state[s]
 
                     for c = C[j]
                         p_j = (1-phi_j)*mu_r[c] + phi_j * mu_v[c]
@@ -546,9 +551,9 @@ function psi_observation_logpdf(model::ModelState,
 
                 for s = 1:num_samples
                     Eta_l = 1.0 - pruned_Eta[pruned_index,s]
-                    phi_j = Eta[j,s] * Eta_l 
+                    phi_j = Eta[j,s] * Eta_l * cur.state[s]
 
-                    old_phi_j = Eta[j,s] 
+                    old_phi_j = Eta[j,s] * cur.state[s] 
                     
                     for c = C[j]
                         p_j = (1-phi_j)*mu_r[c] + phi_j * mu_v[c]
@@ -564,8 +569,8 @@ function psi_observation_logpdf(model::ModelState,
 
         # Need a term for the pruned parent
         for s = 1:num_samples
-            phi_j = Eta[i,s]
             pruned_parent_index = tree.nodes[pruned_index].parent.index
+            phi_j = Eta[i,s] * tree.nodes[pruned_parent_index].state[s]
             for c = C[pruned_parent_index]
                 p_j = (1-phi_j)*mu_r[c] + phi_j * mu_v[c]
                 subtree_probs += logpdf(Binomial(DD[c,s], p_j), AA[c,s])
@@ -819,16 +824,23 @@ function eta_logpdf(model::ModelState,
     mu_r = data.mu_r
     mu_v = data.mu_v
 
+    M, S = size(AA)
+
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
 
     log_pdf = 0.0
 
-    for j = indices
+    Phi = zeros(2N - 1, S)
+
+    for j = reverse(indices)
+
+
+
         if j > N
             cur = tree.nodes[j]
             eta = cur.state
-            nu_r = cur.parent == Nil() ? 1.0 : cur.parent.rho
+            nu_r = cur.rho
 
             log_pdf += (alpha*nu_r)*sum(log(eta)) + (alpha*(1-nu_r))*sum(log(1 .- eta))
 
@@ -839,16 +851,21 @@ function eta_logpdf(model::ModelState,
                 p = a.parent
                 if p != Nil()
                     a_direction = find(p.children .== a)[1]
-                    eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
+                    eta_a = a_direction == 1 ? p.state : 1.0 .- p.state
                     phi .*= eta_a
                 end
             end
+            phi .*= eta
             for i = C[j]
                 r = (1.-phi)*mu_r[i] + phi*mu_v[i]
                 logr = log(r)
                 log1mr = log(1.-r) 
                 for s = 1:length(eta)
                     log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
+                end
+                if i == 10
+                    println("i=10 cur_eta: $eta")
+                    println("i=10 phi: $phi")
                 end
             end
 
@@ -896,7 +913,7 @@ function eta_log_gradient(model::ModelState,
                 p = a.parent
                 if p != Nil()
                     a_direction = find(p.children .== a)[1]
-                    eta_a = a_direction == 1 ? a.state : 1.0 .- a.state
+                    eta_a = a_direction == 1 ? p.state : 1.0 .- p.state
                     phi[j-N, :] .*= eta_a'
 
                     # return gradient = 0 if prior is 0
@@ -905,6 +922,7 @@ function eta_log_gradient(model::ModelState,
                     end
                 end
             end
+            phi[j-N,:] .*= cur.state'
         end
     end
  
@@ -920,14 +938,14 @@ function eta_log_gradient(model::ModelState,
             nu_k = cur.parent.rho
             self_direction = find(parent.children .== cur)[1]
             eta_p = parent.state
-            eta_k = self_direction == 1 ? eta_p : 1.-eta_p 
+            eta_k = cur.state 
  
             for s = 1:S
                 gradient[k-N,s] += (alpha*nu_k)/eta_k[s] + (alpha*(1-nu_k))/(1-eta_k[s])
             end         
 
- 
-            De = GetDescendants(tree, cur.index)
+            # right subtree 
+            De = GetDescendants(tree, cur.children[1].index)
             for d = De
                 j = d.index
                 if j > N
@@ -936,14 +954,47 @@ function eta_log_gradient(model::ModelState,
                         phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / eta_k[s]
                     end
                     for i = C[j]
-                        r = (1 .- phi[k-N,:]).*mu_r[j] + phi[k-N,:].*mu_v[j]
+                        r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
                         for s = 1:S
-                            gradient[k-N,s] +=  AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                                (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
+                            gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
                         end
                     end
                 end
             end
+            # left subtree 
+            De = GetDescendants(tree, cur.children[2].index)
+            for d = De
+                j = d.index
+                if j > N
+                    phi_j_k = phi[j-N,:]
+                    for s = 1:S
+                        phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / (1 - eta_k[s])
+                    end
+                    for i = C[j]
+                        r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
+                        for s = 1:S
+                            gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
+                        end
+                    end
+                end
+            end
+
+            # current node
+            phi_k_k = phi[k-N,:]
+            for s = 1:S
+                phi_k_k[s] = phi_k_k[s] == 0.0 ? 0.0 : phi_k_k[s] / eta_k[s]
+            end
+            for i = C[k]
+                r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
+                for s = 1:S
+                    gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r[s] +
+                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s])
+                end
+            end
+            
+
         end 
 
     end

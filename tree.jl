@@ -568,12 +568,14 @@ function get_segment_length(i::Int,
 end
 
 function tree2array(tree::Tree,
-                    gam::Float64)
+                    gam::Float64;
+                    return_leaf_times::Bool=false)
     nodes = tree.nodes
     _2Nm1 = length(nodes)
     N::Int = (_2Nm1+1) / 2
 
     times = zeros(N-1)
+    leaf_times = zeros(N)
 
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
@@ -582,6 +584,9 @@ function tree2array(tree::Tree,
         cur = tree.nodes[i]
         p = cur.parent
         if i <= N
+            self_direction = find(p.children .== cur)[1];
+            cur_split = self_direction == 1 ? p.rho : 1-p.rho
+            leaf_times[i] = times[p.index-N]*(cur.rhot*cur_split)^gam
             continue
         end
 
@@ -625,7 +630,12 @@ function tree2array(tree::Tree,
     end
 
     states = [nodes[i].state for i = sorted_inds]
-    (Z, states, sorted_inds)
+    
+    if return_leaf_times
+        (Z, leaf_times, states, sorted_inds)
+    else
+        (Z, states, sorted_inds)
+    end
 end
 
 function total_branch_length(tree::Tree,

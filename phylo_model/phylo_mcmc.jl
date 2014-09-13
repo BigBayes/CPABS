@@ -76,8 +76,8 @@ function mcmc(data::DataState,
         mcmc_sweep(model, model_spec, data)
 
         if model_spec.plot && plot_utils_loaded
-            ZZ, Etas, inds = model2array(model)
-            p_dendrogram = dendrogram(ZZ,zeros(length(inds)), plot=false)
+            ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
+            p_dendrogram = dendrogram(ZZ,zeros(length(inds)), plot=false, leaf_times=leaf_times)
 
             tbl = Table(1,1)
             tbl[1,1] = p_dendrogram
@@ -535,7 +535,7 @@ function sample_psi(model::ModelState,
         InsertIndexIntoTree!(model.tree, prune_index, graft_index) 
 
         println("graft_index: $graft_index")
-
+        println("original_sibling_index: $(original_sibling.index)")
 
         if model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
@@ -628,20 +628,29 @@ function sample_eta(model::ModelState,
         for j = N+1:2N-1
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
-        eta_logpdf(model, model_spec, data)
+        true_logpdf = full_pdf(model, model_spec, data)
+        e_pdf = eta_logpdf(model, model_spec, data)
+        println("full_pdf: $true_logpdf")
+        println("eta_logpdf: $e_pdf")
+        println("difference: $(true_logpdf - e_pdf)")
+        println("eta: $eta")
+        return e_pdf
     end
 
     function eta_grad(eta::Vector{Float64})
         for j = N+1:2N-1
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
-        eta_log_gradient(model, model_spec, data)
+        grad = eta_log_gradient(model, model_spec, data)
+        return grad
     end
 
-    opts = @options numsteps=8 stepsize=0.1 transformation=ReducedNaturalTransformation
+    hmcopts = @options numsteps=8 stepsize=0.1 transformation=ReducedNaturalTransformation
+    refopts = @options m=2 w=0.5 refractive_index_ratio=1.3 transformation=ReducedNaturalTransformation
 
     for i = 1:hmc_iterations
-        eta = hmc_sampler(eta, eta_density, eta_grad, opts)
+        #eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
+        eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
     end
 
     

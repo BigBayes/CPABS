@@ -174,6 +174,6 @@ function compute_phis(model::ModelState)
     return B
 end
 
-function model2array(model::ModelState)
-    tree2array(model.tree, model.gamma)
+function model2array(model::ModelState; return_leaf_times::Bool=false)
+    tree2array(model.tree, model.gamma, return_leaf_times=return_leaf_times)
 end

@@ -50,12 +50,15 @@ function uof(Z::Matrix)
     Znew, perm
 end
 
-function dendrogram(Z, U; plot=true, labels=nothing)
+function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing)
     U = convert(Array{Int64}, U)
     Nm1, _ = size(Z)
     N = Nm1+1
     # Sort in depth-first-search order so the dendrogram doesn't cross itself 
     times = zeros(2N-1)
+    if leaf_times!=nothing
+        times[1:N] = leaf_times
+    end
     locations = zeros(2N-1)
     parents = zeros(2N-1)
 

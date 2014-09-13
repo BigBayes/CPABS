@@ -1,16 +1,18 @@
 require("Options")
 using OptionsMod
+require("samplers/transformation.jl")
 
 function refractive_sampler(init_x::Vector{Float64},
                             f::Function,
                             grad_f::Function,
                             opts::Options) 
-  @defaults opts w=.01 refractive_index_ratio=nothing m=10 w_dist=nothing 
+  @defaults opts w=.01 refractive_index_ratio=nothing m=10 transformation=identity_transformation
   
+  T = transformation.transformation_function
+  T_inv = transformation.transformation_inverse
+  T_grad = transformation.transformed_gradient
+  T_logjacobian = transformation.transformation_logjacobian
 
-  if w_dist != nothing
-    w = w* w_dist()
-  end
 
 #  if refractive_index_ratio < 1.0
 #    error("refractive_index_ratio should be >= 1.0")
@@ -39,24 +41,24 @@ function refractive_sampler(init_x::Vector{Float64},
   local jacobian_term = 0.0
 
 
-  x0 = copy(init_x)
+  x0 = T_inv(init_x)
   x = copy(x0)
 
   d = length(x0)
   p = randn(d)
 
 
-  fx0= f(x0)
+  fx0= f(T(x0)) + T_logjacobian(x0)
   accept_logprob = 0.0
 
   for iteration = 1:m+1
-    fx = f(x)
+    fx = f(T(x)) + T_logjacobian(x) 
     if !isfinite(fx)
         println("reject: out of bounds?")
         accept_logprob = -Inf
         break
     end
-    grad = grad_f(x)
+    grad = T_grad(x, grad_f(T(x)))
 
     grad_norm = sqrt(dot(grad,grad))
  
@@ -114,9 +116,9 @@ function refractive_sampler(init_x::Vector{Float64},
 #  println("accept_logprob: $accept_logprob")
 
   if rand() < exp(accept_logprob)
-    return x
+    return T(x)
   else
-    return x0
+    return T(x0)
   end
 
 
