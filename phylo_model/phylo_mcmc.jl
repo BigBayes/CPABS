@@ -76,8 +76,16 @@ function mcmc(data::DataState,
         mcmc_sweep(model, model_spec, data)
 
         if model_spec.plot && plot_utils_loaded
+
+            u = zeros(Int64, 2N-1)
+            for i=1:length(Z)
+                u[Z[i]] += 1
+            end 
+            u = u .- 1
+            u[1:N] = 0
+
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
-            p_dendrogram = dendrogram(ZZ,zeros(length(inds)), plot=false, leaf_times=leaf_times)
+            p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
             tbl = Table(1,1)
             tbl[1,1] = p_dendrogram
@@ -297,14 +305,14 @@ function sample_nu_nutd(model::ModelState,
             times = compute_times(model)
 
 
-            ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
-            dend = dendrogram(ZZ,u[inds], leaf_times=leaf_times, sorted_inds=inds, plot=false)
-#
 
             C_l = A_tau[l] - A_I[l]
             C_r = A_tau[r] - A_I[r]
             D = B_tau[i] - B_I[i]
 
+#            ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
+#            dend = dendrogram(ZZ,u[inds], leaf_times=leaf_times, sorted_inds=inds, plot=false)
+#
 #            v = zeros(N-1)
 #            for j = 1:2N-1
 #                jcur = tree.nodes[j]
