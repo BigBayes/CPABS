@@ -179,6 +179,9 @@ function likelihood(model::ModelState,
         for s = 1:num_samples
             phi_z = B[z,s]*cur_eta[s]
             reference_allele_prob = (1-phi_z)*mu_r[j] + phi_z*mu_v[j]
+#            if j == 1
+#                println("j=1 s=$s k=$z, phi, ref prob: $phi_z $reference_allele_prob")
+#            end
             total_prob += logpdf(Binomial(DD[j,s], reference_allele_prob), AA[j,s])
         end
         
@@ -1068,8 +1071,6 @@ function z_logpdf(model::ModelState,
 
     (M,S) = size(AA)
 
-    An = GetAncestors(tree, current_k)
-
     log_pdf = zeros(N-1)
 
     for k = N+1:2N-1
@@ -1082,6 +1083,9 @@ function z_logpdf(model::ModelState,
 
         for s = 1:S
             r_ks = (1-phi[k,s])*mu_r[index] + phi[k,s]*mu_v[index]
+#            if index == 1
+#                println("j=1 s=$s k=$k, phi, ref prob (fast): $(phi[k,s]) $r_ks")
+#            end
             log_pdf[k-N] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks)
         end
 

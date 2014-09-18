@@ -163,7 +163,7 @@ function compute_phis(model::ModelState)
             for s = 1:S
                 # the eta variable held by a node is the eta for the right child
                 eta_self = self_direction == 1 ? parent.state[s] : (1 - parent.state[s])
-                B[i,s] = B[parent.index]*eta_self
+                B[i,s] = B[parent.index,s]*eta_self
             end
         else
             B[i,:] = 1.0
@@ -173,7 +173,9 @@ function compute_phis(model::ModelState)
 
     for i = indices
         cur = tree.nodes[i]
-        B[i,:] .*= cur.state'
+        for s = 1:S
+            B[i,s] .*= cur.state[s]
+        end
     end
 
     return B

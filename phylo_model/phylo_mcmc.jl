@@ -806,6 +806,16 @@ function sample_assignments(model::ModelState,
         for i = 1:M
             cur_z = Z[i]-N
             z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi)
+
+#            full_logpdf = k -> (model.Z[i] = k+N; full_pdf(model, model_spec, data))
+#            full_z_probs = [full_logpdf(k) for k = 1:N-1]
+#            z_probs -= maximum(z_probs)
+#            full_z_probs -= maximum(full_z_probs)
+#            println("full_z_probs: $full_z_probs")
+#            println("z_probs: $z_probs")
+#            @assert false
+
+
             new_z = rand(Categorical(exp_normalize(z_probs)))
             U[cur_z] -= 1
             U[new_z] += 1
