@@ -63,16 +63,16 @@ end
 function tau_path(t::TreeNode)
     @assert t != Nil()
     path = Array(Node,0)
-    push!(path,t)
     p = t.parent
     if p == Nil()
         push!(path,t)
         return path
     end
 
-    c = t 
+    c = t
+    push!(path,t) 
     while p.children[1] != c
-        push!(path,c)
+        push!(path,p)
         c = p
 
         p = p.parent
@@ -169,6 +169,11 @@ function compute_phis(model::ModelState)
             B[i,:] = 1.0
         end
 
+    end
+
+    for i = indices
+        cur = tree.nodes[i]
+        B[i,:] .*= cur.state'
     end
 
     return B

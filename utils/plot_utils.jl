@@ -50,7 +50,7 @@ function uof(Z::Matrix)
     Znew, perm
 end
 
-function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing)
+function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_inds=nothing)
     U = convert(Array{Int64}, U)
     Nm1, _ = size(Z)
     N = Nm1+1
@@ -80,13 +80,13 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing)
         parents[l] = ind
         parents[r] = ind
         
-        push!(visited_stack, l)
         push!(visited_stack, r) 
+        push!(visited_stack, l)
     end
 
-    locations[leaf_order] = [1:N]/N
+    locations[leaf_order] = [0:N-1]/(N-1)
 
-    # Traverse in breadth first order so get leaves to root ordering of internal nodes
+    # Traverse in breadth first order so get leaves-to-root ordering of internal nodes
     stack = Int[]
     queue = [2N-1]
     while length(queue) > 0
@@ -125,6 +125,13 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing)
 
         add(p, Curve(x_points, y_points, "color", "blue"))
 
+        if sorted_inds != nothing
+            original_l = sorted_inds[int(l)]
+            original_r = sorted_inds[int(r)]
+            add(p, Winston.DataLabel(l_loc, l_t-0.02, "$original_l", color="red", size=0.3))
+            add(p, Winston.DataLabel(r_loc, r_t-0.02, "$original_r", color="red", size=0.3))
+        end
+
         if U[l] > 0
             l_x, l_y = get_mutation_plot_locations(U[l], l_loc, l_t, n_t)
             append!(mutations_x, l_x)
@@ -153,7 +160,7 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing)
     end
 
     if plot
-        Winston.tk(p)
+        display(p)
     end
     p
 end

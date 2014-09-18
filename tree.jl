@@ -618,8 +618,8 @@ function tree2array(tree::Tree,
         assert(k+N == ind_map[ii])
 
         Z[k,3] = times[i]
-        l = ind_map[nodes[ii].children[1].index]
-        r = ind_map[nodes[ii].children[2].index]
+        l = ind_map[nodes[ii].children[2].index]
+        r = ind_map[nodes[ii].children[1].index]
         Z[k,1] = l
         Z[k,2] = r
 

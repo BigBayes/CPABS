@@ -14,7 +14,7 @@ function full_pdf(model::ModelState,
 end
 
 function prior(model::ModelState,
-               model_spec::ModelSpecification)
+               model_spec::ModelSpecification; debug=false)
 
     Z = model.Z 
 
@@ -106,6 +106,9 @@ function prior(model::ModelState,
         assignment_term += U[i]*log(Tau[i])
     end
 
+    if debug
+        return assignment_term
+    end
     psi_term + assignment_term
 end
 
@@ -177,10 +180,6 @@ function likelihood(model::ModelState,
             phi_z = B[z,s]*cur_eta[s]
             reference_allele_prob = (1-phi_z)*mu_r[j] + phi_z*mu_v[j]
             total_prob += logpdf(Binomial(DD[j,s], reference_allele_prob), AA[j,s])
-        end
-        if j == 10
-            println("z=10 cur_eta: $cur_eta")
-            println("z=10 phi: $((B[z,:]' .* cur_eta)')")
         end
         
     end
@@ -713,34 +712,55 @@ end
 ###### pdfs for nu, nutd updates #
 ###################################
 
-function nu_tilde_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r, xi; node="r")
+function nu_tilde_splits(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r, xi; node="r")
 
-    p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+    l1 = node == "r" ? nutd_l : 1.0
+    r1 = node == "r" ? 1.0 : nutd_r
+
+    p_z1 = p_z_given_nu_nutd(nu, l1, r1, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r)
+    p_z2 = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r)
  
-    f1 = log(xi) + p_z
+    f1 = log(xi) + p_z1
 
-    f2 = node == "r" ? log(1-xi)+log(xi)+(xi-1)*log(nutd_r) + p_z :
-                       log(1-xi)+log(xi)+(xi-1)*log(nutd_l) + p_z
+    f2 = node == "r" ? log(1-xi)+log(xi)+(xi-1)*log(nutd_r) + p_z2 :
+                       log(1-xi)+log(xi)+(xi-1)*log(nutd_l) + p_z2
 
-    if isnan(f1)
-        println("f1")
-    elseif isnan(f2)
-        println("p_z: $p_z")
-        if node == "r"
-            println("r.  xi: $xi, nutd_r: $nutd_r")
-        else
-            println("l.  xi: $xi, nutd_l: $nutd_l")
-        end
-    end
+#    println("xi: $xi")
+#    println("nu: $nu")
+#    println("nutd_l: $nutd_l")
+#    println("nutd_r: $nutd_r")
+#    println("splits: $f1 $f2")
+#
+#    if isnan(f1)
+#        println("f1")
+#    elseif isnan(f2)
+#        println("p_z2: $p_z2")
+#        if node == "r"
+#            println("r.  xi: $xi, nutd_r: $nutd_r")
+#        else
+#            println("l.  xi: $xi, nutd_l: $nutd_l")
+#        end
+#    end
 
     return [f1, f2] 
 end
 
+function root_nu_tilde_splits(nutd, gam, U, U_i, u, K_i, C_i, D, Pki_i, xi)
 
-function nu_logpdf(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r,
+    p_z1 = p_z_given_nutd(1.0, gam, U, U_i, u, K_i, C_i, D, Pki_i)
+    p_z2 = p_z_given_nutd(nutd, gam, U, U_i, u, K_i, C_i, D, Pki_i)
+ 
+    f1 = log(xi) + p_z1
+
+    f2 = log(1-xi)+log(xi)+(xi-1)*log(nutd) + p_z2
+
+    return [f1, f2] 
+end
+
+function nu_logpdf(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r,
                     eta, alpha, N_l, N_r)
 
-    p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+    p_z = p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r)
     p_eta = p_eta_given_nu(eta, nu, alpha)
     p_nu = p_nu_Nl_Nr(nu, N_l, N_r)
 
@@ -752,28 +772,21 @@ function p_nu_Nl_Nr(nu, N_l, N_r)
 end
 
 function p_eta_given_nu(eta, nu, alpha)
-    S = length(eta)
-
-    log_pdf = S*lbeta(alpha*nu+1, alpha*(1-nu)+1)
-
-    leta_1 = sum(log(eta))
-    leta_2 = sum(log(1-eta))
-
-    log_pdf += (alpha*nu)*leta_1 + (alpha*(1-nu))*leta_2
-    log_pdf
+    sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
 end
 
-function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, P_l, P_r)
+function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_l, C_r, D, Pki_l, Pki_r)
 
     if nu == 0.0 || nu == 1.0 || nutd_r == 0.0 || nutd_l == 0.0
         return -Inf
     end
 
-    log_pdf = gam*U_r*log(nutd_r*nu) + gam*U_l*log(nutd_l*(1-nu)) + gam*U_l*log(nutd_l)+gam*U_r*log(nutd_r) - 
+    log_pdf = gam*U_r*log(nu) + gam*U_l*log(1-nu) + gam*U_l*log(nutd_l)+gam*U_r*log(nutd_r) - 
               U*log( (nu*nutd_r)^gam * C_r + ((1-nu)*nutd_l)^gam * C_l + D )
 
     rrg = ((1-nu)*nutd_l)^gam
-    for c = P_l
+
+    for c = Pki_l
         if c != Nil()
             i = c.index
             if 1-rrg*K_l[i] == 0.0
@@ -785,7 +798,7 @@ function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_
     end
 
     rrg = (nu*nutd_r)^gam
-    for c = P_r
+    for c = Pki_r
         if c != Nil()
             i = c.index 
             if 1-rrg*K_r[i] == 0.0
@@ -799,6 +812,29 @@ function p_z_given_nu_nutd(nu, nutd_l, nutd_r, gam, U, U_l, U_r, u, K_l, K_r, C_
     log_pdf
 end
 
+function p_z_given_nutd(nutd, gam, U, U_i, u, K_i, C_i, D, Pki_i)
+
+    if nutd == 0.0 
+        return -Inf
+    end
+
+    log_pdf = gam*U_i*log(nutd) - U*log(nutd^gam * C_i + D)
+
+
+    rrg = nutd^gam
+    for c = Pki_i
+        if c != Nil()
+            i = c.index
+            if 1-rrg*K_i[i] == 0.0
+                log_pdf += -Inf
+            else 
+                log_pdf += u[i]*log(1-rrg*K_i[i])
+            end
+        end
+    end
+
+    log_pdf
+end
 
 ###################################
 ###### pdfs for eta updates #######
@@ -862,10 +898,6 @@ function eta_logpdf(model::ModelState,
                 log1mr = log(1.-r) 
                 for s = 1:length(eta)
                     log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
-                end
-                if i == 10
-                    println("i=10 cur_eta: $eta")
-                    println("i=10 phi: $phi")
                 end
             end
 

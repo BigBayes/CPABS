@@ -81,7 +81,7 @@ function mcmc(data::DataState,
 
             tbl = Table(1,1)
             tbl[1,1] = p_dendrogram
-            #Winston.display(tbl)
+            Winston.display(tbl)
  
         end
 
@@ -169,7 +169,6 @@ function sample_nu_nutd(model::ModelState,
 
     u = zeros(2N-1)
     U_i = zeros(2N-1)
-    U = sum(u)
 
     Tau = Array(Node, 2N-1)
     P = Array(Array{Node}, 2N-1)
@@ -177,15 +176,18 @@ function sample_nu_nutd(model::ModelState,
     ancestors = Array(Array{Node}, 2N-1)
     K = zeros(2N-1, 2N-1)
 
-    Pki = [Array(Node,0) for i = 1:2N-1]
-    An_i = [Array(Node,0) for i = 1:2N-1]
-    An_tau = [Array(Node,0) for i = 1:2N-1]
+    Pki = [Array(Node,0) for i = 1:2N-1] # {j | i in P[j]}
+    An_i = [Array(Node,0) for i = 1:2N-1] # {j | i in ancestors[j]}
+    An_tau = [Array(Node,0) for i = 1:2N-1] #{j | i in ancestor[tau(j)]}
 
     A_I = zeros(2N-1)
     A_tau = zeros(2N-1)
 
-    An_ni = [Array(Node,0) for i = 1:2N-1]
-    An_ntau = [Array(Node,0) for i = 1:2N-1]
+    An_ni = [Array(Node,0) for i = 1:2N-1] # {j | i not in ancestors[j]} 
+    An_ntau = [Array(Node,0) for i = 1:2N-1] # {j | i not in ancestors[tau(j)]}
+
+    root_An_ni = Array(Node,0)
+    root_An_ntau = Array(Node,0)
 
     B_I = zeros(2N-1)
     B_tau = zeros(2N-1)
@@ -203,51 +205,60 @@ function sample_nu_nutd(model::ModelState,
         u[i] = length(C[i])-1
         @assert u[i] >= 0 || i <= N
     end
+    u[1:N] = 0
+    U = sum(u)
 
     for i = indices
         tau = Tau[i]
 
         An = tau == Nil() ? [] : ancestors[tau.index]
-
         for j in An
-            U_i[i] += u[j.index]
+            U_i[j.index] += u[i]
         end 
     end
 
-    println("blah1") 
+    
     for i = indices
-        for k = P[i]
-            push!(Pki[k.index], tree.nodes[i])
-        end
-        for k = ancestors[i]
-            push!(An_i[k.index], tree.nodes[i])
-        end
-        tau = Tau[i]
-        An = tau == Nil() ? [] : ancestors[tau.index]
-        for k = An
-            push!(An_tau[k.index], tree.nodes[i])
-        end
+        if i > N
+            for k = P[i]
+                push!(Pki[k.index], tree.nodes[i])
+            end
+            for k = ancestors[i]
+                push!(An_i[k.index], tree.nodes[i])
+            end
+            tau = Tau[i]
+            An = tau == Nil() ? [] : ancestors[tau.index]
+            for k = An
+                push!(An_tau[k.index], tree.nodes[i])
+            end
 
-        for k = indices
-            cur = tree.nodes[k]
-            if k > N
-                left_child = cur.children[2]
-                right_child = cur.children[1]
-                l = left_child.index
-                r = right_child.index
-                if !(l in ancestors[i]) && !(r in ancestors[i])
-                    push!(An_ni[k], tree.nodes[i])
-                end
-                tau = Tau[i]
-                An = tau == Nil() ? [] : ancestors[tau.index]
-                if !(l in An) && !(r in An)
-                    push!(An_ntau[k], tree.nodes[i])
-                end
-            end 
+            for k = indices
+                cur = tree.nodes[k]
+                if k > N
+                    left_child = cur.children[2]
+                    right_child = cur.children[1]
+                    l = left_child.index
+                    r = right_child.index
+                   
+     
+                    if !(left_child in ancestors[i]) && !(right_child in ancestors[i])
+                        push!(An_ni[k], tree.nodes[i])
+                    end
+                    tau = Tau[i]
+                    An = tau == Nil() ? [] : ancestors[tau.index]
+                    if !(left_child in An) && !(right_child in An)
+                        push!(An_ntau[k], tree.nodes[i])
+                    end
+                end 
+            end
+           
+            # (root_An_ni is always empty)
+
+            if Tau[i] == Nil()
+                push!(root_An_ntau, tree.nodes[i])
+            end
         end
     end
-
-    println("blah2") 
 
     for i = reverse(indices)
         if i > N
@@ -277,153 +288,269 @@ function sample_nu_nutd(model::ModelState,
             nu_r = cur.rho
             nu_l = 1-cur.rho
 
+            update_nu_nutd_constants!(i,[l,r], gam, ancestors, Tau, Pki, P, An_i, An_tau, An_ni[i], An_ntau[i], K, A_I, A_tau, B_I, B_tau)
 
-            for a in [l,r]
-                # Compute K(a,n) for n \in {n | a \in P(n)} 
-                for n = Pki[a]
-                    j = n.index
-                    for k = P[j]
-                        if k.index == a
-                            continue
-                        end
-                        if k.parent == Nil()
-                            K[a,j] *= (k.rhot)^gam
-                        else
-                            k_direction = find(k.parent.children .== k)[1]
-                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
-                            K[a,j] *= (k.rhot*nu_k)^gam
-                        end
+            K_l = zeros(2N-1)
+            K_r = zeros(2N-1)
 
-                    end
-                end
 
-                # Compute A(a,I)
-                for n = An_i[a]
-                    j = n.index
-                    prod = 1.0
-                    for k = ancestors[j]
-                        if k.index == a
-                            continue
-                        end
-                        if k.parent == Nil()
-                            prod *= k.rhot^gam
-                        else
-                            k_direction = find(k.parent.children .== k)[1]
-                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
-                            prod *= (k.rhot*nu_k)^gam
-                        end
-                    end
-                    A_I[a] += prod
-                end
-                # Compute A(a,tau)
-                for n = An_tau[a]
-                    j = n.index
-                    prod = 1.0
-                    An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
-                    for k = An_k
-                        if k.index == a
-                            continue
-                        end
-                        if k.parent == Nil()
-                            prod *= k.rhot^gam
-                        else
-                            k_direction = find(k.parent.children .== k)[1]
-                            nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
-                            prod *= (k.rhot*nu_k)^gam
-                        end
-                    end
-                    A_tau[a] += prod
-                end
+            times = compute_times(model)
 
-            end
 
-            for n = An_ni[i]
-                j = n.index
-                prod = 1.0
+            ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
+            dend = dendrogram(ZZ,u[inds], leaf_times=leaf_times, sorted_inds=inds, plot=false)
+#
 
-                for k = ancestors[j]
-                    if k == l || k == r
-                        continue
-                    end
-                    if k.parent == Nil()
-                        prod *= k.rhot^gam
-                    else
-                        k_direction = find(k.parent.children .== k)[1]
-                        nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
-                        prod *= (k.rhot*nu_k)^gam
-                    end
-                end
-                B_I[i] += prod 
-            end
-
-            for n = An_ntau[i]
-                j = n.index
-                prod = 1.0
-                An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
-                for k = An_k
-                    if k == l || k == r
-                        continue
-                    end
-                    if k.parent == Nil()
-                        prod *= k.rhot^gam
-                    else
-                        k_direction = find(k.parent.children .== k)[1]
-                        nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
-                        prod *= (k.rhot*nu_k)^gam
-                    end
-                end
-                B_tau[i] += prod 
-            end
-            
             C_l = A_tau[l] - A_I[l]
             C_r = A_tau[r] - A_I[r]
             D = B_tau[i] - B_I[i]
 
+#            v = zeros(N-1)
+#            for j = 1:2N-1
+#                jcur = tree.nodes[j]
+#                parent = jcur.parent
+#                if j > N
+#                    tau_node = tau(jcur)
+#                    tau_t = tau_node == Nil() ? 1.0 : times[tau_node.index]
+#                    v[j-N] = tau_t - times[j]
+#                end
+#
+#            end
+#
+#            V_fast = (nu_r*nutd_r)^gam * C_r + ((1-nu_r)*nutd_l)^gam * C_l + D 
+#            V_slow = sum(v)
+#
+#            println("V_fast: $V_fast")
+#            println("V_slow: $V_slow")
+#            println("v: $v")
             p_s = 1 - 2/(N_l+N_r+1)
+            p_sl = 1 - 2/(N_l+1)
+            p_sr = 1 - 2/(N_r+1)
 
-            # Sample nutd_l
-            f = x -> logsumexp( nu_tilde_splits(nu_r, x, nutd_r, gam, U, U_i[l], U_i[r], u, 
-                                    K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], p_s, node="l"))
+            
+
+            if l > N
+
+                # Sample nutd_l
+                f = x -> logsumexp( nu_tilde_splits(nu_r, x, nutd_r, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sl, node="l"))
 
 
 
-            nutd_l = nutd_l == 1.0 ? rand(Uniform(0,1)) : nutd_l
-            (nutd_u, f_nutd) = slice_sampler(nutd_l, f, 0.1, 10, 0.0, 1.0)
+                nutd_l = nutd_l == 1.0 ? rand(Uniform(0,1)) : nutd_l
+                (nutd_u, f_nutd) = slice_sampler(nutd_l, f, 0.1, 10, 0.0, 1.0)
 
-            f_vals = nu_tilde_splits(nu_r, nutd_u, nutd_r, gam, U, U_i[l], U_i[r], u, 
-                                    K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], p_s, node="l")
+                f_vals = nu_tilde_splits(nu_r, nutd_u, nutd_r, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sl, node="l")
 
-            f_ind = rand(Categorical(exp_normalize(f_vals)))
-            nutd_l = f_ind == 1 ? 1.0 : nutd_u
+                f_ind = rand(Categorical(exp_normalize(f_vals)))
+                nutd_l = f_ind == 1 ? 1.0 : nutd_u
+            end
 
-            # Sample nutd_r
-            f = x -> logsumexp( nu_tilde_splits(nu_r, nutd_l, x, gam, U, U_i[l], U_i[r], u, 
-                                    K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], p_s, node="r"))
+            if r > N
+                # Sample nutd_r
+                f = x -> logsumexp( nu_tilde_splits(nu_r, nutd_l, x, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sr, node="r"))
 
-            nutd_r = nutd_r == 1.0 ? rand(Uniform(0,1)) : nutd_r
-            (nutd_u, f_nutd) = slice_sampler(nutd_r, f, 0.1, 10, 0.0, 1.0)
+                nutd_r = nutd_r == 1.0 ? rand(Uniform(0,1)) : nutd_r
+                (nutd_u, f_nutd) = slice_sampler(nutd_r, f, 0.1, 10, 0.0, 1.0)
 
-            f_vals = nu_tilde_splits(nu_r, nutd_l, nutd_u, gam, U, U_i[l], U_i[r], u, 
-                                    K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], p_s, node="r")
+                f_vals = nu_tilde_splits(nu_r, nutd_l, nutd_u, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sr, node="r")
 
-            f_ind = rand(Categorical(exp_normalize(f_vals)))
-            nutd_r = f_ind == 1 ? 1.0 : nutd_u
+                f_ind = rand(Categorical(exp_normalize(f_vals)))
+                nutd_r = f_ind == 1 ? 1.0 : nutd_u
+            end
 
             # Sample nu_r = 1-nu_l
 
             f = x -> nu_logpdf(x, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u,
-                                K[l,:], K[r,:], C_l, C_r, D, P[l], P[r], cur.state, alpha, N_l, N_r) 
+                                K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], cur.state, alpha, N_l, N_r)
+
+#            f1 = x -> p_z_given_nu_nutd(x, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u, 
+#                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r]) + p_nu_Nl_Nr(x, N_l, N_r)
+#
+#
+#            left_child.rhot = nutd_l
+#            right_child.rhot = nutd_r
+#            f2 = x -> (tree.nodes[i].rho = x; full_pdf(model, model_spec, data))
+#
+#                    x_range = [0.01:0.01:0.99]
+#                    f1_vals = [f(x) for x in x_range]
+#                    f2_vals = [f2(x) for x in x_range]
+#
+#                    f1_vals -= maximum(f1_vals)
+#                    f2_vals -= maximum(f2_vals)
+#
+#                    c1 = Curve(x_range, f1_vals, color="blue")
+#                    c2 = Curve(x_range, f2_vals, color="red")
+#
+#                    p = FramedPlot()
+#                    add(p, c2) 
+#                    add(p, c1) 
+#                    tbl = Table(1,2)
+#                    tbl[1,1] = p
+#                    tbl[1,2] = dend
+#                    display(tbl)
+#                    @assert false
+ 
             (nu_r, f_nu) = slice_sampler(nu_r, f, 0.1, 10, 0.0, 1.0)
 
             cur.rho = nu_r
-            left_child.rhot = nutd_l
-            right_child.rhot = nutd_r
+
+            if i == root.index
+                update_nu_nutd_constants!(i,[i], gam, ancestors, Tau, Pki, P, An_i, An_tau, root_An_ni, root_An_ntau, K, A_I, A_tau, B_I, B_tau)
+
+                C_i = A_tau[i] - A_I[i]
+                D = B_tau[i] - B_I[i]
+
+                nutd_p = cur.rhot 
+                nutd_p = nutd_p == 1.0 ? rand(Uniform(0,1)) : nutd_p
+
+                f = x -> logsumexp( root_nu_tilde_splits(x, gam, U, U_i[i], u, 
+                                        K[i,:], C_i, D, Pki[i], p_s))
+                ##########
+#                    println("i: $i")
+#                    f1 = x -> root_nu_tilde_splits(x, gam, U, U_i[i], u, 
+#                                            K[i,:], C_i, D, Pki[i], p_s)[2]
+#                    f2 = x -> (tree.nodes[i].rhot = x; prior(model, model_spec, debug=false))
+#
+#                    x_range = [0.01:0.01:0.99]
+#                    f1_vals = [f1(x) for x in x_range]
+#                    f2_vals = [f2(x) for x in x_range]
+#
+#                    f1_vals -= maximum(f1_vals)
+#                    f2_vals -= maximum(f2_vals)
+#
+#                    c1 = Curve(x_range, f1_vals, color="blue")
+#                    c2 = Curve(x_range, f2_vals, color="red")
+#
+#                    p = FramedPlot()
+#                    add(p, c2) 
+#                    add(p, c1) 
+#                    tbl = Table(1,2)
+#                    tbl[1,1] = p
+#                    tbl[1,2] = dend
+#                    display(tbl)
+#                    @assert false
+                ##########
+            
+                (nutd_u, f_nutd) = slice_sampler(nutd_p, f, 0.1, 10, 0.0, 1.0)
+                f_vals = root_nu_tilde_splits(nutd_u, gam, U, U_i[i], u,
+                                        K[i,:], C_i, D, Pki[i], p_s)
+                f_ind = rand(Categorical(exp_normalize(f_vals)))
+                nutd_p = f_ind == 1 ? 1.0 : nutd_u
+                @assert nutd_p != 1.0
+                cur.rhot = nutd_p
+            end
+
+
         end
     end
 
 end
 
+function update_nu_nutd_constants!(i, update_set, gam, ancestors, Tau, Pki, P, An_i, An_tau, An_ni, An_ntau, K, A_I, A_tau, B_I, B_tau)
 
+    for a in update_set
+        # Compute K(a,n) for n \in {n | a \in P(n)} 
+        for n = Pki[a]
+            j = n.index
+            K[a,j] = 1.0
+            for k = P[j]
+                if k.index == a
+                    continue
+                end
+                if k.parent == Nil()
+                    K[a,j] *= (k.rhot)^gam
+                else
+                    k_direction = find(k.parent.children .== k)[1]
+                    nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                    K[a,j] *= (k.rhot*nu_k)^gam
+                end
+
+            end
+        end
+
+        # Compute A(a,I)
+        A_I[a] = 0.0
+        for n = An_i[a]
+            j = n.index
+            prod = 1.0
+            for k = ancestors[j]
+                if k.index == a
+                    continue
+                end
+                if k.parent == Nil()
+                    prod *= k.rhot^gam
+                else
+                    k_direction = find(k.parent.children .== k)[1]
+                    nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                    prod *= (k.rhot*nu_k)^gam
+                end
+            end
+            A_I[a] += prod
+        end
+        # Compute A(a,tau)
+        A_tau[a] = 0.0
+        for n = An_tau[a]
+            j = n.index
+            prod = 1.0
+            An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
+            for k = An_k
+                if k.index == a
+                    continue
+                end
+                if k.parent == Nil()
+                    prod *= k.rhot^gam
+                else
+                    k_direction = find(k.parent.children .== k)[1]
+                    nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                    prod *= (k.rhot*nu_k)^gam
+                end
+            end
+            A_tau[a] += prod
+        end
+
+    end
+
+    
+    B_I[i] = 0.0
+    for n = An_ni
+        j = n.index
+        prod = 1.0
+
+        for k = ancestors[j]
+            @assert !(k in update_set)
+            if k.parent == Nil()
+                prod *= k.rhot^gam
+            else
+                k_direction = find(k.parent.children .== k)[1]
+                nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                prod *= (k.rhot*nu_k)^gam
+            end
+        end
+        B_I[i] += prod 
+    end
+
+    B_tau[i] = 0.0
+    for n = An_ntau
+        j = n.index
+        prod = 1.0
+        An_k = Tau[j] == Nil() ? [] : ancestors[Tau[j].index]
+        for k = An_k
+            @assert !(k in update_set)
+            if k.parent == Nil()
+                prod *= k.rhot^gam
+            else
+                k_direction = find(k.parent.children .== k)[1]
+                nu_k = k_direction == 1 ? k.parent.rho : 1-k.parent.rho
+                prod *= (k.rhot*nu_k)^gam
+            end
+        end
+        B_tau[i] += prod 
+    end
+end
 
 function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
@@ -628,12 +755,7 @@ function sample_eta(model::ModelState,
         for j = N+1:2N-1
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
-        true_logpdf = full_pdf(model, model_spec, data)
         e_pdf = eta_logpdf(model, model_spec, data)
-        println("full_pdf: $true_logpdf")
-        println("eta_logpdf: $e_pdf")
-        println("difference: $(true_logpdf - e_pdf)")
-        println("eta: $eta")
         return e_pdf
     end
 
