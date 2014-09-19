@@ -81,8 +81,6 @@ function mcmc(data::DataState,
             for i=1:length(Z)
                 u[Z[i]] += 1
             end 
-            u = u .- 1
-            u[1:N] = 0
 
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
@@ -600,8 +598,7 @@ function sample_psi(model::ModelState,
         end
 
 
-        correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
-        correct_logprobs = correct_priors + correct_likelihoods
+        #correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
 
         PruneIndexFromTree!(model.tree, prune_index)
 
@@ -619,26 +616,18 @@ function sample_psi(model::ModelState,
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_observation_logpdf(model, model_spec, data, prune_index, path)
 
+#        priors = priors .- maximum(priors)
+#
+#        correct_priors = correct_priors .- maximum(correct_priors)
+#
+#        println("prune_index: $prune_index") 
+#        println("parent_prune_index: $parent_prune_index") 
+#        println("states: $lstates") 
+#        println("priors (efficient): $priors")
+#        println("priors (correct): $correct_priors")
+
         logprobs = priors + likelihoods
         probs = exp_normalize(logprobs)
-
-
-
-        priors = priors .- maximum(priors)
-        likelihoods = likelihoods .- maximum(likelihoods)
-        logprobs = logprobs .- maximum(logprobs)
-
-        correct_priors = correct_priors .- maximum(correct_priors)
-        correct_likelihoods = correct_likelihoods .- maximum(correct_likelihoods)
-        correct_logprobs = correct_logprobs - maximum(correct_logprobs)
-       
-        println("states: $pstates") 
-        println("priors (efficient): $priors")
-        println("priors (correct): $correct_priors")
-        println("likelihoods (efficient): $likelihoods")
-        println("likelihoods (correct): $correct_likelihoods")
-        println("logprobs (efficient): $logprobs")
-        println("logprobs (correct): $correct_logprobs")
 
         if any(isnan(probs))
             nan_ind = find(isnan(probs))[1]

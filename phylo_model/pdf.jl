@@ -14,7 +14,7 @@ function full_pdf(model::ModelState,
 end
 
 function prior(model::ModelState,
-               model_spec::ModelSpecification; debug=false)
+               model_spec::ModelSpecification)
 
     Z = model.Z 
 
@@ -106,9 +106,6 @@ function prior(model::ModelState,
         assignment_term += U[i]*log(Tau[i])
     end
 
-    if debug
-        return assignment_term
-    end
     psi_term + assignment_term
 end
 
@@ -435,6 +432,7 @@ function psi_infsites_logpdf(model::ModelState,
             println("psi prob ", psi_probs[i])
             println("subtree_probs ", subtree_probs)
         end
+
         # node above which to attach
         push!(tree_states, i)                
     end
@@ -618,7 +616,7 @@ function prior_tree(tree::Tree,
 
     self_direction = find(pruned_parent.children .== pruned_node)[1]
 
-    pruned_mu_prop = self_direction == 1 ? pruned_parent.rho : (1-pruned_parent.rho) 
+    pruned_mu_prop = self_direction == 1 ? 1-pruned_parent.rho : (pruned_parent.rho) 
     pruned_leaves = pruned_node.num_leaves
     
     for i = reverse(indices)
@@ -699,7 +697,7 @@ function prune_graft_logprobs(input_model::ModelState,
     likelihoods = Float64[]
 
     for graft_index = path
-        InsertIndexIntoTree!(tree, prune_index, graft_index) 
+        InsertIndexIntoTree!(tree, prune_index, graft_index)
         prior_term = prior(model, model_spec)
         likelihood_term = likelihood(model, model_spec, data)
 
