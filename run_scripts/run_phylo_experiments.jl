@@ -18,15 +18,15 @@ model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
 lambda = 0.2
 gamma = 1.0
 alpha = 1.0
-init_K = 5
+init_K = 4
 
 if !isdefined(:num_trials)
     num_trials = 1
 end
 
-data = DataState(AA, DD, mu_r, mu_v)
+data = DataState(AA, DD, mu_r, mu_v, names)
 
-result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 1000, 200) 
+result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 200) 
 
 #results = run_batch(model_spec, YY, symmetric_split, trnpct, lambda, gamma, w_sigma, b_sigma, 1000, 500, num_trials, "prison_L$(lambda)_G$(gamma)_P$(trnpct)_PW$(positive_W)", "../results/prison/")
 

@@ -33,6 +33,7 @@ type DataState
     total_counts::Matrix{Float64}
     mu_r::Vector{Float64}
     mu_v::Vector{Float64}
+    mutation_names::Vector{ASCIIString}
 end
 
 # Find ancestor to whose population t belongs

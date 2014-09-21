@@ -63,17 +63,29 @@ function mcmc(data::DataState,
 
     local tbl
 
+    t0 = time()
+
+    chain_probs = Float64[]
+
     for iter = 1:iterations
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec)
         tree_LL = likelihood(model, model_spec, data)
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
+        if iter == 1 || tree_prior + tree_LL > chain_probs[end]+100
+            Temp = 1.0
+        end
+
+        push!(chain_probs, tree_prior + tree_LL)
         if iter == 2 && debug
             model_spec.debug = true
         end
 
-        mcmc_sweep(model, model_spec, data)
+        #Temp += 0.5
+        Temp = 1.0
+
+        mcmc_sweep(model, model_spec, data, Temp=Temp)
 
         if model_spec.plot && plot_utils_loaded
 
@@ -85,8 +97,39 @@ function mcmc(data::DataState,
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
-            tbl = Table(1,1)
-            tbl[1,1] = p_dendrogram
+            if iter > burnin_iterations
+                c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
+            else
+                c = Curve([1:iter], chain_probs, color="blue")
+            end
+            p_chain = FramedPlot()
+            add(p_chain,c)
+
+            p_clusters = FramedPlot()
+            cluster_names = ["" for i = 1:maximum(Z-N)]
+            for i = 1:length(Z)
+                cluster_names[Z[i]-N] = "$(cluster_names[Z[i]-N])$(cluster_names[Z[i]-N] == "" ? "" : "; ")$(data.mutation_names[i])"
+            end
+            add(p_clusters, Curve([0, 0], [0, 1], color="white"))
+            #println("$cluster_names")
+            for i = 1:length(cluster_names)
+                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Cluster $(i+N): $(cluster_names[i])", size=0.5, halign="left" ) 
+                add(p_clusters, pl)
+                eta = model.tree.nodes[i+N].state
+                eta_string = @sprintf("%0.2f",eta[1])
+                for k = 2:length(eta)
+                    eta_string = "$eta_string, $(@sprintf("%0.2f",eta[k]))"
+                end
+                pl = Winston.DataLabel(-0.9, 0.5-0.5*((i-1)/length(cluster_names)), "Eta $(i+N): $eta_string", size=0.5, halign="left" ) 
+                add(p_clusters, pl)
+            end
+
+            tbl = Table(1,2)
+            tbl2 = Table(2,1)
+            tbl2[1,1] = p_dendrogram
+            tbl2[2,1] = p_clusters
+            tbl[1,1] = p_chain
+            tbl[1,2] = tbl2
             Winston.display(tbl)
  
         end
@@ -100,6 +143,8 @@ function mcmc(data::DataState,
         #push!(Ks, size(model.weights)[1])
     end
 
+    tend = time() - t0
+    println("total elapsed time: $tend")
     if model_spec.plot && plot_utils_loaded
         (iters, Ks, trainLLs, models, tbl )
     else
@@ -110,7 +155,8 @@ end
 
 function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
-                    data::DataState)
+                    data::DataState;
+                    Temp::Float64 = 1.0)
 
     tree = model.tree
 
@@ -119,7 +165,7 @@ function mcmc_sweep(model::ModelState,
     println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
     psi_time = time()
-    sample_psi(model, model_spec, data)
+    sample_psi(model, model_spec, data, Temp=Temp)
     psi_time = time() - psi_time
 
     tree_prior = prior(model,model_spec) 
@@ -136,7 +182,7 @@ function mcmc_sweep(model::ModelState,
 
     hmc_iterations = 5
     eta_time = time()
-    sample_eta(model, model_spec, data, hmc_iterations)
+    sample_eta(model, model_spec, data, hmc_iterations, Temp=Temp)
     eta_time = time() - eta_time
 
     tree_prior = prior(model,model_spec) 
@@ -145,7 +191,7 @@ function mcmc_sweep(model::ModelState,
 
     Z_iterations = 1
     Z_time = time()
-    sample_assignments(model, model_spec, data, Z_iterations)
+    sample_assignments(model, model_spec, data, Z_iterations, Temp=Temp)
     Z_time = time() - Z_time
     tree_prior = prior(model,model_spec) 
     tree_LL = likelihood(model, model_spec, data)
@@ -560,7 +606,8 @@ end
 
 function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
-                    data::DataState)
+                    data::DataState;
+                    Temp::Float64 = 1.0)
 
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
@@ -598,7 +645,7 @@ function sample_psi(model::ModelState,
         end
 
 
-        #correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
+#        correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
 
         PruneIndexFromTree!(model.tree, prune_index)
 
@@ -619,14 +666,17 @@ function sample_psi(model::ModelState,
 #        priors = priors .- maximum(priors)
 #
 #        correct_priors = correct_priors .- maximum(correct_priors)
-#
+#        correct_likelihoods = correct_likelihoods .- maximum(correct_likelihoods)
+
 #        println("prune_index: $prune_index") 
 #        println("parent_prune_index: $parent_prune_index") 
 #        println("states: $lstates") 
 #        println("priors (efficient): $priors")
 #        println("priors (correct): $correct_priors")
+#        println("likelihoods (efficient): $likelihoods")
+#        println("likelihoods (correct): $correct_likelihoods")
 
-        logprobs = priors + likelihoods
+        logprobs = priors + likelihoods/Temp
         probs = exp_normalize(logprobs)
 
         if any(isnan(probs))
@@ -735,7 +785,8 @@ end
 function sample_eta(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
-                    hmc_iterations::Int64)
+                    hmc_iterations::Int64;
+                    Temp::Float64 = 1.0)
 
     tree  = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -743,6 +794,7 @@ function sample_eta(model::ModelState,
     eta = zeros(S*(N-1))
 
     num_iterations = 10
+
 
     for j = N+1:2N-1
         eta[1 + (j-N-1)*S : (j-N)*S] = tree.nodes[j].state
@@ -752,7 +804,7 @@ function sample_eta(model::ModelState,
         for j = N+1:2N-1
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
-        e_pdf = eta_logpdf(model, model_spec, data)
+        e_pdf = eta_logpdf(model, model_spec, data, Temp=Temp)
         return e_pdf
     end
 
@@ -760,18 +812,33 @@ function sample_eta(model::ModelState,
         for j = N+1:2N-1
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
-        grad = eta_log_gradient(model, model_spec, data)
+        grad = eta_log_gradient(model, model_spec, data, Temp=Temp)
         return grad
     end
 
     hmcopts = @options numsteps=8 stepsize=0.1 transformation=ReducedNaturalTransformation
-    refopts = @options m=2 w=0.5 refractive_index_ratio=1.3 transformation=ReducedNaturalTransformation
+    refopts = @options m=2 w=0.1 refractive_index_ratio=1.3 transformation=ReducedNaturalTransformation #verify_gradient=true
 
     for i = 1:hmc_iterations
         #eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
         eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
     end
 
+#    verify_gradient = true
+#    if verify_gradient
+#        println("eta: $eta")
+#        grad = eta_grad(eta)
+#        epsilon = 10.0^-5
+#
+#        f1 = eta_density(eta)
+#        for i = 1:length(eta)
+#            eta_new = copy(eta)
+#            eta_new[i] = eta_new[i] + grad[i]/abs(grad[i])*epsilon
+#            f2 = eta_density(eta_new)
+#            println("grad $i: $(norm(grad[i])*epsilon)")
+#            println("agrad $i: $( (f2-f1))")
+#        end
+#    end
     
  
     for j = N+1:2N-1
@@ -782,7 +849,8 @@ end
 function sample_assignments(model::ModelState,
                             model_spec::ModelSpecification,
                             data::DataState,
-                            num_iterations::Int64)
+                            num_iterations::Int64;
+                            Temp::Float64 = 1.0)
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -802,7 +870,7 @@ function sample_assignments(model::ModelState,
     for iter = 1:num_iterations    
         for i = 1:M
             cur_z = Z[i]-N
-            z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi)
+            z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp)
 
 #            full_logpdf = k -> (model.Z[i] = k+N; full_pdf(model, model_spec, data))
 #            full_z_probs = [full_logpdf(k) for k = 1:N-1]

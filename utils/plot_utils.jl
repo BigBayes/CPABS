@@ -145,9 +145,11 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_
 
         if n == 2N-1
             if U[n] > 0
+                original_n = sorted_inds[int(n)]
                 n_x, n_y = get_mutation_plot_locations(U[n], locations[n], n_t, 1.0)
                 append!(mutations_x, n_x)
                 append!(mutations_y, n_y)
+                add(p, Winston.DataLabel((l_loc+r_loc)/2, n_t-0.02, "$original_n", color="red", size=0.3))
             end
         end
     end

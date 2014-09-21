@@ -843,7 +843,8 @@ end
 
 function eta_logpdf(model::ModelState,
                     model_spec::ModelSpecification,
-                    data::DataState)
+                    data::DataState;
+                    Temp::Float64 = 1.0)
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -898,12 +899,11 @@ function eta_logpdf(model::ModelState,
                 logr = log(r)
                 log1mr = log(1.-r) 
                 for s = 1:length(eta)
-                    log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
+                    log_pdf += (AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s]))/Temp
                 end
             end
 
         end 
-
     end
 
     log_pdf
@@ -911,7 +911,8 @@ end
 
 function eta_log_gradient(model::ModelState,
                           model_spec::ModelSpecification,
-                          data::DataState)
+                          data::DataState;
+                          Temp::Float64 = Temp)
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
 
@@ -936,7 +937,6 @@ function eta_log_gradient(model::ModelState,
 
     gradient = zeros(N-1, S)
     phi = ones(N-1, S)
-
     for j = indices
         if j > N
             cur = tree.nodes[j]
@@ -958,39 +958,36 @@ function eta_log_gradient(model::ModelState,
             phi[j-N,:] .*= cur.state'
         end
     end
- 
+
     for k = indices
         if k > N
             
             cur = tree.nodes[k]
             parent = cur.parent
-            if parent == Nil()
-                continue
-            end
 
-            nu_k = cur.parent.rho
-            self_direction = find(parent.children .== cur)[1]
-            eta_p = parent.state
+            nu_k = parent == Nil() ? 1.0 : cur.parent.rho
             eta_k = cur.state 
- 
+
             for s = 1:S
-                gradient[k-N,s] += (alpha*nu_k)/eta_k[s] + (alpha*(1-nu_k))/(1-eta_k[s])
+                gradient[k-N,s] += (alpha*nu_k)/eta_k[s] - (alpha*(1-nu_k))/(1-eta_k[s])
             end         
 
             # right subtree 
             De = GetDescendants(tree, cur.children[1].index)
+            #println("De($(cur.children[1].index)): $([x.index for x in De])")
             for d = De
                 j = d.index
                 if j > N
                     phi_j_k = phi[j-N,:]
                     for s = 1:S
+                            
                         phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / eta_k[s]
                     end
                     for i = C[j]
-                        r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
+                        r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
-                            gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
+                            gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))/Temp
                         end
                     end
                 end
@@ -1005,10 +1002,10 @@ function eta_log_gradient(model::ModelState,
                         phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / (1 - eta_k[s])
                     end
                     for i = C[j]
-                        r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
+                        r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
-                            gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s])
+                            gradient[k-N,s] -= (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))/Temp
                         end
                     end
                 end
@@ -1022,8 +1019,8 @@ function eta_log_gradient(model::ModelState,
             for i = C[k]
                 r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
                 for s = 1:S
-                    gradient[k-N,s] += AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r[s] +
-                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s])
+                    gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r[s] +
+                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s]))/Temp
                 end
             end
             
@@ -1031,7 +1028,7 @@ function eta_log_gradient(model::ModelState,
         end 
 
     end
-    gradient[:]
+    gradient'[:]
 end
 
 ###################################
@@ -1045,7 +1042,8 @@ function z_logpdf(model::ModelState,
                   U::Vector{Int64},
                   times::Vector{Float64},
                   Tau::Vector{Int64},
-                  phi::Matrix{Float64})
+                  phi::Matrix{Float64};
+                  Temp::Float64 = 1.0)
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -1084,7 +1082,7 @@ function z_logpdf(model::ModelState,
 #            if index == 1
 #                println("j=1 s=$s k=$k, phi, ref prob (fast): $(phi[k,s]) $r_ks")
 #            end
-            log_pdf[k-N] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks)
+            log_pdf[k-N] += (AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks))/Temp
         end
 
     end

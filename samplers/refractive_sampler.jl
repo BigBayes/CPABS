@@ -6,7 +6,7 @@ function refractive_sampler(init_x::Vector{Float64},
                             f::Function,
                             grad_f::Function,
                             opts::Options) 
-  @defaults opts w=.01 refractive_index_ratio=nothing m=10 transformation=identity_transformation
+  @defaults opts w=.01 refractive_index_ratio=nothing m=10 transformation=IdentityTransformation verify_gradient=false
   
   T = transformation.transformation_function
   T_inv = transformation.transformation_inverse
@@ -63,6 +63,17 @@ function refractive_sampler(init_x::Vector{Float64},
     grad_norm = sqrt(dot(grad,grad))
  
     grad = grad/grad_norm
+
+    if verify_gradient
+        epsilon=10.0^-6
+        x_test = x + epsilon*grad
+        fx_test = f(T(x_test)) + T_logjacobian(x_test)
+
+        println("approx. grad: $(fx_test-fx)")
+        println("grad norm: $(grad_norm*epsilon)")
+
+    end
+
 
     if grad_norm == 0.0
         if iteration <= m
