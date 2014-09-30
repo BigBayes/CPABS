@@ -82,12 +82,15 @@ function mcmc(data::DataState,
             model_spec.debug = true
         end
 
-        #Temp += 0.5
-        Temp = 1.0
+#        if iter < 0.5*iterations
+#            Temp += 0.5
+#        else
+#            Temp = 1.0
+#        end
 
         mcmc_sweep(model, model_spec, data, Temp=Temp)
 
-        if model_spec.plot && plot_utils_loaded
+        if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
             u = zeros(Int64, 2N-1)
             for i=1:length(Z)
@@ -112,15 +115,24 @@ function mcmc(data::DataState,
             end
             add(p_clusters, Curve([0, 0], [0, 1], color="white"))
             #println("$cluster_names")
+            phi = compute_phis(model)
             for i = 1:length(cluster_names)
-                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Cluster $(i+N): $(cluster_names[i])", size=0.5, halign="left" ) 
-                add(p_clusters, pl)
+#                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Cluster $(i+N): $(cluster_names[i])", halign="left" ) 
+#                add(p_clusters, pl)
                 eta = model.tree.nodes[i+N].state
                 eta_string = @sprintf("%0.2f",eta[1])
                 for k = 2:length(eta)
                     eta_string = "$eta_string, $(@sprintf("%0.2f",eta[k]))"
                 end
-                pl = Winston.DataLabel(-0.9, 0.5-0.5*((i-1)/length(cluster_names)), "Eta $(i+N): $eta_string", size=0.5, halign="left" ) 
+                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Eta $(i+N): $eta_string", size=0.5, halign="left" ) 
+                add(p_clusters, pl)
+
+                phi_i = phi[i+N,:]
+                phi_string = @sprintf("%0.2f",phi_i[1])
+                for k = 2:length(phi_i)
+                    phi_string = "$phi_string, $(@sprintf("%0.2f",phi_i[k]))"
+                end
+                pl = Winston.DataLabel(-0.9, 0.5-0.5*((i-1)/length(cluster_names)), "Phi $(i+N): $phi_string", halign="left" ) 
                 add(p_clusters, pl)
             end
 
@@ -676,8 +688,8 @@ function sample_psi(model::ModelState,
 #        println("likelihoods (efficient): $likelihoods")
 #        println("likelihoods (correct): $correct_likelihoods")
 
-        logprobs = priors + likelihoods/Temp
-        probs = exp_normalize(logprobs)
+        logprobs = priors + likelihoods
+        probs = exp_normalize(logprobs/Temp)
 
         if any(isnan(probs))
             nan_ind = find(isnan(probs))[1]
@@ -816,14 +828,19 @@ function sample_eta(model::ModelState,
         return grad
     end
 
-    hmcopts = @options numsteps=8 stepsize=0.1 transformation=ReducedNaturalTransformation
+    hmcopts = @options numsteps=8 stepsize=0.01 transformation=ReducedNaturalTransformation
     refopts = @options m=2 w=0.1 refractive_index_ratio=1.3 transformation=ReducedNaturalTransformation #verify_gradient=true
 
-    for i = 1:hmc_iterations
-        #eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
-        eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
-    end
+    if rand() < 0.5
+        for i = 1:hmc_iterations
+            eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
+        end
+    else
+        for i = 1:hmc_iterations
+            eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
+        end
 
+    end
 #    verify_gradient = true
 #    if verify_gradient
 #        println("eta: $eta")
@@ -888,6 +905,35 @@ function sample_assignments(model::ModelState,
         end
     end
 end
+
+function sample_num_leaves(model::ModelState,
+                           model_spec::ModelSpecification,
+                           data::DataState,
+                           num_iterations::Int64;
+                           Temp::Float64 = 1.0)
+
+    tree = model.tree
+    lambda = model.lambda
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
+
+   
+    # W = (K-1, K) 
+    if rand() < 0.5
+        new_model = copy(model)
+
+
+    # W = (K, K+1) 
+    else
+        new_model = copy(model)
+
+
+    end
+
+
+end
+
+
 
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)

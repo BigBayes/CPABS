@@ -240,6 +240,92 @@ function copy(tree::Tree{Vector{Float64}})
     new_tree
 end
 
+# Construct a new tree object from a specifed node of an existing tree 
+# (eg after pruning or to obtain a subtree)
+# Can also be used to reindex the nodes (eg after grafting a new subtree in),
+# as long as all node indices are unique (the leaves don't need to have the first N indices)
+function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64)
+    tree = Tree{T}()
+
+    old_root = FindRoot(old_tree, root_index)
+    old_leaves = GetLeaves(old_tree, old_root.index)
+    old_N = length(old_leaves)
+
+
+    root_node = old_tree.nodes[root_index]
+    leaves = GetLeaves(old_tree, root_index)
+    N = length(leaves)
+    tree.nodes = Array(TreeNode{T}, 2N-1)
+
+    queue = copy(leaves)
+
+    index_map = zeros(Int64, 2old_N-1)
+
+    # build index_map and instantiate nodes of the new tree
+    println("N: $N")
+    indices = [1:2N-1]
+    while length(queue) > 0
+        node_index = shift!(queue)
+
+        new_index = shift!(indices)
+
+        index_map[node_index] = new_index
+ 
+        node = old_tree.nodes[node_index]
+        new_node = copy(node)
+        new_node.rhot = node.rhot 
+        new_node.rho = node.rho 
+        new_node.children[1] = Nil()
+        new_node.children[2] = Nil()
+
+        tree.nodes[new_index] = new_node
+
+        if node.parent != Nil() && node_index != root_index
+            parent_index = node.parent.index
+            if index_map[parent_index] == 0 && !(parent_index in queue)
+                push!(queue, parent_index)
+            end
+        end
+
+    end
+
+
+    stack = Int64[]
+    push!(stack, root_index)
+
+    # connect parents/children in the new tree
+    while length(stack) > 0
+        node_index = pop!(stack)
+        node = old_tree.nodes[node_index]
+
+        new_index = index_map[node_index]
+        new_node = tree.nodes[new_index]
+        new_node.index = new_index
+
+
+        l = node.children[2]
+        r = node.children[1]
+        if l != Nil()
+            l_index = index_map[l.index]            
+            new_node.children[2] = tree.nodes[l_index]
+            tree.nodes[l_index].parent = new_node
+
+            push!(stack, l.index)
+        end
+        if r != Nil()
+            r_index = index_map[r.index]            
+            new_node.children[1] = tree.nodes[r_index]
+            tree.nodes[r_index].parent = new_node
+
+            push!(stack, r.index)
+        end
+
+    end 
+
+    UpdateDescendantCounts!(tree, tree.nodes[index_map[root_index]])
+    UpdateSubtreeAncestorCounts!(tree, tree.nodes[index_map[root_index]])
+    return (tree, index_map)
+end
 
 function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
     self = tree.nodes[index]
@@ -552,19 +638,6 @@ function ConstructZ{T}(tree::Tree{T})
         end
     end
     full(sparse(Z_I, Z_J, Z_S, N, sum(U)))
-end
-
-function get_segment_length(i::Int,
-                            N::Int,
-                            num_ancestors::Int,
-                            gam::Float64)
-    if i > N
-        segment_length = gam*(1-gam)^(num_ancestors-1)
-    else
-        segment_length = (1-gam)^(num_ancestors-1)
-    end
-
-    segment_length
 end
 
 function tree2array(tree::Tree,

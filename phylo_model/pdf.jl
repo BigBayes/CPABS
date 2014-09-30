@@ -899,14 +899,14 @@ function eta_logpdf(model::ModelState,
                 logr = log(r)
                 log1mr = log(1.-r) 
                 for s = 1:length(eta)
-                    log_pdf += (AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s]))/Temp
+                    log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
                 end
             end
 
         end 
     end
 
-    log_pdf
+    log_pdf/Temp
 end
 
 function eta_log_gradient(model::ModelState,
@@ -987,7 +987,7 @@ function eta_log_gradient(model::ModelState,
                         r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
                             gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))/Temp
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))
                         end
                     end
                 end
@@ -1005,8 +1005,7 @@ function eta_log_gradient(model::ModelState,
                         r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
                             gradient[k-N,s] -= (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))/Temp
-                        end
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))                        end
                     end
                 end
             end
@@ -1020,7 +1019,7 @@ function eta_log_gradient(model::ModelState,
                 r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
                 for s = 1:S
                     gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r[s] +
-                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s]))/Temp
+                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s]))
                 end
             end
             
@@ -1028,7 +1027,7 @@ function eta_log_gradient(model::ModelState,
         end 
 
     end
-    gradient'[:]
+    gradient'[:]./Temp
 end
 
 ###################################
@@ -1082,11 +1081,11 @@ function z_logpdf(model::ModelState,
 #            if index == 1
 #                println("j=1 s=$s k=$k, phi, ref prob (fast): $(phi[k,s]) $r_ks")
 #            end
-            log_pdf[k-N] += (AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks))/Temp
+            log_pdf[k-N] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks)
         end
 
     end
-    log_pdf 
+    log_pdf/Temp 
 end
 
 ###################################

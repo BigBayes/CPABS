@@ -18,7 +18,12 @@ model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
 lambda = 0.2
 gamma = 1.0
 alpha = 1.0
-init_K = 4
+
+if filename == "CLL077.csv" || filename == "CLL003.csv"
+    init_K = 4
+elseif filename == "CLL006.csv"
+    init_K = 5
+end
 
 if !isdefined(:num_trials)
     num_trials = 1
