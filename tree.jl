@@ -243,7 +243,7 @@ end
 # Construct a new tree object from a specifed node of an existing tree 
 # (eg after pruning or to obtain a subtree)
 # Can also be used to reindex the nodes (eg after grafting a new subtree in),
-# as long as all node indices are unique (the leaves don't need to have the first N indices)
+# as long as all node indices are unique (the leaves don't need to have the first N indices, however)
 function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64)
     tree = Tree{T}()
 

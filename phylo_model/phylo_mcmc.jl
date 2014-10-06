@@ -906,6 +906,35 @@ function sample_assignments(model::ModelState,
     end
 end
 
+function compute_assignment_probs(model::ModelState,
+                                  model_spec::ModelSpecification,
+                                  data::DataState,
+                                  Temp::Float64 = 1.0)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    M,S = size(data.reference_counts)
+
+    t = compute_times(model)
+    Tau = compute_taus(model)
+    phi = compute_phis(model)
+
+    Z = model.Z
+    U = zeros(Int64, N-1)
+    for i=1:length(Z)
+        U[Z[i]-N] += 1
+    end 
+    U = U .- 1
+
+    z_probs = zeros(M,N-1)
+
+    for i = 1:M
+        cur_z = Z[i]-N
+        z_probs[i,:] = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp)
+    end
+
+    return z_probs
+end
 function sample_num_leaves(model::ModelState,
                            model_spec::ModelSpecification,
                            data::DataState,
@@ -914,26 +943,218 @@ function sample_num_leaves(model::ModelState,
 
     tree = model.tree
     lambda = model.lambda
+    alpha = model.alpha
+
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
+    M,S = size(data.reference_counts)
 
+    root = FindRoot(model.tree, 1)
+    root_index = root.index
    
     # W = (K-1, K) 
     if rand() < 0.5
         new_model = copy(model)
+       
+        parent_prune_index = rand(N+1:2N-1) 
+        parent = tree.nodes[parent_prune_index]
+        prune_index = parent.children[1].index
 
+
+        PruneIndexFromTree!(new_model.tree, prune_index)
+
+        # clusters being merged        
+        pruned_cluster = prune_index - N
+        parent_pruned_cluster = parent_prune_index - N
+
+        (new_tree, index_map) = MakeReindexedTree!(new_model.tree, root_index) 
 
     # W = (K, K+1) 
     else
         new_model = copy(model)
 
+        parent_graft_index = rand(N+1:2N-1) 
+        parent = tree.nodes[parent_graft_index]
+        graft_index = parent.children[1].index
+
+        # cluster that is being split
+        grafted_cluster = graft_index - N
+
+        ntree = new_model.tree 
+
+        nu = rand()
+        N_g = tree.nodes[graft_index].num_leaves + 1
+        xi = 1 - 2/(N_g+1)
+        rhot = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
+        eta = rand(Beta(alpha*rho+1, alpha*(1-rho)+1), S)
+
+        new_leaf_node = TreeNode(zeros(S), 2N)
+        new_internal_node = TreeNode(eta, 2N+1)
+        new_internal_node.children[1] = new_leaf_node
+        new_leaf_node.parent = new_internal_node
+        push!(ntree.nodes, new_leaf_node)
+        push!(ntree.nodes, new_internal_node)
+
+        InsertIndexIntoTree!(ntree, 2N, graft_index)
+        new_tree, index_map = MakeReindexedTree(ntree, root_index)
+        new_model.tree = new_tree
 
     end
 
 
 end
 
+function draw_neighboring_tree(model::ModelState,
+                               model_spec::ModelSpecification,
+                               data::DataState,
+                               new_N::Int64;
+                               Temp::Float64 = 1.0)
+    tree = model.tree
+    root = FindRoot(tree,1)
+    
+    M,S = size(data.reference_counts)
 
+    ntree = Tree{Vector{Float64}}()
+    ntree.nodes = Array(TreeNode{Vector{Float64}}, new_N)
+ 
+
+    new_indices = [1:2*new_N-1]
+    new_index = pop!(new_indices)
+    ntree.nodes[new_index] = TreeNode(root.state, new_index )
+    nroot = ntree.nodes[new_index]
+
+    nroot.rho = root.rho
+    nroot.rhot = root.rhot
+    nroot.num_leaves = new_N
+
+
+    queue = Array(Tuple,0)
+    push!(queue, (root.index, new_N, 0, true))
+
+    while length(queue) > 0
+        cur_index, N_cur, parent_nindex, is_right = shift!(queue)
+
+        parent = parent_nindex == 0 ? Nil() : ntree.nodes[parent_nindex]
+
+        new_index = pop!(new_indices)
+        if cur_index > 0 
+            cur = tree.nodes[cur_index]
+
+
+            p_new = 1-cur.rhot
+            p_r = cur.rho 
+            p_l = (1-cur.rho)
+
+            ntree.nodes[new_index] = TreeNode(cur.state, new_index)
+            ntree.nodes[new_index].rhot = cur.rhot
+            ntree.nodes[new_index].rho = cur.rho
+
+        else
+            # new node that differs from given tree
+            xi = 1 - 2/(N_cur+1)
+            nutd = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
+            nu = rand()
+            eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+
+            p_new = 1-nutd
+            p_r = nu
+            p_l = 1-nu
+
+            ntree.nodes[new_index] = TreeNode(eta, new_index)
+            ntree.nodes[new_index].rhot = nutd
+            ntree.nodes[new_index].rho = nu
+
+        end
+
+        ntree.nodes[new_index].parent = parent
+        if parent != Nil()
+            parent.children[2-is_right] = ntree.nodes[new_index]
+        end
+
+        N_n = rand(Binomial(N_cur, p_new))
+        N_cur -= N_n
+
+        if N_n > 0
+            nutd_index = pop!(new_indices)
+            xi = 1 - 2/(N_n+1)
+            nutd = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
+            nu = rand()
+            eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+
+            ntree.nodes[nutd_index] = TreeNode(eta, nutd_index)
+            ntree.nodes[nutd_index].rhot = nutd
+            ntree.nodes[nutd_index].rho = nu
+
+            ntree.nodes[nutd_index].parent = parent
+            if parent != Nil()
+                parent.children[2-is_right] = ntree.nodes[nutd_index]
+            end
+
+            ntree.nodes[nutd_index].children[2] = ntree.nodes[new_index]
+            ntree.nodes[new_index].parent = ntree.nodes[nutd_index]
+
+            push!(queue, (0, N_n, nutd_index, true)) 
+        end
+
+        N_r = rand(Binomial(N_cur, p_r))
+        N_l = N_cur - N_r
+
+
+        l = cur.children[2]
+        r = cur.children[1]
+
+        if l != Nil() && N_l > 0
+            push!(queue, (l.index, N_l, new_index, false))
+        end
+        if r != Nil() && N_r > 0
+            push!(queue, (r.index, N_r, new_index, true))
+        end
+
+    end
+ 
+    nroot = FindRoot(ntree,1) 
+    (new_tree, index_map) = MakeReindexedTree!(ntree, nroot.index) 
+    new_root = index_map[nroot.index]
+
+    new_model = copy(model)
+    new_model.tree = new_tree
+
+    times = compute_times(new_model)
+    Tau = compute_taus(new_model)
+    phi = compute_phis(new_model)
+    # dummy U set to ones as z_logpdf takes into account
+    # the fact that we shouldn't leave clusters empty (but we don't want that here)
+    U = ones(length(model.Z))
+
+    indices = GetLeafToRootOrdering(new_tree, new_root) 
+
+
+    Z_logpdfs = zeros(new_N-1, M)
+    for m = 1:M
+        Z_logpdfs[:,m] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi, Temp=Temp) 
+    end
+
+    mutations = [1:M]
+
+    # Assign a mutation for each cluster
+    for i = reverse(indices)
+        if i > new_N
+            j = rand(Categorical(exp_normalize(Z_logpdfs[i,mutations])))
+            m = splice!(mutations, j)
+            new_model.Z[m] = i-new_N
+ 
+        end
+    end
+
+    # Assign remaining clusters
+    for m = mutations
+        i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
+        new_model.Z[m] = i-new_N
+    end
+
+ 
+    return new_model 
+end
 
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)
