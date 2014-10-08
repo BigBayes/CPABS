@@ -92,6 +92,8 @@ function mcmc(data::DataState,
 
         if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
+
+
             u = zeros(Int64, 2N-1)
             for i=1:length(Z)
                 u[Z[i]] += 1
@@ -99,6 +101,16 @@ function mcmc(data::DataState,
 
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+
+            new_model = draw_neighboring_tree(model, model_spec, data, N+1)
+            ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
+            new_u = zeros(Int64, 2(N+1)-1)
+            for i=1:length(new_model.Z)
+                x = new_model.Z[i]
+                new_u[x] += 1
+            end 
+            p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+
 
             if iter > burnin_iterations
                 c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
@@ -137,9 +149,10 @@ function mcmc(data::DataState,
             end
 
             tbl = Table(1,2)
-            tbl2 = Table(2,1)
+            tbl2 = Table(3,1)
             tbl2[1,1] = p_dendrogram
             tbl2[2,1] = p_clusters
+            tbl2[3,1] = p_dendrogram2
             tbl[1,1] = p_chain
             tbl[1,2] = tbl2
             Winston.display(tbl)
@@ -967,7 +980,7 @@ function sample_num_leaves(model::ModelState,
         pruned_cluster = prune_index - N
         parent_pruned_cluster = parent_prune_index - N
 
-        (new_tree, index_map) = MakeReindexedTree!(new_model.tree, root_index) 
+        (new_tree, index_map) = MakeReindexedTree(new_model.tree, root_index) 
 
     # W = (K, K+1) 
     else
@@ -1015,21 +1028,15 @@ function draw_neighboring_tree(model::ModelState,
     M,S = size(data.reference_counts)
 
     ntree = Tree{Vector{Float64}}()
-    ntree.nodes = Array(TreeNode{Vector{Float64}}, new_N)
+    ntree.nodes = Array(TreeNode{Vector{Float64}}, 2*new_N-1)
  
 
     new_indices = [1:2*new_N-1]
-    new_index = pop!(new_indices)
-    ntree.nodes[new_index] = TreeNode(root.state, new_index )
-    nroot = ntree.nodes[new_index]
-
-    nroot.rho = root.rho
-    nroot.rhot = root.rhot
-    nroot.num_leaves = new_N
 
 
     queue = Array(Tuple,0)
     push!(queue, (root.index, new_N, 0, true))
+
 
     while length(queue) > 0
         cur_index, N_cur, parent_nindex, is_right = shift!(queue)
@@ -1048,7 +1055,6 @@ function draw_neighboring_tree(model::ModelState,
             ntree.nodes[new_index] = TreeNode(cur.state, new_index)
             ntree.nodes[new_index].rhot = cur.rhot
             ntree.nodes[new_index].rho = cur.rho
-
         else
             # new node that differs from given tree
             xi = 1 - 2/(N_cur+1)
@@ -1066,54 +1072,71 @@ function draw_neighboring_tree(model::ModelState,
 
         end
 
+        if N_cur == 1
+            ntree.nodes[new_index].children[1] = Nil()
+            ntree.nodes[new_index].children[2] = Nil()
+        end
+
         ntree.nodes[new_index].parent = parent
         if parent != Nil()
             parent.children[2-is_right] = ntree.nodes[new_index]
         end
 
-        N_n = rand(Binomial(N_cur, p_new))
-        N_cur -= N_n
 
-        if N_n > 0
-            nutd_index = pop!(new_indices)
-            xi = 1 - 2/(N_n+1)
-            nutd = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
-            nu = rand()
-            eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+        if N_cur > 1
 
-            ntree.nodes[nutd_index] = TreeNode(eta, nutd_index)
-            ntree.nodes[nutd_index].rhot = nutd
-            ntree.nodes[nutd_index].rho = nu
+            N_n = rand(Binomial(N_cur-2, p_new))
+            N_cur -= N_n
 
-            ntree.nodes[nutd_index].parent = parent
-            if parent != Nil()
-                parent.children[2-is_right] = ntree.nodes[nutd_index]
+            if N_n > 0
+                nutd_index = pop!(new_indices)
+                xi = 1 - 2/(N_n+1)
+                nutd = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
+                nu = rand()
+                eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+
+                ntree.nodes[nutd_index] = TreeNode(eta, nutd_index)
+                ntree.nodes[nutd_index].rhot = nutd
+                ntree.nodes[nutd_index].rho = nu
+
+                ntree.nodes[nutd_index].parent = parent
+                if parent != Nil()
+                    parent.children[2-is_right] = ntree.nodes[nutd_index]
+                end
+
+                ntree.nodes[nutd_index].children[2] = ntree.nodes[new_index]
+                ntree.nodes[new_index].parent = ntree.nodes[nutd_index]
+                if N_n > 0
+                    push!(queue, (0, N_n, nutd_index, true))
+                end
             end
 
-            ntree.nodes[nutd_index].children[2] = ntree.nodes[new_index]
-            ntree.nodes[new_index].parent = ntree.nodes[nutd_index]
+            N_r = N_cur > 2 ? rand(Binomial(N_cur-2, p_r))+1 : 1
+            N_l = N_cur - N_r
 
-            push!(queue, (0, N_n, nutd_index, true)) 
-        end
+            l = cur.children[2]
+            r = cur.children[1]
 
-        N_r = rand(Binomial(N_cur, p_r))
-        N_l = N_cur - N_r
+            l_index = l == Nil() ? 0 : l.index
+            r_index = r == Nil() ? 0 : r.index
 
-
-        l = cur.children[2]
-        r = cur.children[1]
-
-        if l != Nil() && N_l > 0
-            push!(queue, (l.index, N_l, new_index, false))
-        end
-        if r != Nil() && N_r > 0
-            push!(queue, (r.index, N_r, new_index, true))
+            if N_l > 0
+                push!(queue, (l_index, N_l, new_index, false))
+            end
+            if N_r > 0
+                push!(queue, (r_index, N_r, new_index, true))
+            end
         end
 
     end
- 
-    nroot = FindRoot(ntree,1) 
-    (new_tree, index_map) = MakeReindexedTree!(ntree, nroot.index) 
+
+    nindices = [x.index for x in ntree.nodes]
+
+    nroot = ntree.nodes[2* new_N-1]
+    if nroot.parent != Nil()
+        nroot = nroot.parent
+    end 
+    (new_tree, index_map) = MakeReindexedTree(ntree, nroot.index) 
     new_root = index_map[nroot.index]
 
     new_model = copy(model)
@@ -1124,32 +1147,20 @@ function draw_neighboring_tree(model::ModelState,
     phi = compute_phis(new_model)
     # dummy U set to ones as z_logpdf takes into account
     # the fact that we shouldn't leave clusters empty (but we don't want that here)
-    U = ones(length(model.Z))
+    U = ones(Int64,length(model.Z))
 
     indices = GetLeafToRootOrdering(new_tree, new_root) 
-
+    new_model.Z = ones(Int64, length(model.Z)) + new_N
 
     Z_logpdfs = zeros(new_N-1, M)
     for m = 1:M
         Z_logpdfs[:,m] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi, Temp=Temp) 
     end
 
-    mutations = [1:M]
-
-    # Assign a mutation for each cluster
-    for i = reverse(indices)
-        if i > new_N
-            j = rand(Categorical(exp_normalize(Z_logpdfs[i,mutations])))
-            m = splice!(mutations, j)
-            new_model.Z[m] = i-new_N
- 
-        end
-    end
-
-    # Assign remaining clusters
-    for m = mutations
+    # Assign mutations to clusters
+    for m = 1:M
         i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
-        new_model.Z[m] = i-new_N
+        new_model.Z[m] = i
     end
 
  

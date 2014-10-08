@@ -473,7 +473,8 @@ end
 function GetLeaves{T}(tree::Tree{T},
                       subtree_root::Int)
 
-    if subtree_root <= (length(tree.nodes)+1)/2
+    if tree.nodes[subtree_root].children[1] == Nil() &&
+       tree.nodes[subtree_root].children[2] == Nil()
         return [subtree_root]
     else
         a = Array(Int64,0)
