@@ -20,7 +20,7 @@ gamma = 1.0
 alpha = 1.0
 
 if filename == "CLL077.csv" || filename == "CLL003.csv"
-    init_K = 4
+    init_K = 5
 elseif filename == "CLL006.csv"
     init_K = 5
 end

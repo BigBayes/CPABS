@@ -243,13 +243,12 @@ end
 # Construct a new tree object from a specifed node of an existing tree 
 # (eg after pruning or to obtain a subtree)
 # Can also be used to reindex the nodes (eg after grafting a new subtree in),
-# as long as all node indices are unique (the leaves don't need to have the first N indices, however)
-function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64)
+# as long as all node indices are unique (the leaves don't need to have the first N indices)
+function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64, old_N::Int64)
     tree = Tree{T}()
 
     old_root = FindRoot(old_tree, root_index)
     old_leaves = GetLeaves(old_tree, old_root.index)
-    old_N = length(old_leaves)
 
 
     root_node = old_tree.nodes[root_index]
@@ -388,6 +387,128 @@ function InsertIndexIntoTree!{T}(tree::Tree{T},
 
     UpdateDescendantCounts!(tree, parent)
     UpdateSubtreeAncestorCounts!(tree, parent)
+    nothing
+end
+
+# Remove index from tree, promoting the right child
+function RemoveAndPromoteRight!{T}(tree::Tree{T},
+                                   removal_index::Int)
+
+    self = tree.nodes[removal_index]
+    parent = self.parent
+
+
+    right_child = self.children[1]
+    left_child = self.children[2]
+
+    if parent != Nil()
+        self_direction = find(parent.children .== self)[1]
+        parent.children[self_direction] = right_child
+        right_child.parent = parent
+    else
+        right_child.parent = Nil()
+    end
+
+    right_left_child = right_child.children[2]
+
+    rl_cur = right_left_child
+    while rl_cur != Nil() && rl_cur.children[2] != Nil()
+        rl_cur = rl_cur.children[2]
+    end 
+
+    if rl_cur != Nil()
+        rl_cur = rl_cur.parent
+        rl_cur.children[2].parent = Nil() #remove this leaf node
+        rl_cur.children[2] = left_child
+        left_child.parent = rl_cur    
+    else
+        if parent == Nil()
+            left_child.parent = Nil()
+        else
+            parent.children[self_direction] = left_child
+            left_child.parent = parent
+        end
+    end
+
+    UpdateDescendantCounts!(tree, left_child.parent)
+    UpdateSubtreeAncestorCounts!(tree, left_child.parent)
+    nothing
+end
+
+# As there are multiples trees after which using RemoveAndPromoteRight! will
+# result in the same tree, there are multiple ways in which we may build a 
+# tree by inserting a node at a particular location.  
+# That is to remove node "n," and promote "r," we need to move node "rl" above "l"
+#            
+#
+#          ...                    ...          
+#             \                      \
+#              n                      r
+#            /   \       =>         /   \
+#          l       r              rl     o
+#         / \     / \            / \    
+#        o   o   rl  o          l   o   
+#               / \            / \  
+#              o   o          o   o
+#
+# where one of the leaves has been deleted
+# However, we may have arrived at the same tree by removing "n" from these trees
+#                                     ...
+#                                        \
+#            ...                          n          
+#               \                        / \
+#                n                      o   r
+#              /   \                      /   \
+#            rl     r                   rl     o
+#           / \    / \                 / \    
+#          l   o  o   o               l   o   
+#         / \                        / \  
+#        o   o                      o   o
+#        
+# So in order to map back to all possible trees that can result in the current tree by removing
+# the newly inserted node, we have to MOVE some subset of the internal nodes on the path to the
+# leftmost leaf of the right child of the newly inserted node TO the left subtree of the newly 
+# inserted node. N_move determines the number that are moved.   
+#
+# Assumes that tree.nodes[insert_index] has a left child that is not Nil() 
+function InsertAndDemoteLeft!{T}(tree::Tree{T},
+                                 insert_index::Int,
+                                 location_index::Int,
+                                 N_move::Int)
+
+    self = tree.nodes[insert_index]
+    left_child = self.children[2]
+    
+    @assert left_child != Nil()
+ 
+    right_child = tree.nodes[location_index]
+    right_left_child = right_child.children[2]
+    rl_prune = right_left_child
+
+    if N_move > 0
+        N_count = N_move
+        while N_count > 0
+            N_count -= 1
+            rl_prune = rl_prune.children[2]        
+        end
+
+        @assert rl_prune != Nil()
+
+        # remove the relevent subtree
+        rl_prune_child = rl_prune.children[2]
+        rl_prune_child.parent = right_child
+        right_child.children[2] = rl_prune_child
+
+        # attach it to the left of self
+        left_child.parent = rl_prune
+        rl_prune.children[2] = left_child
+        right_left_child.parent = self
+        self.children[2] = right_left_child
+    end
+
+    self.children[1] = right_child
+    self.parent = right_child.parent
+    right_child.parent = self 
     nothing
 end
 

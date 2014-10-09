@@ -102,7 +102,7 @@ function mcmc(data::DataState,
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
-            new_model = draw_neighboring_tree(model, model_spec, data, N+1)
+            new_model = draw_neighboring_tree_remove_insert(model, model_spec, data, N-1)
             ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
             new_u = zeros(Int64, 2(N+1)-1)
             for i=1:length(new_model.Z)
@@ -111,6 +111,12 @@ function mcmc(data::DataState,
             end 
             p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
+            new_prior = prior(new_model, model_spec)
+            new_LL = likelihood(new_model, model_spec, data)
+            println("new Z: $(new_model.Z)")
+            println("new_prior: $new_prior")
+            println("new_LL: $new_LL")
+            println("old_LL: $tree_LL")
 
             if iter > burnin_iterations
                 c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
@@ -1024,6 +1030,8 @@ function draw_neighboring_tree(model::ModelState,
                                Temp::Float64 = 1.0)
     tree = model.tree
     root = FindRoot(tree,1)
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
     
     M,S = size(data.reference_counts)
 
@@ -1049,8 +1057,11 @@ function draw_neighboring_tree(model::ModelState,
 
 
             p_new = 1-cur.rhot
-            p_r = cur.rho 
-            p_l = (1-cur.rho)
+
+
+            p_r = cur.rho^tree_temp 
+            p_l = (1-cur.rho)^tree_temp
+
 
             ntree.nodes[new_index] = TreeNode(cur.state, new_index)
             ntree.nodes[new_index].rhot = cur.rhot
@@ -1085,7 +1096,7 @@ function draw_neighboring_tree(model::ModelState,
 
         if N_cur > 1
 
-            N_n = rand(Binomial(N_cur-2, p_new))
+            N_n = 0*rand(Binomial(N_cur-2, p_new))
             N_cur -= N_n
 
             if N_n > 0
@@ -1136,7 +1147,7 @@ function draw_neighboring_tree(model::ModelState,
     if nroot.parent != Nil()
         nroot = nroot.parent
     end 
-    (new_tree, index_map) = MakeReindexedTree(ntree, nroot.index) 
+    (new_tree, index_map) = MakeReindexedTree(ntree, nroot.index, N) 
     new_root = index_map[nroot.index]
 
     new_model = copy(model)
@@ -1160,12 +1171,125 @@ function draw_neighboring_tree(model::ModelState,
     # Assign mutations to clusters
     for m = 1:M
         i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
-        new_model.Z[m] = i
+        new_model.Z[m] = i+new_N
     end
 
  
     return new_model 
 end
+
+
+function draw_neighboring_tree_remove_insert(model::ModelState,
+                                             model_spec::ModelSpecification,
+                                             data::DataState,
+                                             new_N::Int64;
+                                             Temp::Float64 = 1.0)
+    tree = model.tree
+    root = FindRoot(tree,1)
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    @assert abs(new_N - N) == 1
+    M,S = size(data.reference_counts)
+
+    if new_N > N
+        grafted_leaf_index = 2N
+        grafted_parent_index = 2N+1
+
+        grafted_leaf = TreeNode(zeros(S), grafted_leaf_index)
+       
+        nutd = 0.5 < rand() ? 1.0 : rand() 
+        nu = rand()
+        eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+        grafted_parent = TreeNode(eta, grafted_parent_index)
+        grafted_parent.rhot = nutd
+        grafted_parent.rho = nu
+        grafted_parent.children[1] = grafted_leaf
+        grafted_parent.children[2] = Nil()
+        grafted_parent.parent = Nil()
+        grafted_leaf.children[1] = Nil()
+        grafted_leaf.children[2] = Nil()
+        grafted_leaf.parent = grafted_parent
+
+        new_model = copy(model)
+        push!(new_model.tree.nodes, grafted_leaf)
+        push!(new_model.tree.nodes, grafted_parent)
+
+        #pick a random right child
+        insert_location = rand(1:2N-1)
+        while true
+            cur = tree.nodes[insert_location]
+            parent = cur.parent
+            if parent.children[1] == cur
+                break
+            end 
+            insert_location = rand(1:2N-1)
+        end
+
+        temp_node = tree.nodes[insert_location]        
+
+        left_path_length = 0
+        while temp_node != Nil()
+            temp_node = temp_node.children[2]
+            left_path_length += 1
+        end
+
+        InsertAndDemoteLeft!(new_model.tree, grafted_parent_index, insert_location, rand(1:left_path_length))
+
+        new_root = FindRoot(new_model.tree, 1)
+        new_tree, index_map = MakeReindexedTree(new_model.tree, new_root.index, N)
+        new_model.tree = new_tree
+    else
+        removal_index = rand(N+1:2N-1)
+
+        new_model = copy(model)
+        println("removal_index: $removal_index")
+        println("$([x.index for x in tree.nodes[removal_index].children])")
+        RemoveAndPromoteRight!(new_model.tree, removal_index)
+
+
+        existing_index = N + find([N+1:2N-1] .!= removal_index)[1]
+        println("N: $N")
+        println("existing index: $existing_index")
+        new_root = FindRoot(new_model.tree, existing_index)
+        new_tree, index_map = MakeReindexedTree(new_model.tree, new_root.index, N)
+        new_model.tree = new_tree
+    end
+ 
+            ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
+            new_u = zeros(Int64, 2(N+1)-1)
+            for i=1:length(new_model.Z)
+                x = new_model.Z[i]
+                new_u[x] += 1
+            end 
+            p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+
+        display(p_dendrogram2)
+
+    times = compute_times(new_model)
+    Tau = compute_taus(new_model)
+    phi = compute_phis(new_model)
+    # dummy U set to ones as z_logpdf takes into account
+    # the fact that we shouldn't leave clusters empty (but we don't want that here)
+    U = ones(Int64,length(model.Z))
+
+    indices = GetLeafToRootOrdering(new_tree, index_map[new_root.index]) 
+    new_model.Z = ones(Int64, length(model.Z)) + new_N
+
+    Z_logpdfs = zeros(new_N-1, M)
+    for m = 1:M
+        Z_logpdfs[:,m] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi, Temp=Temp) 
+    end
+
+    # Assign mutations to clusters
+    for m = 1:M
+        i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
+        new_model.Z[m] = i+new_N
+    end
+
+ 
+    return new_model 
+end
+
 
 # Integrate exp(f) in a numerically stable way
 function int_exp(f::Function, a::Float64, b::Float64)
