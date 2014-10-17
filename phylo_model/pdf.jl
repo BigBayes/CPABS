@@ -382,6 +382,11 @@ function psi_infsites_logpdf(model::ModelState,
             if j > N
                 L_new = L[j] * pruned_subtree_mu_prop^gam
                 subtree_probs += U[j-N]*log(L_new)
+                if isnan(subtree_probs)
+                    println("U[$j]: $(U[j-N]), L_new: $L_new")
+                    println("pruned_subtree_mu_prop: $pruned_subtree_mu_prop")
+                    println("L[$j]: $(L[j])")
+                end
             end
         end
 
@@ -403,6 +408,9 @@ function psi_infsites_logpdf(model::ModelState,
                 L_new_total += L_new
                 # need to compute the difference here as these terms aren't the same for each i
                 subtree_probs += U[j-N]*(log(L_new) - log(L[j]))
+                if isnan(subtree_probs)
+                    println("U[$j]: $(U[j-N]), L_new: $L_new, L[j]: $(L[j])")
+                end
             end
         end 
 
@@ -662,9 +670,29 @@ function prior_tree(tree::Tree,
         rhot = pruned_parent.rhot
         cur_rhot_prob = rhot == 1.0 ? log(p_s) : log(1-p_s) + log(p_s) + (p_s-1)*log(rhot) 
 
+
         prob_diffs[i] = cur_prob + parent_rhot_prob + cur_rhot_prob +
                         (num_leaves - 1) * log(pruned_mu_prop) -
                         log(total_leaves) - log(total_leaves-1) 
+
+        if isnan(prob_diffs[i])
+
+            if isnan(cur_rhot_prob)
+                println("rhot: $rhot")
+                println("p_s: $p_s")
+
+            elseif isnan(parent_rhot_prob)
+                println("parent_rhot_prob")
+            elseif isnan(cur_prob)
+                println("cur_prob")
+            else
+                println("pruned_mu_prop: $pruned_mu_prop")
+                println("cur_prob: $cur_prob")
+                println("parent_rhot_prob: $parent_rhot_prob")
+                println("total_leaves: $total_leaves")
+                println("num_leaves: $num_leaves")
+            end
+        end
 #        prob_above[i] = num_leaves * log(pruned_mu_prop)
 #        prob_below[i] = pruned_leaves * log(mu_1[i])
 
@@ -1086,6 +1114,230 @@ function z_logpdf(model::ModelState,
 
     end
     log_pdf/Temp 
+end
+
+
+###################################
+###### kernel function for trees ##
+###################################
+
+function tree_kernel_sample(model::ModelState,
+                            model_spec::ModelSpecification,
+                            data::DataState,
+                            parent_prune_index::Int64;
+                            eta_Temp::Float64 = 1.0,
+                            nu_Temp::Float64 = 1.0)
+
+
+    new_model = copy(model)
+
+    tree = new_model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    
+    alpha = new_model.alpha
+    Z = new_model.Z
+
+    # Perturb eta
+    for i = N+1:2N-1
+        cur_eta = tree.nodes[i].state
+        for s = 1:length(cur_eta)
+            cur_eta[s] = rand(Beta( cur_eta[s]/eta_Temp, (1-cur_eta[s])/eta_Temp))
+        end
+
+    end
+
+    # Perturb nu/nutd
+    for i = N+1:2N-1
+        nu = tree.nodes[i].rho
+        nutd = tree.nodes[i].rhot
+
+        nutd = nutd == 1.0 ? 1.0 : rand(Beta( nutd/nu_Temp+1.0, (1-nutd)/nu_Temp+1.0))
+        nu = rand(Beta(nu/nu_Temp+1.0, (1-nu)/nu_Temp+1.0))
+
+        tree.nodes[i].rho = nu
+        tree.nodes[i].rhot = nutd
+
+    end
+
+    # Prune and graft parent_prune_index
+    parent = tree.nodes[parent_prune_index]
+    prune_index = parent.children[1].index
+
+
+
+    PruneIndexFromTree!(tree, prune_index)
+    
+    subtree_indices = GetSubtreeIndicies(tree, prune_index)
+    i = 1
+    while in(i,subtree_indices)
+        i += 1
+    end
+    root = FindRoot(tree, i)
+    path = GetLeafToRootOrdering(tree, root.index)
+
+    (priors, pstates) = psi_infsites_logpdf(new_model, data, prune_index, path)
+    (likelihoods, lstates) = psi_observation_logpdf(new_model, model_spec, data, prune_index, path)
+
+    println("parent_prune_index: $parent_prune_index")
+    println("prune_index: $prune_index")
+    logprobs = priors + likelihoods
+    println("priors: $priors")
+    println("likelihoods: $likelihoods")
+    probs = exp_normalize(logprobs)
+
+    state_index = rand(Categorical(probs))
+    graft_index = pstates[state_index]
+
+    InsertIndexIntoTree!(tree, prune_index, graft_index)
+
+    # Gibbs sample assignments
+    sample_assignments(new_model, model_spec, data, 1)
+
+    return new_model
+
+end
+
+function tree_kernel_logpdf(model::ModelState,
+                            model0::ModelState,
+                            model_spec::ModelSpecification,
+                            data::DataState,
+                            parent_prune_index::Int64;
+                            eta_Temp::Float64 = 1.0,
+                            nu_Temp::Float64 = 1.0,
+                            nutd_aug = nothing,
+                            return_eta_grad::Bool = false)
+
+    tree = model.tree
+    tree0 = model0.tree
+
+    N::Int = (length(tree.nodes) + 1) / 2
+    
+    alpha = model.alpha
+    Z = model.Z
+    M,S = size(data.reference_counts)
+
+    log_pdf = 0.0
+    gradient = zeros(N-1,S)
+
+    # Prob of eta perturbation
+    for i = N+1:2N-1
+        cur_eta0 = tree0.nodes[i].state
+        cur_eta = tree.nodes[i].state
+        for s = 1:length(cur_eta)
+            log_pdf += logpdf(Beta( cur_eta0[s]/eta_Temp, (1-cur_eta0[s])/eta_Temp), cur_eta[s])
+        end
+
+        if return_eta_grad
+            gradient[i-N,s] = (cur_eta0[s]/eta_Temp)/cur_eta[s] - ((1-cur_eta0[s])/eta_Temp)/(1-cur_eta[s])
+        end
+
+
+    end
+
+    # Prob of nu/nutd perturbation
+    if nutd_aug != nothing
+        for i = N+1:2N-1
+            nu0 = tree0.nodes[i].rho
+            nutd0 = tree0.nodes[i].rhot
+
+            nu = tree.nodes[i].rho
+            nutd = tree.nodes[i].rhot
+            nutd_a = nutd_aug[i-N]
+ 
+            log_pdf += logpdf(Beta(nu0/nu_Temp+1.0, (1-nu0)/nu_Temp)+1.0, nu) 
+            log_pdf += nutd0 == 1.0 ? logpdf(Uniform(0,1), nutd_a) : logpdf(Beta(nutd0/nu_Temp+1.0, (1-nutd0)/nu_Temp+1.0), nutd_a)
+        end
+    end
+
+    # Prob of prune/graft
+    parent = tree.nodes[parent_prune_index]
+    prune = parent.children[1]
+    prune_index = prune.index
+    
+    parent0 = tree0.nodes[parent_prune_index]
+    prune0 = parent0.children[1]
+    prune0_index = prune0.index
+
+    C = zeros(2N-1,2)
+    C0 = zeros(2N-1,2)
+
+    for i = N+1:2N-1
+        C[i,1] = tree.nodes[i].children[1].index
+        C[i,2] = tree.nodes[i].children[2].index
+
+        C0[i,1] = tree0.nodes[i].children[1].index
+        C0[i,2] = tree0.nodes[i].children[2].index
+
+        # Impossible to reach model from model0 by pruning and grafting parent_prune_index
+        for j = 1:2
+            if C[i,j] != C0[i,j]
+                if C[i,j] != parent_prune_index && C0[i,j] != parent_prune_index && i != parent_prune_index
+                    return -Inf
+                end 
+            end
+        end
+    end
+
+    # right child of the parent pruned index should be unchanged if we really have pruned it and not something else
+    if C[parent_prune_index, 1] != C0[parent_prune_index,1]
+        return -Inf
+    end
+
+    graft_index = C[parent_prune_index,2]
+
+    temp_model = copy(model0)
+    PruneIndexFromTree!(temp_model.tree, prune_index)
+    subtree_indices = GetSubtreeIndicies(temp_model.tree, prune_index)
+    i = 1
+    while in(i,subtree_indices)
+        i += 1
+    end
+    root = FindRoot(temp_model.tree, i)
+    path = GetLeafToRootOrdering(temp_model.tree, root.index)
+  
+    (priors, pstates) = psi_infsites_logpdf(temp_model, data, prune_index, path)
+    (likelihoods, lstates) = psi_observation_logpdf(temp_model, model_spec, data, prune_index, path)
+
+    logprobs = priors + likelihoods
+    probs = exp_normalize(logprobs)
+
+    pdf_graft_index = probs[find(pstates .== graft_index)[1]]
+    
+    log_pdf += log(pdf_graft_index)
+
+    # Prob of assignment
+
+    t = compute_times(model)
+    Tau = compute_taus(model)
+    phi = compute_phis(model)
+
+    temp_model = copy(model0)
+
+    Z = temp_model.Z
+
+    U = zeros(Int64, N-1)
+    for i=1:length(Z)
+        U[Z[i]-N] += 1
+    end 
+    U = U .- 1
+
+    for i = 1:M
+        cur_z = Z[i]-N
+        z_probs = z_logpdf(temp_model, model_spec, data, i, U, t, Tau, phi)
+        z_probs = exp_normalize(z_probs)
+
+        new_z = model.Z[i]-N 
+        log_pdf += log(z_probs[new_z])
+        U[cur_z] -= 1
+        U[new_z] += 1
+        Z[i] = new_z+N
+    end
+
+    if return_eta_grad
+        return (log_pdf, gradient'[:])
+    else
+        return log_pdf
+    end
 end
 
 ###################################

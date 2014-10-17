@@ -102,7 +102,23 @@ function mcmc(data::DataState,
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
-            new_model = draw_neighboring_tree_remove_insert(model, model_spec, data, N-1)
+            parent_prune_index = rand(N+1:2N-1)
+            grandparent = tree.nodes[parent_prune_index].parent
+
+
+            while grandparent == Nil()
+                parent_prune_index = rand(N+1:2N-1)
+                grandparent = tree.nodes[parent_prune_index].parent
+            end
+
+
+            #new_model = draw_neighboring_tree(model, model_spec, data, N)
+            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=0.0000001)
+
+            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=.0000001, nutd_aug=nothing)
+
+
+
             ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
             new_u = zeros(Int64, 2(N+1)-1)
             for i=1:length(new_model.Z)
@@ -117,7 +133,7 @@ function mcmc(data::DataState,
             println("new_prior: $new_prior")
             println("new_LL: $new_LL")
             println("old_LL: $tree_LL")
-
+            println("kernel_logpdf: $kernel_logpdf")
             if iter > burnin_iterations
                 c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
             else
@@ -973,50 +989,19 @@ function sample_num_leaves(model::ModelState,
    
     # W = (K-1, K) 
     if rand() < 0.5
-        new_model = copy(model)
-       
-        parent_prune_index = rand(N+1:2N-1) 
-        parent = tree.nodes[parent_prune_index]
-        prune_index = parent.children[1].index
+        model_star = draw_neighboring_tree(model, model_spec, data, N-1)
 
-
-        PruneIndexFromTree!(new_model.tree, prune_index)
-
-        # clusters being merged        
-        pruned_cluster = prune_index - N
-        parent_pruned_cluster = parent_prune_index - N
-
-        (new_tree, index_map) = MakeReindexedTree(new_model.tree, root_index) 
+        for i = 1:num_iterations
+            mcmc_sweep(model_star, model_spec, data)
+        end 
 
     # W = (K, K+1) 
     else
-        new_model = copy(model)
+        model_star = draw_neighboring_tree(model, model_spec, data, N+1)
 
-        parent_graft_index = rand(N+1:2N-1) 
-        parent = tree.nodes[parent_graft_index]
-        graft_index = parent.children[1].index
-
-        # cluster that is being split
-        grafted_cluster = graft_index - N
-
-        ntree = new_model.tree 
-
-        nu = rand()
-        N_g = tree.nodes[graft_index].num_leaves + 1
-        xi = 1 - 2/(N_g+1)
-        rhot = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
-        eta = rand(Beta(alpha*rho+1, alpha*(1-rho)+1), S)
-
-        new_leaf_node = TreeNode(zeros(S), 2N)
-        new_internal_node = TreeNode(eta, 2N+1)
-        new_internal_node.children[1] = new_leaf_node
-        new_leaf_node.parent = new_internal_node
-        push!(ntree.nodes, new_leaf_node)
-        push!(ntree.nodes, new_internal_node)
-
-        InsertIndexIntoTree!(ntree, 2N, graft_index)
-        new_tree, index_map = MakeReindexedTree(ntree, root_index)
-        new_model.tree = new_tree
+        for i = 1:num_iterations
+            mcmc_sweep(model_star, model_spec, data)
+        end 
 
     end
 
@@ -1059,8 +1044,8 @@ function draw_neighboring_tree(model::ModelState,
             p_new = 1-cur.rhot
 
 
-            p_r = cur.rho^tree_temp 
-            p_l = (1-cur.rho)^tree_temp
+            p_r = cur.rho
+            p_l = (1-cur.rho)
 
 
             ntree.nodes[new_index] = TreeNode(cur.state, new_index)

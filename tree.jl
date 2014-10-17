@@ -357,7 +357,9 @@ function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
         sibling = parent.children[sibling_direction]
 
         sibling.parent = Nil()
-        UpdateDescendantCounts!(tree, sibling)
+        if sibling.children[1] != Nil() 
+            UpdateDescendantCounts!(tree, sibling)
+        end
         UpdateSubtreeAncestorCounts!(tree, sibling)
         UpdateSubtreeAncestorCounts!(tree, parent)
     end
