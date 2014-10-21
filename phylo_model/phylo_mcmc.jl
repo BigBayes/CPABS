@@ -24,33 +24,25 @@ function mcmc(data::DataState,
               init_N::Int64,
               model_spec::ModelSpecification,
               iterations::Int64,
-              burnin_iterations::Int64)
+              burnin_iterations::Int64;
+              jump_lag=100,
+              jump_scan_length=100,
+              eta_Temp=1.0)
 
     # number of leaves is the number of split points plus one
     N = init_K+1
 
     (M,S) = size(data.reference_counts)
-    eta = [rand(S) for i = 1:2N-1]
-    tree = Tree(eta)
 
-    InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
+    model = draw_random_tree(N, M, S, lambda, gam, alpha)
+    tree = model.tree
+    Z = model.Z
 
-
-    # initial root node must have nutd < 1.0
-    root = FindRoot(tree,1)
-    tree.nodes[root.index].rhot = 0.9
-
-
-    Z = rand(1:N-1, M) + N
-    # choose one mutation at random for each cluster to ensure they are nonempty
-    perm = randperm(M)
-    for k = 1:N-1
-        Z[perm[k]] = k + N
-    end
-
-
-    model = ModelState(lambda,gam,alpha,tree,Z)
-
+    global hmc_accepts = 0
+    global hmc_count = 0
+    global ref_accepts = 0
+    global ref_count = 0
+    global update_accept_counts = true
 
     trainLLs = Float64[]
     Ks = Int[]
@@ -90,6 +82,13 @@ function mcmc(data::DataState,
 
         mcmc_sweep(model, model_spec, data, Temp=Temp)
 
+        if iter > burnin_iterations && mod(iter, jump_lag) == 0 
+            model = sample_num_leaves(model, model_spec, data, jump_scan_length, 0, eta_Temp=eta_Temp)
+            tree = model.tree
+            Z = model.Z
+            N = ifloor((length(tree.nodes)+1) / 2)
+        end
+
         if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
 
@@ -113,9 +112,9 @@ function mcmc(data::DataState,
 
 
             #new_model = draw_neighboring_tree(model, model_spec, data, N)
-            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=0.0000001)
+            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
 
-            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=.0000001, nutd_aug=nothing)
+            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
 
 
 
@@ -151,14 +150,14 @@ function mcmc(data::DataState,
             #println("$cluster_names")
             phi = compute_phis(model)
             for i = 1:length(cluster_names)
-#                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Cluster $(i+N): $(cluster_names[i])", halign="left" ) 
+                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Cluster $(i+N): $(cluster_names[i])", halign="left" ) 
 #                add(p_clusters, pl)
-                eta = model.tree.nodes[i+N].state
-                eta_string = @sprintf("%0.2f",eta[1])
-                for k = 2:length(eta)
-                    eta_string = "$eta_string, $(@sprintf("%0.2f",eta[k]))"
-                end
-                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Eta $(i+N): $eta_string", size=0.5, halign="left" ) 
+#                eta = model.tree.nodes[i+N].state
+#                eta_string = @sprintf("%0.2f",eta[1])
+#                for k = 2:length(eta)
+#                    eta_string = "$eta_string, $(@sprintf("%0.2f",eta[k]))"
+#                end
+#                pl = Winston.DataLabel(-0.9, 1.0-0.5*((i-1)/length(cluster_names)), "Eta $(i+N): $eta_string", size=0.5, halign="left" ) 
                 add(p_clusters, pl)
 
                 phi_i = phi[i+N,:]
@@ -199,52 +198,126 @@ function mcmc(data::DataState,
     end
 end
 
+# Not quite the same as a draw from the prior, as we don't let nu-tilde of the root be 1.0
+function draw_random_tree(N::Int64, M::Int64, S::Int64, 
+                          lambda::Float64, gam::Float64, alpha::Float64)
+    eta = [rand(S) for i = 1:2N-1]
+    tree = Tree(eta)
+
+    InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
+
+    for i = N+1:2N-1
+        nu = tree.nodes[i].rho
+        eta_i = rand(Beta( alpha*nu+1, alpha*(1-nu)+1), S)
+        tree.nodes[i].state = eta_i
+
+        N_leaves = tree.nodes[i].num_leaves
+
+        p_split = 1 - 2/(N_leaves+1)
+
+        if rand() < p_split
+            tree.nodes[i].rhot = 1.0
+        else
+            tree.nodes[i].rhot = rand(Beta(1, p_split))
+        end
+    end
+
+    # initial root node must have nutd < 1.0
+    root = FindRoot(tree,1)
+    tree.nodes[root.index].rhot = rand(Beta(1,1-2/(N+1)))
+
+
+    Z = zeros(M) #rand(1:N-1, M) + N
+    # choose one mutation at random for each cluster to ensure they are nonempty
+    perm = randperm(M)
+    for k = 1:N-1
+        Z[perm[k]] = k + N
+    end
+    remaining_mutations = perm[N:end]
+
+    model = ModelState(lambda, gam, alpha, tree, Z)
+    times = compute_times(model)
+    Tau = compute_taus(model)
+
+    branch_times = zeros(N-1)
+
+    for i = N+1:2N-1
+        tau_t = Tau[i] == 0 ? 1.0 : times[Tau[i]]  
+        branch_times[i-N] = tau_t - times[i]
+    end 
+
+    branch_times /= sum(branch_times)
+    for m = remaining_mutations
+        k = rand(Categorical(branch_times))
+        Z[m] = k + N
+    end
+    model.Z = Z
+    return model
+end
 
 function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState;
-                    Temp::Float64 = 1.0)
+                    Temp::Float64 = 1.0,
+                    verbose::Bool=true)
 
     tree = model.tree
 
-    tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, data)
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    if verbose
+        tree_prior = prior(model,model_spec) 
+        tree_LL = likelihood(model, model_spec, data)
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    end
 
     psi_time = time()
-    sample_psi(model, model_spec, data, Temp=Temp)
+    sample_psi(model, model_spec, data, Temp=Temp, verbose=verbose)
     psi_time = time() - psi_time
 
-    tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, data)
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    if verbose
+        tree_prior = prior(model,model_spec) 
+        tree_LL = likelihood(model, model_spec, data)
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    end
 
     slice_iterations = 5
     nu_time = time()
-    sample_nu_nutd(model, model_spec, slice_iterations)
+    sample_nu_nutd(model, model_spec, slice_iterations, verbose=verbose)
     nu_time = time() - nu_time
-    tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, data)
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+    if verbose
+        tree_prior = prior(model,model_spec) 
+        tree_LL = likelihood(model, model_spec, data)
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    end
 
     hmc_iterations = 5
     eta_time = time()
     sample_eta(model, model_spec, data, hmc_iterations, Temp=Temp)
     eta_time = time() - eta_time
 
-    tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, data)
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    if isdefined(:update_accept_counts) && update_accept_counts && verbose
+        println("HMC accept rate: $hmc_accepts/$hmc_count")
+        println("Refractive accept rate: $ref_accepts/$ref_count")
+    end
+
+    if verbose
+        tree_prior = prior(model,model_spec) 
+        tree_LL = likelihood(model, model_spec, data)
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    end
 
     Z_iterations = 1
     Z_time = time()
     sample_assignments(model, model_spec, data, Z_iterations, Temp=Temp)
     Z_time = time() - Z_time
-    tree_prior = prior(model,model_spec) 
-    tree_LL = likelihood(model, model_spec, data)
-    println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
-    println("MCMC Timings (psi, nu, eta, Z) = ", (psi_time, nu_time, eta_time, Z_time))
+    if verbose
+        tree_prior = prior(model,model_spec) 
+        tree_LL = likelihood(model, model_spec, data)
+        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+
+        println("MCMC Timings (psi, nu, eta, Z) = ", (psi_time, nu_time, eta_time, Z_time))
+    end
 end
 
 
@@ -252,9 +325,12 @@ end
 # nutd_l = l.rhot 
 function sample_nu_nutd(model::ModelState,
                         model_spec::ModelSpecification,
-                        slice_iterations::Int)
+                        slice_iterations::Int;
+                        verbose::Bool=true)
 
-    println("Sample nu, nu-tilde")
+    if verbose
+        println("Sample nu, nu-tilde")
+    end
     tree = model.tree
     gam = model.gamma
     lambda = model.lambda
@@ -651,16 +727,121 @@ function update_nu_nutd_constants!(i, update_set, gam, ancestors, Tau, Pki, P, A
     end
 end
 
+function sample_nu_nutd_from_f(model::ModelState,
+                               model_spec::ModelSpecification,
+                               data::DataState,
+                               slice_iterations::Int,
+                               f::Function)
+
+    tree = model.tree
+    gam = model.gamma
+    lambda = model.lambda
+    alpha = model.alpha
+    Z = model.Z
+
+    N::Int = (length(tree.nodes)+1)/2
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    u = zeros(2N-1)
+    U_i = zeros(2N-1)
+
+    Tau = Array(Node, 2N-1)
+    P = Array(Array{Node}, 2N-1)
+    #Self inclusive
+    ancestors = Array(Array{Node}, 2N-1)
+    K = zeros(2N-1, 2N-1)
+
+
+
+    for i = reverse(indices)
+        if i > N
+            cur = tree.nodes[i]
+            left_child = tree.nodes[i].children[2]
+            right_child = tree.nodes[i].children[1]
+            l = left_child.index
+            r = right_child.index
+
+            eta = cur.state
+
+            N_l = left_child.num_leaves
+            N_r = right_child.num_leaves
+            N_p = cur.num_leaves
+            
+            nu_p = 1.0
+            if i != root.index
+                parent = cur.parent
+                self_direction = find(parent.children .== cur)[1]
+                nu_p = self_direction == 1 ? parent.rho : 1-parent.rho 
+            end
+
+            rhot = cur.rhot
+            nutd_l = left_child.rhot
+            nutd_r = right_child.rhot
+ 
+            nu_r = cur.rho
+            nu_l = 1-cur.rho
+
+
+            if l > N
+
+                # Sample nutd_l
+                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=l, sample_nutd=false)  
+
+                nutd_l = nutd_l == 1.0 ? rand(Uniform(0,1)) : nutd_l
+                (nutd_u, f_nutd) = slice_sampler(nutd_l, g, 0.1, 10, 0.0, 1.0)
+
+                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=l, sample_nutd=true)
+            end
+
+            if r > N
+                # Sample nutd_r
+                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=r, sample_nutd=false)  
+
+                nutd_r = nutd_r == 1.0 ? rand(Uniform(0,1)) : nutd_r
+                (nutd_u, f_nutd) = slice_sampler(nutd_r, g, 0.1, 10, 0.0, 1.0)
+
+                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=r, sample_nutd=true)
+            end
+
+            # Sample nu_r = 1-nu_l
+
+            g = x -> f(model, model_spec, data, nu=x, nu_index=i) 
+ 
+            (nu_r, f_nu) = slice_sampler(nu_r, g, 0.1, 10, 0.0, 1.0)
+
+            cur.rho = nu_r
+
+            if i == root.index
+
+                nutd_p = cur.rhot 
+                nutd_p = nutd_p == 1.0 ? rand(Uniform(0,1)) : nutd_p
+
+                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=i, sample_nutd=false)  
+            
+                (nutd_u, f_nutd) = slice_sampler(nutd_p, g, 0.1, 10, 0.0, 1.0)
+
+                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=i, sample_nutd=true)
+            end
+
+
+        end
+    end
+
+end
 function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState;
-                    Temp::Float64 = 1.0)
+                    Temp::Float64 = 1.0,
+                    verbose::Bool=true)
 
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
 
-
-    println("psi: ")
+    if verbose
+        println("psi: ")
+    end
     for parent_prune_index = N+1:2N-1
          
         parent = tree.nodes[parent_prune_index]
@@ -671,7 +852,7 @@ function sample_psi(model::ModelState,
             old_LL = likelihood(model, model_spec, data)
         end
 
-        if mod(parent_prune_index-N+1,ceil(N/10)) == 0
+        if mod(parent_prune_index-N+1,ceil(N/10)) == 0 && verbose
             percent = ceil((parent_prune_index-N+1)/ceil(N/10))*10
             println(" ",percent , "% ")
         end
@@ -755,8 +936,152 @@ function sample_psi(model::ModelState,
 
         InsertIndexIntoTree!(model.tree, prune_index, graft_index) 
 
-        println("graft_index: $graft_index")
-        println("original_sibling_index: $(original_sibling.index)")
+
+        if model_spec.debug 
+            println("graft_index: $graft_index")
+            println("original_sibling_index: $(original_sibling.index)")
+            println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
+            println("Num Leaves pruned: ", length(GetLeaves(tree, prune_index)), " Num leaves remaining: ", length(GetLeaves(tree, gp)) )
+            println("original_index,insert_index,parent,root: ", original_sibling.index, ",", pstates[state_index][1], ",", parent.index, ",", root.index)
+#            println("logprobs: ", logprobs)
+#            println("graft indices: ", graft_indices)
+
+            println("graftpoint_features: $graftpoint_features")
+            println("parent_features: $parent_features")
+
+            subtree_indices = GetLeafToRootOrdering(tree, prune_index)
+            grafttree_indices = GetLeafToRootOrdering(tree, graft_index)
+            ancestor_indices = GetPath(tree, tree.nodes[prune_index].parent.index)
+
+            count_features = x -> sum([tree.nodes[i].state for i in x])
+            get_features = x -> [tree.nodes[i].state for i in x]
+
+            subtree_num = count_features(subtree_indices)
+            grafttree_num = count_features(grafttree_indices)
+            ancestor_num = count_features(ancestor_indices)
+           
+            println("subtree num_features: $subtree_num") 
+            println("grafttree num_features: $grafttree_num") 
+            println("ancestor num_features: $ancestor_num") 
+            println("original sibling under graftpoint?: $(original_sibling.index in grafttree_indices)")
+
+            println("ancestors: $ancestor_indices")
+            println("ancestor_features: $(get_features(ancestor_indices))")
+
+            println("local_LL: $(likelihoods[state_index])")
+            println("local_prior: $(priors[state_index])")
+            println("old_local_LL: $(likelihoods[A])")
+            println("old_local_prior: $(priors[A])")
+
+            println("prob: $(probs[state_index])")
+            println("old_prob: $(probs[A])")
+
+
+            tree_prior = prior(model, model_spec) 
+            tree_LL = likelihood(model, model_spec, data)
+            println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL, ",", test_LL)
+
+            full_diff = tree_LL + tree_prior - old_LL - old_prior
+            local_diff = likelihoods[state_index] + priors[state_index] -
+                         likelihoods[A[1]] - priors[A[1]]
+
+            all_local_diff =  likelihoods[state_index] + priors[state_index] .- likelihoods[A] .- priors[A]
+
+            min_local_diff, ai = findmin(abs(full_diff .- all_local_diff))
+
+            #if (tree_LL-old_LL) + (tree_prior-old_prior) < -8
+            if min_local_diff > 0.1 
+                println("full_diff: $full_diff")
+                println("local_diff: $local_diff")
+                println("min_local_diff: $min_local_diff")
+
+                println("prior_diff: $((tree_prior-old_prior))")
+                println("local_prior_diff: $(priors[state_index] - priors[A[ai]])")
+
+                println("prior_err: $(abs((tree_prior-old_prior) - (priors[state_index] - priors[A[1]])))")
+
+                println("LL_diff: $(tree_LL-old_LL)")
+                println("local_LL_diff: $(likelihoods[state_index] - likelihoods[A[ai]])")
+                assert(false)
+            end
+        end
+    end
+end
+
+
+function sample_psi_from_f(model::ModelState,
+                           model_spec::ModelSpecification,
+                           data::DataState,
+                           f::Function;
+                           Temp::Float64 = 1.0)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes)+1)/2
+
+
+    println("psi: ")
+    for parent_prune_index = N+1:2N-1
+         
+        parent = tree.nodes[parent_prune_index]
+        prune_index = parent.children[1].index
+
+        if model_spec.debug
+            old_prior = prior(model, model_spec)
+            old_LL = likelihood(model, model_spec, data)
+        end
+
+        if mod(parent_prune_index-N+1,ceil(N/10)) == 0
+            percent = ceil((parent_prune_index-N+1)/ceil(N/10))*10
+            println(" ",percent , "% ")
+        end
+
+        old_model = copy(model)
+        old_tree = old_model.tree
+
+
+        grandparent = tree.nodes[prune_index].parent.parent
+        if grandparent == Nil()
+            continue
+        end
+
+        if parent.children[1].index == prune_index
+            original_sibling = parent.children[2]
+        else
+            original_sibling = parent.children[1]
+        end
+
+        PruneIndexFromTree!(model.tree, prune_index)
+
+        gp = grandparent.index
+
+        subtree_indices = GetSubtreeIndicies(tree, prune_index)
+        i = 1
+        while in(i,subtree_indices)
+            i += 1
+        end
+        root = FindRoot(tree, i)
+        path = GetLeafToRootOrdering(tree, root.index)
+    
+        logprobs = zeros(length(path))
+ 
+        for j in 1:length(path)
+            graft_index = path[j]
+            InsertIndexIntoTree!(tree, prune_index, graft_index)
+            logprobs[j] = f(model, model_spec, data)
+            PruneIndexFromTree!(tree, prune_index) 
+        end 
+
+        probs = exp_normalize(logprobs/Temp)
+
+        if any(isnan(probs))
+            println(logprobs)
+            assert(false)
+        end
+
+        state_index = rand(Categorical(probs))
+
+        graft_index = path[state_index]
+        InsertIndexIntoTree!(tree, prune_index, graft_index) 
 
         if model_spec.debug 
             println("Sampling Prune Index: ", prune_index, " Num Leaves: ", length(GetLeaves(tree, grandparent.index)))
@@ -827,8 +1152,6 @@ function sample_psi(model::ModelState,
     end
 end
 
-
-
 function sample_eta(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
@@ -860,6 +1183,87 @@ function sample_eta(model::ModelState,
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
         grad = eta_log_gradient(model, model_spec, data, Temp=Temp)
+        return grad
+    end
+
+    hmcopts = @options numsteps=8 stepsize=0.001 transformation=ReducedNaturalTransformation
+    refopts = @options m=2 w=0.04 refractive_index_ratio=1.1 transformation=ReducedNaturalTransformation #verify_gradient=true
+
+    if rand() < 0.5
+        for i = 1:hmc_iterations
+            eta0 = copy(eta)
+            eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
+            if isdefined(:update_accept_counts) && update_accept_counts
+                global ref_accepts += eta != eta0
+                global ref_count += 1
+            end
+        end
+    else
+        for i = 1:hmc_iterations
+            eta0 = copy(eta)
+            eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
+            if isdefined(:update_accept_counts) && update_accept_counts
+                global hmc_accepts += eta != eta0
+                global hmc_count += 1
+            end
+        end
+
+    end
+#    verify_gradient = true
+#    if verify_gradient
+#        println("eta: $eta")
+#        grad = eta_grad(eta)
+#        epsilon = 10.0^-5
+#
+#        f1 = eta_density(eta)
+#        for i = 1:length(eta)
+#            eta_new = copy(eta)
+#            eta_new[i] = eta_new[i] + grad[i]/abs(grad[i])*epsilon
+#            f2 = eta_density(eta_new)
+#            println("grad $i: $(norm(grad[i])*epsilon)")
+#            println("agrad $i: $( (f2-f1))")
+#        end
+#    end
+    
+ 
+    for j = N+1:2N-1
+        tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
+    end
+end
+
+function sample_eta_from_f(model::ModelState,
+                           model_spec::ModelSpecification,
+                           data::DataState,
+                           hmc_iterations::Int64,
+                           f::Function;
+                           Temp::Float64 = 1.0)
+
+    tree  = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    M, S = size(data.reference_counts)
+    eta = zeros(S*(N-1))
+
+    num_iterations = 10
+
+
+    for j = N+1:2N-1
+        eta[1 + (j-N-1)*S : (j-N)*S] = tree.nodes[j].state
+    end
+
+    function eta_density(eta::Vector{Float64})
+        for j = N+1:2N-1
+            tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
+        end
+        e_pdf = logsumexp(f(model, model_spec, data)[1])
+        return e_pdf
+    end
+
+    function eta_grad(eta::Vector{Float64})
+        for j = N+1:2N-1
+            tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
+        end
+        pdfs, grads = f(model, model_spec, data)
+        grad = logsumexp_d_dx(pdfs, grads)
         return grad
     end
 
@@ -941,6 +1345,45 @@ function sample_assignments(model::ModelState,
     end
 end
 
+function sample_assignments_from_f(model::ModelState,
+                                   model_spec::ModelSpecification,
+                                   data::DataState,
+                                   num_iterations::Int64,
+                                   f::Function;
+                                   Temp::Float64 = 1.0)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    M,S = size(data.reference_counts)
+
+    t = compute_times(model)
+    Tau = compute_taus(model)
+    phi = compute_phis(model)
+
+    Z = model.Z
+    U = zeros(Int64, N-1)
+    for i=1:length(Z)
+        U[Z[i]-N] += 1
+    end 
+    U = U .- 1
+
+    for iter = 1:num_iterations    
+        for i = 1:M
+            cur_z = Z[i]-N
+            z_probs = zeros(N-1)
+
+            for n = N+1:2N-1
+                Z[i] = n
+                z_probs[n-N] = f(model, model_spec, data) 
+            end
+
+            new_z = rand(Categorical(exp_normalize(z_probs)))
+            U[cur_z] -= 1
+            U[new_z] += 1
+            Z[i] = new_z+N
+        end
+    end
+end
 function compute_assignment_probs(model::ModelState,
                                   model_spec::ModelSpecification,
                                   data::DataState,
@@ -970,11 +1413,70 @@ function compute_assignment_probs(model::ModelState,
 
     return z_probs
 end
+
+
+function mixed_density_splits(model_k::ModelState,
+                              model_star::ModelState,
+                              model_spec::ModelSpecification,
+                              data::DataState,
+                              pi_j0::Float64,
+                              pi_j::Float64,
+                              parent_prune_index::Int64;
+                              compute_gradient::Bool=false,
+                              eta_Temp::Float64=1.0,
+                              nutd_aug::Float64=-1.0,
+                              nutd_index::Int64=0,
+                              sample_nutd::Bool=false)
+
+    model_k_term = full_pdf(model_k, model_spec, data; nutd_aug=nutd_aug, nutd_index=nutd_index)
+
+    if nutd_index > 0
+        term1 = pi_j0 + logsumexp(model_k_term)
+    else
+        term1 = pi_j0 + model_k_term
+    end
+    if compute_gradient
+        kernel_logpdf, kernel_gradient = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                                            eta_Temp=eta_Temp, nutd_aug=nutd_aug, nutd_index=nutd_index, 
+                                                            return_eta_grad=true )
+    else
+        kernel_logpdf = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                           eta_Temp=eta_Temp, nutd_aug=nutd_aug, nutd_index=nutd_index)
+    end
+    
+    term2 = pi_j + kernel_logpdf 
+
+    if sample_nutd
+        probs = exp_normalize([term1, term2])
+        term = rand(Categorical(probs))
+        if term == 1
+            probs = exp_normalize(model_k_term)
+            model_k.tree.nodes[nutd_index].rhot = rand(Categorical(probs)) == 1 ? 1.0 : nutd_aug 
+        else
+            nutd_star = model_star.tree.nodes[nutd_index].rhot
+            model_k.tree.nodes[nutd_index].rhot = nutd_star == 1.0 ? 1.0 : nutd_aug 
+        end
+    end
+
+    if compute_gradient
+        eta_grad = eta_log_gradient(model_k, model_spec, data, Temp=eta_Temp)
+        return ([term1, term2], (eta_grad, kernel_gradient)) 
+    else
+        return [term1, term2]
+    end
+
+end
+
 function sample_num_leaves(model::ModelState,
                            model_spec::ModelSpecification,
                            data::DataState,
+                           num_scan_iterations::Int64,
                            num_iterations::Int64;
-                           Temp::Float64 = 1.0)
+                           eta_Temp::Float64 = 1.0)
+    
+    slice_iterations = 5
+    hmc_iterations = 10
+    Z_iterations = 5
 
     tree = model.tree
     lambda = model.lambda
@@ -986,25 +1488,219 @@ function sample_num_leaves(model::ModelState,
 
     root = FindRoot(model.tree, 1)
     root_index = root.index
-   
-    # W = (K-1, K) 
-    if rand() < 0.5
-        model_star = draw_neighboring_tree(model, model_spec, data, N-1)
+ 
+    f_psi = (model, model_spec, data) -> (terms = mixed_density_splits(model, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, eta_Temp=eta_Temp); 
+                                          all(terms .== -Inf) ? -Inf : logsumexp(terms)) 
 
-        for i = 1:num_iterations
-            mcmc_sweep(model_star, model_spec, data)
-        end 
+    function f_nu_nutd(model::ModelState,
+                       model_spec::ModelSpecification,
+                       data::DataState;
+                       nutd_aug::Float64=-1.0,
+                       nutd_index::Int64=0,
+                       nu::Float64=-1.0,
+                       nu_index::Int64=0,
+                       sample_nutd::Bool=false)
 
-    # W = (K, K+1) 
-    else
-        model_star = draw_neighboring_tree(model, model_spec, data, N+1)
-
-        for i = 1:num_iterations
-            mcmc_sweep(model_star, model_spec, data)
-        end 
-
+        if nu_index > 0
+            model.tree.nodes[nu_index].rho = nu
+        end
+        terms = mixed_density_splits(model, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, nutd_aug=nutd_aug, nutd_index=nutd_index, sample_nutd=sample_nutd, eta_Temp=eta_Temp)
+        logsumexp(terms)
     end
 
+    f_eta = (model, model_spec, data) -> mixed_density_splits(model, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, compute_gradient=true, eta_Temp=eta_Temp)
+
+    global update_accept_counts = false
+ 
+    # W = (K-1, K) 
+    if rand() < 0.5
+
+        if rand() < 0.5
+            model_prior = prior(model, model_spec) 
+            model_pdf = full_pdf(model, model_spec, data) 
+
+            if rand() < 0.5
+                model_star = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+            else
+                model_star = draw_neighboring_tree(model, model_spec, data, N-1)
+            end
+
+            for i = 1:num_scan_iterations
+                mcmc_sweep(model_star, model_spec, data, verbose=false)
+            end 
+
+            parent_prune_index = rand(N:2N-3)
+            grandparent = model_star.tree.nodes[parent_prune_index].parent
+
+            while grandparent == Nil()
+                parent_prune_index = rand(N:2N-3)
+                grandparent = model_star.tree.nodes[parent_prune_index].parent
+            end
+
+            model_k = tree_kernel_sample(model_star, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+            
+            kernel_logpdf = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                               eta_Temp=eta_Temp)
+            model_k_pdf = full_pdf(model_k, model_spec, data)
+
+            splits = mixed_density_splits(model_k, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, eta_Temp=eta_Temp)
+
+            model_star_pdf = full_pdf(model_star, model_spec, data)
+            probs = exp_normalize(splits)
+            println("model_prior: $model_prior")
+            println("model_pdf: $model_pdf")
+            println("model_star_pdf: $model_star_pdf")
+            println("kernel_pdf: $kernel_logpdf")
+            println("model_k_pdf: $model_k_pdf")
+            println("splits: $splits")
+            println("probs: $probs")
+            println("W = (K-1, K), forward")
+            new_model = rand(Categorical(probs)) == 1 ? model_k : model
+#            for i = 1:num_iterations
+#                # sample psi
+#                sample_psi_from_f(model_k, model_spec, data, f_psi)
+#                # sample nu
+#                sample_nu_nutd_from_f(model_k, model_spec, data, slice_iterations, f_nu_nutd)
+#                # sample eta
+#                sample_eta_from_f(model_k, model_spec, data, hmc_iterations, f_eta)
+#                # sample assignments
+#                sample_assignments_from_f(model_k, model_spec, data, Z_iterations, f_psi)
+#            end
+        else # reverse move for W=(K,K+1) forward move
+            model_k0 = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha)
+            model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
+            model_pdf = full_pdf(model_k0, model_spec, data)
+
+            if rand() < 0.5
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+            else
+                model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
+            end
+
+            for i = 1:num_scan_iterations
+                mcmc_sweep(model_star, model_spec, data, verbose=false)
+            end
+
+            parent_prune_index = rand(N+1:2N-1)
+            grandparent = model_star.tree.nodes[parent_prune_index].parent
+
+            while grandparent == Nil()
+                parent_prune_index = rand(N+1:2N-1)
+                grandparent = model_star.tree.nodes[parent_prune_index].parent
+            end
+
+            model_k = tree_kernel_sample(model_star, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+            kernel_logpdf = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                               eta_Temp=eta_Temp)
+            model_k_pdf = full_pdf(model_k, model_spec, data)
+
+            splits = mixed_density_splits(model, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, eta_Temp=eta_Temp)
+            probs = exp_normalize(splits)
+            println("model_prior: $model_prior")
+            println("model_pdf: $model_pdf")
+            println("kernel_pdf: $kernel_logpdf")
+            println("model_k_pdf: $model_k_pdf")
+            println("splits: $splits")
+            println("probs: $probs")
+            println("W = (K-1, K), reverse")
+            new_model = rand(Categorical(probs)) == 1 ? model : model_k0
+
+        end
+    # W = (K, K+1) 
+    else
+        if rand() < 0.5
+            model_prior = prior(model, model_spec) 
+            model_pdf = full_pdf(model, model_spec, data) 
+            if rand() < 0.5
+                model_star = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N+1)
+            else
+                model_star = draw_neighboring_tree(model, model_spec, data, N+1)
+            end
+            for i = 1:num_scan_iterations
+                mcmc_sweep(model_star, model_spec, data, verbose=false)
+            end
+
+            parent_prune_index = rand(N+2:2N+1)
+            grandparent = model_star.tree.nodes[parent_prune_index].parent
+
+            while grandparent == Nil()
+                parent_prune_index = rand(N+2:2N+1)
+                grandparent = model_star.tree.nodes[parent_prune_index].parent
+            end
+
+            model_k = tree_kernel_sample(model_star, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+            kernel_logpdf = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                               eta_Temp=eta_Temp)
+            model_k_pdf = full_pdf(model_k, model_spec, data)
+
+#            for i = 1:num_iterations
+#                # sample psi
+#                sample_psi_from_f(model_k, model_spec, data, f_psi)
+#                # sample nu
+#                sample_nu_nutd_from_f(model_k, model_spec, data, slice_iterations, f_nu_nutd)
+#                # sample eta
+#                sample_eta_from_f(model_k, model_spec, data, hmc_iterations, f_eta)
+#                # sample assignments
+#                sample_assignments_from_f(model_k, model_spec, data, Z_iterations, f_psi)
+#            end
+            splits = mixed_density_splits(model_k, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, eta_Temp=eta_Temp)
+
+            model_star_pdf = full_pdf(model_star, model_spec, data)
+            probs = exp_normalize(splits)
+            println("model_prior: $model_prior")
+            println("model_pdf: $model_pdf")
+            println("model_star_pdf: $model_star_pdf")
+            println("kernel_pdf: $kernel_logpdf")
+            println("model_k_pdf: $model_k_pdf")
+            println("splits: $splits")
+            println("probs: $probs")
+            println("W = (K, K+1), forward")
+            new_model = rand(Categorical(probs)) == 1 ? model_k : model
+        else # reverse move for W = (K-1,K) forward move
+            model_k0 = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha)
+            model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
+            model_pdf = full_pdf(model_k0, model_spec, data)
+
+            if rand() < 0.5
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+            else
+                model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
+            end
+
+            for i = 1:num_scan_iterations
+                mcmc_sweep(model_star, model_spec, data, verbose=false)
+            end
+
+            parent_prune_index = rand(N+1:2N-1)
+            grandparent = model_star.tree.nodes[parent_prune_index].parent
+
+            while grandparent == Nil()
+                parent_prune_index = rand(N+1:2N-1)
+                grandparent = model_star.tree.nodes[parent_prune_index].parent
+            end
+
+            model_k = tree_kernel_sample(model_star, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+            kernel_logpdf = tree_kernel_logpdf(model_k, model_star, model_spec, data, parent_prune_index,
+                                               eta_Temp=eta_Temp)
+            model_k_pdf = full_pdf(model_k, model_spec, data)
+
+            splits = mixed_density_splits(model, model_star, model_spec, data, model_prior, model_pdf, parent_prune_index, eta_Temp=eta_Temp)
+            probs = exp_normalize(splits)
+            println("model_prior: $model_prior")
+            println("model_pdf: $model_pdf")
+            println("kernel_pdf: $kernel_logpdf")
+            println("model_k_pdf: $model_k_pdf")
+            println("splits: $splits")
+            println("probs: $probs")
+            println("W = (K, K+1), reverse")
+            new_model = rand(Categorical(probs)) == 1 ? model : model_k0
+        end
+    end
+
+     
+    global update_accept_counts = true
+
+    return new_model
 
 end
 
@@ -1132,11 +1828,15 @@ function draw_neighboring_tree(model::ModelState,
     if nroot.parent != Nil()
         nroot = nroot.parent
     end 
-    (new_tree, index_map) = MakeReindexedTree(ntree, nroot.index, N) 
+    (new_tree, index_map) = MakeReindexedTree(ntree, nroot.index, new_N) 
+
+    prior_tree(new_tree,1)
+
     new_root = index_map[nroot.index]
 
     new_model = copy(model)
     new_model.tree = new_tree
+
 
     times = compute_times(new_model)
     Tau = compute_taus(new_model)
@@ -1153,8 +1853,15 @@ function draw_neighboring_tree(model::ModelState,
         Z_logpdfs[:,m] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi, Temp=Temp) 
     end
 
+    mutations = [1:M]
+
+    for i = new_N+1:2*new_N-1
+        m_index = rand(Categorical(exp_normalize(Z_logpdfs[i-new_N,mutations][:])))
+        m = splice!(mutations, m_index)
+        new_model.Z[m] = i
+    end
     # Assign mutations to clusters
-    for m = 1:M
+    for m = mutations
         i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
         new_model.Z[m] = i+new_N
     end
@@ -1265,13 +1972,20 @@ function draw_neighboring_tree_remove_insert(model::ModelState,
         Z_logpdfs[:,m] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi, Temp=Temp) 
     end
 
+    mutations = [1:M]
+
+    for i = new_N+1:2*new_N-1
+        m_index = rand(Categorical(exp_normalize(Z_logpdfs[i-new_N,mutations][:])))
+        m = splice!(mutations, m_index)
+        new_model.Z[m] = i
+    end
+
     # Assign mutations to clusters
-    for m = 1:M
+    for m = mutations
         i = rand(Categorical(exp_normalize(Z_logpdfs[:,m])))
         new_model.Z[m] = i+new_N
     end
 
- 
     return new_model 
 end
 

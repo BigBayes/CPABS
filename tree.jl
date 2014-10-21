@@ -321,7 +321,12 @@ function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64, old_N::Int64
 
     end 
 
-    UpdateDescendantCounts!(tree, tree.nodes[index_map[root_index]])
+    root = FindRoot(tree, 1)  
+
+    @assert root.index == index_map[root_index]
+    println("root.index: $(root.index)")
+    println("N: $N")
+    UpdateSubtreeDescendantCounts!(tree, tree.nodes[index_map[root_index]])
     UpdateSubtreeAncestorCounts!(tree, tree.nodes[index_map[root_index]])
     return (tree, index_map)
 end
@@ -360,6 +365,8 @@ function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
         if sibling.children[1] != Nil() 
             UpdateDescendantCounts!(tree, sibling)
         end
+        parent.children[sibling_direction] = Nil()
+
         UpdateSubtreeAncestorCounts!(tree, sibling)
         UpdateSubtreeAncestorCounts!(tree, parent)
     end
@@ -376,6 +383,11 @@ function InsertIndexIntoTree!{T}(tree::Tree{T},
     grandparent = new_sibling.parent
 
     self_direction = find(parent.children .== self)[1]
+
+    if all(parent.children .!= Nil())
+        println("child1: $(parent.children[1].index)")
+        println("child2: $(parent.children[2].index)")
+    end
     sibling_direction = find(parent.children .== Nil())[1]
 
     parent.children[sibling_direction] = new_sibling 
@@ -521,6 +533,31 @@ function UpdateDescendantCounts!{T}(tree::Tree{T},
         cur.num_leaves = cur.children[1].num_leaves + 
                          cur.children[2].num_leaves 
         cur = cur.parent
+    end
+end
+
+function UpdateSubtreeDescendantCounts!{T}(tree::Tree{T},
+                                           subtree_root::TreeNode{T})
+    if subtree_root == Nil()
+        return
+    end
+
+    indices = GetLeafToRootOrdering(tree, subtree_root.index)
+
+    for index in indices
+        cur = tree.nodes[index]
+        cur.num_leaves = 0
+        l = cur.children[1]
+        r = cur.children[2]
+        if l == Nil() && r == Nil()
+            cur.num_leaves = 1
+        end
+        if l != Nil()
+            cur.num_leaves += l.num_leaves
+        end
+        if r != Nil()
+            cur.num_leaves += r.num_leaves
+        end
     end
 end
 
