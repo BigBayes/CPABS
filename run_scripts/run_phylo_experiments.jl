@@ -12,7 +12,7 @@ function run_all_emptysims_experiments()
     filenames = readdir("../data/phylosub/emptysims")
 
     for fname in filenames
-        @spawn run_phylo_experiment(fname)
+        @spawn run_phylo_experiment("emptysims/$fname")
     end
 end
 

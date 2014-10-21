@@ -5,10 +5,10 @@ require("phylo_model/pdf.jl")
 require("samplers/transformation.jl")
 
 plot_utils_loaded = true
-if Pkg.installed("Winston") != nothing
+if Pkg.installed("Winston") != nothing && isdefined(:plotting) && plotting==true
     require("utils/plot_utils.jl")
 else
-    println("Failed to load plot_utils.jl: disabling plotting")
+    println("Failed to load plot_utils.jl or plotting disabled")
     plot_utils_loaded = false
 end
 
