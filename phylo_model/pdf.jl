@@ -1369,12 +1369,6 @@ function tree_kernel_logpdf(model::ModelState,
     pdf_graft_index = probs[find(pstates .== graft_index)[1]]
     
     log_pdf += log(pdf_graft_index)
-    if log_pdf < -100
-        println("pdf_graft_index: $pdf_graft_index")
-        println("pstates: $pstates")
-        println("graft_index: $graft_index")
-        println("probs: $probs")
-    end
     # Prob of assignment
 
     t = compute_times(model)
@@ -1399,9 +1393,6 @@ function tree_kernel_logpdf(model::ModelState,
 
         new_z = model.Z[i]-N 
         log_pdf += log(z_probs[new_z])
-    if log_pdf < -100
-        println("z_prob: $(z_probs[new_z])")
-    end
         U[cur_z] -= 1
         U[new_z] += 1
         Z[i] = new_z+N

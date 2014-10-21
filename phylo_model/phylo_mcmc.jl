@@ -21,14 +21,16 @@ function mcmc(data::DataState,
               lambda::Float64,
               gam::Float64,
               alpha::Float64,
-              init_N::Int64,
+              init_K::Int64,
               model_spec::ModelSpecification,
               iterations::Int64,
               burnin_iterations::Int64;
               jump_lag=100,
               jump_scan_length=100,
-              eta_Temp=1.0)
+              eta_Temp=1.0,
+              rand_restarts::Int64=0)
 
+    
     # number of leaves is the number of split points plus one
     N = init_K+1
 
@@ -37,6 +39,14 @@ function mcmc(data::DataState,
     model = draw_random_tree(N, M, S, lambda, gam, alpha)
     tree = model.tree
     Z = model.Z
+
+    remaining_restarts = rand_restarts
+    rand_restart_models = Array(Any, rand_restarts)
+    rand_restart_pdfs = zeros(rand_restarts)
+    for r = 1:rand_restarts
+        rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha)
+    end 
+
 
     global hmc_accepts = 0
     global hmc_count = 0
@@ -59,7 +69,9 @@ function mcmc(data::DataState,
 
     chain_probs = Float64[]
 
-    for iter = 1:iterations
+    iter = 0
+    while iter < iterations
+        iter += 1
         println("Iteration: ", iter)
         tree_prior = prior(model,model_spec)
         tree_LL = likelihood(model, model_spec, data)
@@ -81,6 +93,24 @@ function mcmc(data::DataState,
 #        end
 
         mcmc_sweep(model, model_spec, data, Temp=Temp)
+
+
+        if iter == burnin_iterations && remaining_restarts > 0
+            rand_restart_models[remaining_restarts] = model
+            remaining_restarts -= 1
+
+            if remaining_restarts > 0
+                iter = 1
+                model = rand_restart_models[remaining_restarts]
+            else
+                for r = 1:rand_restarts
+                    model = rand_restart_models[r]
+                    rand_restart_pdfs = full_pdf(model, model_spec, data)
+                end
+                best_restart = findmax(rand_restart_pdfs)[2]
+                model = rand_restart_models[best_restart]
+            end 
+        end
 
         if iter > burnin_iterations && mod(iter, jump_lag) == 0 
             model = sample_num_leaves(model, model_spec, data, jump_scan_length, 0, eta_Temp=eta_Temp)
@@ -128,7 +158,6 @@ function mcmc(data::DataState,
 
             new_prior = prior(new_model, model_spec)
             new_LL = likelihood(new_model, model_spec, data)
-            println("new Z: $(new_model.Z)")
             println("new_prior: $new_prior")
             println("new_LL: $new_LL")
             println("old_LL: $tree_LL")
@@ -181,7 +210,7 @@ function mcmc(data::DataState,
         end
 
 
-        if mod(iter, 10) == 0 || iter == iterations
+        if (mod(iter, 10) == 0 && iter > burnin_iterations) || iter == iterations
             push!(models,copy(model))
             push!(iters, iter)
         end
@@ -1710,6 +1739,7 @@ function draw_neighboring_tree(model::ModelState,
                                new_N::Int64;
                                Temp::Float64 = 1.0)
     tree = model.tree
+    alpha = model_spec.alpha
     root = FindRoot(tree,1)
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
