@@ -16,6 +16,13 @@ function run_all_emptysims_experiments()
     end
 end
 
+function run_all_aldous_experiments()
+    filenames = readdir("../data/phylosub/aldous")
+
+    for fname in filenames
+        @spawn run_phylo_experiment("aldous/$fname")
+    end
+end
 
 function run_phylo_experiment(filename)
     (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
@@ -54,6 +61,15 @@ function run_phylo_experiment(filename)
         init_K = int(m.captures[1])-1
         D = int(m.captures[2])
         M_per_cluster = int(m.captures[3])
+    elseif contains(filename, "aldous")
+        filename_base="aldous"
+        eta_Temp = 0.001
+        jump_lag = Inf
+        jump_scan_length = 20
+        m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
+        init_K = 4
+        D = int(m.captures[1])
+        count = int(m.captures[2])
     end
 
     if !isdefined(:num_trials)
@@ -79,8 +95,10 @@ function run_phylo_experiment(filename)
     end
     cocluster_matrix /= length(models)
 
-    if filename_base == "emptysims" || filename_base == "aldous"
+    if filename_base == "emptysims"
         writedlm("../results/phylo/$filename_base.ccm.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")
+    elseif filename_base == "aldous"
+        writedlm("../results/phylo/$filename_base.ccm.$init_K.$D.$count.csv", cocluster_matrix, ",")
     else
         return cocluster_matrix
     end

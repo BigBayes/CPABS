@@ -2,6 +2,8 @@
 function read_phylosub_data(filename)
     if contains(filename, "emptysims")
         data = readdlm("../data/phylosub/$filename", '\t', header=true)
+    elseif contains(filename, "aldous")
+        data = readdlm("../data/phylosub/$filename", '\t', header=true)
     else
         data = readdlm("../data/phylosub/$filename", ';', header=true)
     end
