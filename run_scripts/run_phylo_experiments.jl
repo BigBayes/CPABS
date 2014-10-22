@@ -98,9 +98,9 @@ function run_phylo_experiment(filename, alpha::Float64)
     cocluster_matrix /= length(models)
 
     if filename_base == "emptysims"
-        writedlm("../results/phylo/$filename_base.ccm.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")
+        writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")
     elseif filename_base == "aldous"
-        writedlm("../results/phylo/$filename_base.ccm.$init_K.$D.$count.csv", cocluster_matrix, ",")
+        writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$count.csv", cocluster_matrix, ",")
     else
         return cocluster_matrix
     end
