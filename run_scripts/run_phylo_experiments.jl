@@ -8,23 +8,23 @@ require("data_utils/read_phylosub_data.jl")
 #    filename = "CLL077.csv"
 #end
 
-function run_all_emptysims_experiments()
+function run_all_emptysims_experiments(alpha)
     filenames = readdir("../data/phylosub/emptysims")
 
     for fname in filenames
-        @spawn run_phylo_experiment("emptysims/$fname")
+        @spawn run_phylo_experiment("emptysims/$fname", alpha)
     end
 end
 
-function run_all_aldous_experiments()
+function run_all_aldous_experiments(alpha)
     filenames = readdir("../data/phylosub/aldous")
 
     for fname in filenames
-        @spawn run_phylo_experiment("aldous/$fname")
+        @spawn run_phylo_experiment("aldous/$fname", alpha)
     end
 end
 
-function run_phylo_experiment(filename)
+function run_phylo_experiment(filename, alpha::Float64)
     (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
 
     (M, S) = size(AA)
@@ -39,7 +39,6 @@ function run_phylo_experiment(filename)
 
     lambda = 0.2
     gamma = 1.0
-    alpha = 1.0
 
     #if filename == "CLL077.csv" || filename == "CLL003.csv"
     #    init_K = 4
