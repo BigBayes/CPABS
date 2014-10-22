@@ -29,10 +29,11 @@ function run_phylo_experiment(filename)
 
     (M, S) = size(AA)
     if !isdefined(:plotting)
-        plotting=false
+        model_spec = ModelSpecification(ones(3)/3, false, false, false)
+    else
+        model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
     end
 
-    model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
 
     #model_spec.debug = true
 
@@ -55,21 +56,23 @@ function run_phylo_experiment(filename)
     elseif contains(filename, "emptysims")
         filename_base="emptysims"
         eta_Temp = 0.001
-        jump_lag = Inf
+        jump_lag = 20
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = int(m.captures[1])-1
         D = int(m.captures[2])
         M_per_cluster = int(m.captures[3])
+        rand_restarts=0
     elseif contains(filename, "aldous")
         filename_base="aldous"
-        eta_Temp = 0.001
+        eta_Temp = 0.1
         jump_lag = Inf
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = 4
         D = int(m.captures[1])
         count = int(m.captures[2])
+        rand_restarts=10
     end
 
     if !isdefined(:num_trials)
@@ -78,7 +81,7 @@ function run_phylo_experiment(filename)
 
     data = DataState(AA, DD, mu_r, mu_v, names)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 500, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=10)
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 500, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
 
     cocluster_matrix = zeros(M,M)
     (iters, Ks, trainLLs, models) = result

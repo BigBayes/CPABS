@@ -1205,35 +1205,35 @@ function tree_kernel_sample(model::ModelState,
     end
 
     # Prune and graft parent_prune_index
-    parent = tree.nodes[parent_prune_index]
-    prune_index = parent.children[1].index
-
-
-
-    PruneIndexFromTree!(tree, prune_index)
-    
-    subtree_indices = GetSubtreeIndicies(tree, prune_index)
-    i = 1
-    while in(i,subtree_indices)
-        i += 1
-    end
-    root = FindRoot(tree, i)
-    path = GetLeafToRootOrdering(tree, root.index)
-
-    (priors, pstates) = psi_infsites_logpdf(new_model, data, prune_index, path)
-    (likelihoods, lstates) = psi_observation_logpdf(new_model, model_spec, data, prune_index, path)
-
-    logprobs = priors + likelihoods
-    probs = exp_normalize(logprobs)
-
-    state_index = rand(Categorical(probs))
-    graft_index = pstates[state_index]
-
-    println("sampler pstates: $pstates")
-    println("sampler graft_index: $graft_index")
-    println("sampler probs: $probs")
-
-    InsertIndexIntoTree!(tree, prune_index, graft_index)
+#    parent = tree.nodes[parent_prune_index]
+#    prune_index = parent.children[1].index
+#
+#
+#
+#    PruneIndexFromTree!(tree, prune_index)
+#    
+#    subtree_indices = GetSubtreeIndicies(tree, prune_index)
+#    i = 1
+#    while in(i,subtree_indices)
+#        i += 1
+#    end
+#    root = FindRoot(tree, i)
+#    path = GetLeafToRootOrdering(tree, root.index)
+#
+#    (priors, pstates) = psi_infsites_logpdf(new_model, data, prune_index, path)
+#    (likelihoods, lstates) = psi_observation_logpdf(new_model, model_spec, data, prune_index, path)
+#
+#    logprobs = priors + likelihoods
+#    probs = exp_normalize(logprobs)
+#
+#    state_index = rand(Categorical(probs))
+#    graft_index = pstates[state_index]
+#
+#    println("sampler pstates: $pstates")
+#    println("sampler graft_index: $graft_index")
+#    println("sampler probs: $probs")
+#
+#    InsertIndexIntoTree!(tree, prune_index, graft_index)
 
     # Gibbs sample assignments
     sample_assignments(new_model, model_spec, data, 1)
@@ -1253,20 +1253,25 @@ function tree_kernel_logpdf(model::ModelState,
                             nutd_index::Int64=0,
                             return_eta_grad::Bool = false)
 
-    tree = model.tree
-    tree0 = model0.tree
-
-    temp_model = copy(model0)
-    tmp_tree = temp_model.tree
-
-    N::Int = (length(tree.nodes) + 1) / 2
-    N0::Int = (length(tree0.nodes) + 1) / 2
+    N::Int = (length(model.tree.nodes) + 1) / 2
+    N0::Int = (length(model0.tree.nodes) + 1) / 2
 
     if N != N0
         println("N: $N")
         println("N0: $N0")
     end
     @assert N == N0
+
+    root = FindRoot(model.tree, 1)
+    root0 = FindRoot(model0.tree, 1)
+    
+    tree = MakeReindexedTree(model.tree, root.index, N)[1]
+    tree0 = MakeReindexedTree(model0.tree, root0.index, N)[1]
+
+    temp_model = copy(model0)
+    tmp_tree = temp_model.tree
+
+
 
     alpha = model.alpha
     Z = model.Z
@@ -1334,41 +1339,59 @@ function tree_kernel_logpdf(model::ModelState,
         C0[i,1] = tree0.nodes[i].children[1].index
         C0[i,2] = tree0.nodes[i].children[2].index
 
-        # Impossible to reach model from model0 by pruning and grafting parent_prune_index
-        for j = 1:2
-            if C[i,j] != C0[i,j]
-                if C[i,j] != parent_prune_index && C0[i,j] != parent_prune_index && i != parent_prune_index
-                    return -Inf
-                end 
-            end
+        # leaves are indistinguishable for our purposes
+        if C[i,1] <= N
+            C[i,1] = 1
         end
+        if C[i,2] <= N
+            C[i,2] = 1
+        end
+        if C0[i,1] <= N
+            C0[i,1] = 1
+        end
+        if C0[i,2] <= N
+            C0[i,2] = 1
+        end
+#        # Impossible to reach model from model0 by pruning and grafting parent_prune_index
+#        for j = 1:2
+#            if C[i,j] != C0[i,j]
+#                if C[i,j] != parent_prune_index && C0[i,j] != parent_prune_index && i != parent_prune_index
+#                    return -Inf
+#                end 
+#            end
+#        end
     end
 
-    # right child of the parent pruned index should be unchanged if we really have pruned it and not something else
-    if C[parent_prune_index, 1] != C0[parent_prune_index,1]
+    # We made no changes to the tree structure in the kernel
+    if C != C0
         return -Inf
     end
 
-    graft_index = C[parent_prune_index,2]
+    # right child of the parent pruned index should be unchanged if we really have pruned it and not something else
+#    if C[parent_prune_index, 1] != C0[parent_prune_index,1]
+#        return -Inf
+#    end
 
-    PruneIndexFromTree!(temp_model.tree, prune_index)
-    subtree_indices = GetSubtreeIndicies(temp_model.tree, prune_index)
-    i = 1
-    while in(i,subtree_indices)
-        i += 1
-    end
-    root = FindRoot(temp_model.tree, i)
-    path = GetLeafToRootOrdering(temp_model.tree, root.index)
-  
-    (priors, pstates) = psi_infsites_logpdf(temp_model, data, prune_index, path)
-    (likelihoods, lstates) = psi_observation_logpdf(temp_model, model_spec, data, prune_index, path)
-
-    logprobs = priors + likelihoods
-    probs = exp_normalize(logprobs)
-
-    pdf_graft_index = probs[find(pstates .== graft_index)[1]]
-    
-    log_pdf += log(pdf_graft_index)
+#    graft_index = C[parent_prune_index,2]
+#
+#    PruneIndexFromTree!(temp_model.tree, prune_index)
+#    subtree_indices = GetSubtreeIndicies(temp_model.tree, prune_index)
+#    i = 1
+#    while in(i,subtree_indices)
+#        i += 1
+#    end
+#    root = FindRoot(temp_model.tree, i)
+#    path = GetLeafToRootOrdering(temp_model.tree, root.index)
+#  
+#    (priors, pstates) = psi_infsites_logpdf(temp_model, data, prune_index, path)
+#    (likelihoods, lstates) = psi_observation_logpdf(temp_model, model_spec, data, prune_index, path)
+#
+#    logprobs = priors + likelihoods
+#    probs = exp_normalize(logprobs)
+#
+#    pdf_graft_index = probs[find(pstates .== graft_index)[1]]
+#    
+#    log_pdf += log(pdf_graft_index)
     # Prob of assignment
 
     t = compute_times(model)

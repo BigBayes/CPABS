@@ -5,7 +5,7 @@ require("phylo_model/pdf.jl")
 require("samplers/transformation.jl")
 
 plot_utils_loaded = true
-if Pkg.installed("Winston") != nothing && isdefined(:plotting) && plotting==true
+if Pkg.installed("Winston") != nothing && isdefined(:plotting)
     require("utils/plot_utils.jl")
 else
     println("Failed to load plot_utils.jl or plotting disabled")
@@ -1444,6 +1444,150 @@ function compute_assignment_probs(model::ModelState,
 end
 
 
+
+function sample_num_leaves(model::ModelState,
+                           model_spec::ModelSpecification,
+                           data::DataState,
+                           num_scan_iterations::Int64,
+                           num_iterations::Int64;
+                           eta_Temp::Float64 = 1.0)
+    
+    slice_iterations = 5
+    hmc_iterations = 10
+    Z_iterations = 5
+
+    tree = model.tree
+    lambda = model.lambda
+    alpha = model.alpha
+
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
+    M,S = size(data.reference_counts)
+
+    root = FindRoot(model.tree, 1)
+    root_index = root.index
+ 
+
+    global update_accept_counts = false
+ 
+    # W = (K-1, K) 
+    if rand() < 0.5
+        model_star_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+
+        for i = 1:num_scan_iterations
+            mcmc_sweep(model_star_k, model_spec, data, verbose=false)
+            mcmc_sweep(model_star_j, model_spec, data, verbose=false)
+        end 
+
+        parent_prune_index_k = rand(N:2N-3)
+        grandparent = model_star_k.tree.nodes[parent_prune_index_k].parent
+
+        while grandparent == Nil()
+            parent_prune_index_k = rand(N:2N-3)
+            grandparent = model_star_k.tree.nodes[parent_prune_index_k].parent
+        end
+
+        parent_prune_index_j = rand(N+1:2N-1)
+        grandparent = model_star_j.tree.nodes[parent_prune_index_j].parent
+
+        while grandparent == Nil()
+            parent_prune_index_j = rand(N+1:2N-1)
+            grandparent = model_star_j.tree.nodes[parent_prune_index_j].parent
+        end
+
+        model_k = tree_kernel_sample(model_star_k, model_spec, data, parent_prune_index_k, eta_Temp=eta_Temp)
+        model_j = model
+        println("W = (K-1, K)")
+ 
+    # W = (K, K+1) 
+    else
+        model_star_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+
+        for i = 1:num_scan_iterations
+            mcmc_sweep(model_star_k, model_spec, data, verbose=false)
+            mcmc_sweep(model_star_j, model_spec, data, verbose=false)
+        end 
+
+        parent_prune_index_k = rand(N+2:2N+1)
+        grandparent = model_star_k.tree.nodes[parent_prune_index_k].parent
+
+        while grandparent == Nil()
+            parent_prune_index_k = rand(N+2:2N+1)
+            grandparent = model_star_k.tree.nodes[parent_prune_index_k].parent
+        end
+
+        parent_prune_index_j = rand(N+1:2N-1)
+        grandparent = model_star_j.tree.nodes[parent_prune_index_j].parent
+
+        while grandparent == Nil()
+            parent_prune_index_j = rand(N+1:2N-1)
+            grandparent = model_star_j.tree.nodes[parent_prune_index_j].parent
+        end
+
+        model_k = tree_kernel_sample(model_star_k, model_spec, data, parent_prune_index_k, eta_Temp=eta_Temp)
+        model_j = model
+        println("W = (K, K+1)")
+ 
+    end
+
+    kernel_logpdf_k = tree_kernel_logpdf(model_k, model_star_k, model_spec, data, parent_prune_index_k,
+                                       eta_Temp=eta_Temp)
+    kernel_logpdf_j = tree_kernel_logpdf(model_j, model_star_j, model_spec, data, parent_prune_index_j,
+                                       eta_Temp=eta_Temp)
+    model_k_pdf = full_pdf(model_k, model_spec, data)
+    model_j_pdf = full_pdf(model_j, model_spec, data)
+
+    term_k = model_k_pdf + kernel_logpdf_j
+    term_j = model_j_pdf + kernel_logpdf_k
+
+    splits = [term_k, term_j]
+
+    model_star_k_pdf = full_pdf(model_star_k, model_spec, data)
+    model_star_j_pdf = full_pdf(model_star_j, model_spec, data)
+    probs = exp_normalize(splits)
+    println("model_k_pdf: $model_k_pdf")
+    println("model_j_pdf: $model_j_pdf")
+    println("model_star_k_pdf: $model_star_k_pdf")
+    println("model_star_j_pdf: $model_star_j_pdf")
+    println("kernel_pdf_k: $kernel_logpdf_k")
+    println("kernel_pdf_j: $kernel_logpdf_j")
+    println("splits: $splits")
+    println("probs: $probs")
+    new_model = rand(Categorical(probs)) == 1 ? model_k : model_j
+     
+    if kernel_logpdf_j == -Inf && model_k_pdf > model_j_pdf && false
+        Z = model_j.Z
+        u = zeros(Int64, 2N-1)
+        for i=1:length(Z)
+            u[Z[i]] += 1
+        end 
+
+        ZZ, leaf_times, Etas, inds = model2array(model_j, return_leaf_times=true)
+        p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+
+        Z = model_star_j.Z
+        u = zeros(Int64, 2N-1)
+        for i=1:length(Z)
+            u[Z[i]] += 1
+        end 
+        ZZ, leaf_times, Etas, inds = model2array(model_star_j, return_leaf_times=true)
+        p_dendrogram_star = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+        tbl = Table(2,1)
+        tbl[1,1] = p_dendrogram_star
+        tbl[2,1] = p_dendrogram
+
+        display(tbl)
+        @assert false
+    end
+
+    global update_accept_counts = true
+
+    return new_model
+
+end
+
 function mixed_density_splits(model_k::ModelState,
                               model_star::ModelState,
                               model_spec::ModelSpecification,
@@ -1496,12 +1640,12 @@ function mixed_density_splits(model_k::ModelState,
 
 end
 
-function sample_num_leaves(model::ModelState,
-                           model_spec::ModelSpecification,
-                           data::DataState,
-                           num_scan_iterations::Int64,
-                           num_iterations::Int64;
-                           eta_Temp::Float64 = 1.0)
+function sample_num_leaves_fixed_j(model::ModelState,
+                                   model_spec::ModelSpecification,
+                                   data::DataState,
+                                   num_scan_iterations::Int64,
+                                   num_iterations::Int64;
+                                   eta_Temp::Float64 = 1.0)
     
     slice_iterations = 5
     hmc_iterations = 10
