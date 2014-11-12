@@ -65,13 +65,13 @@ function run_phylo_experiment(filename, alpha::Float64)
     elseif contains(filename, "aldous")
         filename_base="aldous"
         eta_Temp = 0.1
-        jump_lag = Inf
+        jump_lag = 1
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = 4
         D = int(m.captures[1])
         count = int(m.captures[2])
-        rand_restarts=10
+        rand_restarts=0
     end
 
     if !isdefined(:num_trials)
@@ -80,7 +80,7 @@ function run_phylo_experiment(filename, alpha::Float64)
 
     data = DataState(AA, DD, mu_r, mu_v, names)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 500, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 50, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
 
     cocluster_matrix = zeros(M,M)
     (iters, Ks, trainLLs, models) = result

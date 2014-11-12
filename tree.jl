@@ -46,6 +46,13 @@ end
 type Tree{T}
     nodes::Array{TreeNode{T},1}
     Tree() = new()
+
+end
+
+function Tree(t::Array{TreeNode{Int64},1})
+    tree = Tree{Int64}()
+    tree.nodes = t
+    tree
 end
 
 function ==(tree1::Tree, tree2::Tree)
@@ -240,6 +247,18 @@ function copy(tree::Tree{Vector{Float64}})
     new_tree
 end
 
+function SwapIndices!{T}(tree::Tree{T}, index1::Int64, index2::Int64)
+    node1 = tree.nodes[index1]
+    node2 = tree.nodes[index2]
+
+    node1.index = index2
+    node2.index = index1
+
+    tree.nodes[index1] = node2
+    tree.nodes[index2] = node1
+
+end
+
 # Construct a new tree object from a specifed node of an existing tree 
 # (eg after pruning or to obtain a subtree)
 # Can also be used to reindex the nodes (eg after grafting a new subtree in),
@@ -258,17 +277,19 @@ function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64, old_N::Int64
 
     queue = copy(leaves)
 
-    index_map = zeros(Int64, 2old_N-1)
+    index_map = zeros(Int64, 2max(old_N,N)-1)
 
     # build index_map and instantiate nodes of the new tree
     println("N: $N")
     indices = [1:2N-1]
     while length(queue) > 0
+        println("queue: $queue")
         node_index = shift!(queue)
 
+        println("node_index: $node_index")
+        println("indices: $indices")
         new_index = shift!(indices)
 
-        index_map[node_index] = new_index
  
         node = old_tree.nodes[node_index]
         new_node = copy(node)
@@ -328,7 +349,7 @@ function MakeReindexedTree{T}(old_tree::Tree{T}, root_index::Int64, old_N::Int64
     println("N: $N")
     UpdateSubtreeDescendantCounts!(tree, tree.nodes[index_map[root_index]])
     UpdateSubtreeAncestorCounts!(tree, tree.nodes[index_map[root_index]])
-    return (tree, index_map)
+    return (tree, index_map[1:2*old_N-1])
 end
 
 function PruneIndexFromTree!{T}(tree::Tree{T}, index::Int)
@@ -904,4 +925,28 @@ function total_branch_length(tree::Tree,
     end
 
     return total_length
+end
+
+function GenerateUniformTree(N::Int64)
+
+    nodes = Array(TreeNode{Int64}, 2N-1)  
+    tree = Tree(nodes)
+    for i = 1:N
+        cur = TreeNode(i,Nil(),Array(Node,2),i,1,0,1.0,0.5)
+        cur.children[1] = Nil()
+        cur.children[2] = Nil()
+        nodes[i] = cur
+        if i > 1
+            parent = TreeNode(i+N-1, Nil(),Array(Node,2),i+N-1,1,0,1.0,0.5)
+            parent.children[2] = Nil()
+            cur.parent = parent
+            parent.children[1] = cur
+            nodes[i+N-1] = parent
+
+            j = rand() < (i-1)/(2i-3) ? rand(1:i-1) : N+rand(1:i-2)
+            InsertIndexIntoTree!(tree, i, j)
+        end 
+    end
+   
+    tree 
 end

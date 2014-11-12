@@ -1095,6 +1095,41 @@ function eta_log_gradient(model::ModelState,
     gradient'[:]./Temp
 end
 
+
+function eta_log_prior_gradient(model::ModelState,
+                                model_spec::ModelSpecification;
+                                eta_Temp::Float64=1.0)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+
+    alpha = model.alpha
+
+    S = size(tree.nodes[1].state)
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    gradient = zeros(N-1, S)
+
+    for k = indices
+        if k > N
+            
+            cur = tree.nodes[k]
+            parent = cur.parent
+
+            nu_k = parent == Nil() ? 1.0 : cur.parent.rho
+            eta_k = cur.state 
+
+            for s = 1:S
+                gradient[k-N,s] += (alpha*nu_k)/eta_k[s] - (alpha*(1-nu_k))/(1-eta_k[s])
+            end         
+
+        end
+    end
+    gradient'[:]
+end
+
 ###################################
 ##### pdf for Z assignment update #
 ###################################
@@ -1241,6 +1276,7 @@ function tree_kernel_sample(model::ModelState,
     return new_model
 
 end
+
 
 function tree_kernel_logpdf(model::ModelState,
                             model0::ModelState,
@@ -1428,6 +1464,205 @@ function tree_kernel_logpdf(model::ModelState,
     end
 end
 
+function grow_prune_kernel_sample(model::ModelState,
+                                  model_spec::ModelSpecification,
+                                  data::DataState,
+                                  grow::Bool)
+
+
+    new_model = copy(model)
+
+    tree = new_model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    
+    alpha = new_model.alpha
+    Z = new_model.Z
+    M, S = size(data.reference_counts)
+
+    p_forward = 0.0
+    p_reverse = 0.0
+
+    root = FindRoot(tree,1)
+
+    if grow
+        # We can grow from any existing branch of the tree whose parent has more than one mutation
+        splittable_nodes = find([ sum(Z .== k) for k = N+1:2N-1] .> 1)
+
+        if length(splittable_nodes) == 0
+            println("Z: $Z")
+
+            @assert false
+        end
+
+        if root.index in splittable_nodes
+            branch_index = rand(1:2*length(splittable_nodes)+1)
+            if branch_index == 1
+                sibling_index = root.index
+            else
+                node_index = splittable_nodes[rand(1:length(splittable_nodes))] + N
+                child_index = rand(1:2)
+                sibling_index = tree.nodes[node_index].children[child_index].index
+            end
+            p_forward += -log(2*length(splittable_nodes)+1) 
+        else
+            node_index = splittable_nodes[rand(1:length(splittable_nodes)) ] + N
+            child_index = rand(1:2)
+            sibling_index = tree.nodes[node_index].children[child_index].index
+
+            p_forward += -log(2*length(splittable_nodes)) 
+        end 
+
+        new_leaf = TreeNode(zeros(S), 2N)
+        new_leaf.children[1] = Nil()
+        new_leaf.children[2] = Nil()
+
+
+        N_cur = tree.nodes[sibling_index].num_leaves + 1
+        xi = 1- 2/(N_cur+1)
+        nutd = xi < rand() ? 1.0 : rand(Beta(xi, 1.0))
+
+        p_forward += nutd == 1.0 ? 0.0 : logpdf(Beta(xi, 1.0), nutd)
+
+        nu = rand()
+        eta = rand(Beta(alpha*nu+1, alpha*(1-nu)+1), S)
+        new_internal = TreeNode(eta, 2N+1)
+        new_internal.rhot = nutd
+        new_internal.rho = nu
+
+        p_forward += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
+
+        new_leaf.parent = new_internal
+        new_internal.children[1] = new_leaf
+        new_internal.children[2] = Nil()
+       
+        push!(tree.nodes, new_leaf)
+        push!(tree.nodes, new_internal)
+
+        parent = tree.nodes[node_index]
+
+        # new_internal is the new root, take assignments from sibling
+        if parent == Nil()
+            assignments = find(Z .== sibling_index )
+        # new_internal is a child, take assignments from parent
+        else
+            assignments = find(Z .== parent.index )
+        end
+
+        Z_perm = randperm(length(assignments))
+        num_moved_assignments = rand(1:length(Z_perm)-1)
+        Z[assignments[Z_perm[1:num_moved_assignments]]] = 2N+1
+
+        p_forward += -log(length(Z_perm)-1) # choose number to move
+        p_forward += -lbinomial( length(Z_perm), num_moved_assignments) # select assignments to move
+ 
+        InsertIndexIntoTree!(tree, 2N, sibling_index)
+        SwapIndices!(tree, 2N, N+1) # new leaf should have index N+1
+
+        swapped_assignments = find(Z .== N+1) 
+        Z[swapped_assignments] = 2N
+ 
+        new_N = N + 1
+
+        # compute p_reverse
+        right_children = [tree.nodes[i].children[1].index for i = new_N+1:2new_N-1]
+        prunable_indices = right_children[find(right_children .<= new_N)]
+
+        p_reverse += -log(length(prunable_indices))
+
+    else #prune
+        @assert N > 2
+     
+        right_children = [tree.nodes[i].children[1].index for i = N+1:2N-1]
+        prunable_indices = right_children[find(right_children .<= N)]
+
+        prune_index = prunable_indices[rand(1:length(prunable_indices))]
+        parent = tree.nodes[prune_index].parent
+ 
+        p_forward += -log(length(prunable_indices))
+  
+        grandparent = parent.parent
+
+        moving_assignments = find(Z .== parent.index )
+
+        # Removing the root, so move all assignments to left child
+        if grandparent == Nil()
+            dest_index = parent.children[2].index
+        # Move all assignments to parent 
+        else
+            dest_index = grandparent.index
+        end
+
+        dest_assignments = find(Z .== dest_index)
+        Z[moving_assignments] = dest_index
+
+        N_cur = parent.num_leaves
+
+        parent_index = parent.index
+        PruneIndexFromTree!(tree, prune_index)
+        SwapIndices!(tree, prune_index, N)
+        SwapIndices!(tree, parent_index, 2N-1)
+        SwapIndices!(tree, 2N-2, N)
+
+        new_N = N - 1
+        tree.nodes = tree.nodes[1:2new_N-1]
+
+        swapped_assignments = find(Z .== 2N-1) 
+        Z[swapped_assignments] = parent_index
+
+        swapped_assignments = find(Z .== 2N-2)
+        Z[swapped_assignments] = N
+
+        # compute p_reverse
+
+        splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
+
+        root = FindRoot(tree,1)
+        if root.index in splittable_nodes
+            p_reverse += -log(2*length(splittable_nodes)+1) 
+        else
+            p_reverse += -log(2*length(splittable_nodes)) 
+        end 
+
+        d = length(dest_assignments)
+        m = length(moving_assignments)
+        total_assignments = d + m
+        p_reverse += -log(total_assignments - 1)
+        p_reverse += -lbinomial(total_assignments, m)
+
+        nutd = parent.rhot
+        nu = parent.rho
+        eta = parent.state
+
+        xi = 1- 2/(N_cur+1)
+
+        p_reverse += nutd == 1.0 ? 0.0 : logpdf(Beta(xi, 1.0), nutd)
+        p_reverse += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
+
+    end
+
+    println("proposal N: $new_N")
+    return new_model, p_forward-p_reverse
+end
+
+function grow_prune_kernel_logpdf(model::ModelState,
+                                  model0::ModelState,
+                                  model_spec::ModelSpecification,
+                                  data::DataState)
+
+
+    M, S = size(data.reference_counts)
+    alpha = model.alpha
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    Z = model.Z
+
+    tree0 = model0.tree
+    N0::Int = (length(tree0.nodes) + 1) / 2
+    Z0 = model0.Z
+
+    
+end
 ###################################
 ###### pdfs for vardim updates ####
 ###################################

@@ -2,6 +2,9 @@ function incomplete_gamma(t::Float64, b::Float64)
     quadgk(x -> x^(t-1)*exp(-x), zero(t), b, reltol=100*eps(t))[1]
 end
 
+function lbinomial(n, k)
+    lfact(n) - lfact(k) - lfact(n-k)
+end
 
 # Utility probability functions
 function normal_logpdf(x, sigma)
@@ -232,3 +235,26 @@ function trapz(x::Array{Float64,1}, y::Array{Float64,1})
     sum(0.5*(ry + ly) .* (rx-lx))
 end
 
+function generate_coalescent_tree(N::Int64)
+    blocks = [1:N]
+    next_ind = N+1
+    Z = zeros(N-1, 4)
+    t = 0.0
+    while length(blocks) > 1
+
+        n = length(blocks)
+        l_ind = rand(1:length(blocks))
+        l = splice!(blocks, l_ind)
+
+        r_ind = rand(1:length(blocks))
+        r = splice!(blocks, r_ind)
+        t += exp_rand(1.0/binomial(n,2))
+        Z[next_ind-N,1] = l
+        Z[next_ind-N,2] = r
+        Z[next_ind-N,3] = t 
+        push!(blocks, next_ind)
+        next_ind += 1
+    end
+
+    Z 
+end

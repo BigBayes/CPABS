@@ -113,7 +113,8 @@ function mcmc(data::DataState,
         end
 
         if iter > burnin_iterations && mod(iter, jump_lag) == 0 
-            model = sample_num_leaves(model, model_spec, data, jump_scan_length, 0, eta_Temp=eta_Temp)
+            #model = sample_num_leaves(model, model_spec, data, jump_scan_length, 0, eta_Temp=eta_Temp)
+            model = sample_num_leaves_grow_prune(model, model_spec, data)
             tree = model.tree
             Z = model.Z
             N = ifloor((length(tree.nodes)+1) / 2)
@@ -142,26 +143,20 @@ function mcmc(data::DataState,
 
 
             #new_model = draw_neighboring_tree(model, model_spec, data, N)
-            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+#            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+#
+#            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
 
-            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
+#
+#
+#            ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
+#            new_u = zeros(Int64, 2(N+1)-1)
+#            for i=1:length(new_model.Z)
+#                x = new_model.Z[i]
+#                new_u[x] += 1
+#            end 
+#            p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
-
-
-            ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
-            new_u = zeros(Int64, 2(N+1)-1)
-            for i=1:length(new_model.Z)
-                x = new_model.Z[i]
-                new_u[x] += 1
-            end 
-            p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
-
-            new_prior = prior(new_model, model_spec)
-            new_LL = likelihood(new_model, model_spec, data)
-            println("new_prior: $new_prior")
-            println("new_LL: $new_LL")
-            println("old_LL: $tree_LL")
-            println("kernel_logpdf: $kernel_logpdf")
             if iter > burnin_iterations
                 c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
             else
@@ -199,10 +194,9 @@ function mcmc(data::DataState,
             end
 
             tbl = Table(1,2)
-            tbl2 = Table(3,1)
+            tbl2 = Table(2,1)
             tbl2[1,1] = p_dendrogram
             tbl2[2,1] = p_clusters
-            tbl2[3,1] = p_dendrogram2
             tbl[1,1] = p_chain
             tbl[1,2] = tbl2
             Winston.display(tbl)
@@ -1181,6 +1175,30 @@ function sample_psi_from_f(model::ModelState,
     end
 end
 
+
+function extract_eta(model::ModelState)
+    tree  = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    S = length(tree.nodes[1].state)
+    eta = zeros(S*(N-1))
+
+    for j = N+1:2N-1
+        eta[1 + (j-N-1)*S : (j-N)*S] = tree.nodes[j].state
+    end
+    return eta
+end
+
+function set_eta(model::ModelState,
+                 eta::Vector{Float64})
+    tree  = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    S = length(tree.nodes[1].state)
+
+    for j = N+1:2N-1
+        tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
+    end
+end
+
 function sample_eta(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
@@ -1443,6 +1461,171 @@ function compute_assignment_probs(model::ModelState,
     return z_probs
 end
 
+function sample_num_leaves_grow_prune(model::ModelState,
+                                      model_spec::ModelSpecification,
+                                      data::DataState)
+
+   
+    proposal_model, proposal_ratio = grow_prune_kernel_sample( model, model_spec, data, rand() < 0.5) 
+
+    pi_0 = full_pdf(model, model_spec, data)
+    pi_1 = full_pdf(proposal_model, model_spec, data)
+
+    acceptance_prob = pi_1 - pi_0 - proposal_ratio
+    println("acceptance_prob: $acceptance_prob")
+ 
+    log(rand()) < acceptance_prob ? proposal_model : model 
+end
+
+function sample_num_leaves_pseudo_marginal(model::ModelState,
+                                           model_spec::ModelSpecification,
+                                           data::DataState,
+                                           num_scan_iterations::Int64,
+                                           num_iterations::Int64;
+                                           eta_Temp::Float64 = 1.0)
+    
+    slice_iterations = 5
+    hmc_iterations = 10
+    Z_iterations = 5
+
+    tree = model.tree
+    lambda = model.lambda
+    alpha = model.alpha
+
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
+    M,S = size(data.reference_counts)
+
+    root = FindRoot(model.tree, 1)
+    root_index = root.index
+ 
+
+    global update_accept_counts = false
+    D_k = 0 
+    # W = (K-1, K) 
+    if rand() < 0.5
+        model_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha)
+        model_j = model
+        println("W = (K-1, K)")
+        D_k = N-1 
+    # W = (K, K+1) 
+    else
+        model_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha)
+        model_j = model
+        println("W = (K, K+1)")
+        D_k = N+1 
+    end
+
+    function mixed_splits(eta::Vector{Float64},
+                          D_k::Int64,
+                          particles,
+                          model_spec::ModelSpecification,
+                          data::DataState;
+                          compute_gradient::Bool=false)
+
+        D = length(eta)
+        eta_k = eta[1:D_k]
+        eta_j = eta[D_k+1:end]
+
+        log_probs = zeros(length(particles))
+        gradients = Array(Any, length(particles))
+
+
+        for m = 1:length(particles)
+            model_k, model_j = particles[m]
+
+            set_eta(model_k, eta_k)
+            set_eta(model_j, eta_j)
+
+            M_k = full_pdf(model_k, model_spec, data)
+            M_j = full_pdf(model_j, model_spec, data)
+           
+            P_k = prior(model_k, model_spec, force_nonunit_root_nutd=true) 
+            P_j = prior(model_j, model_spec, force_nonunit_root_nutd=true) 
+
+            grad_k = eta_log_gradient(model_k, model_spec, data)
+            grad_j = eta_log_gradient(model_j, model_spec, data)
+
+            prior_grad_k = eta_log_prior_gradient(model_k, model_spec)
+            prior_grad_j = eta_log_prior_gradient(model_j, model_spec)
+
+            grad_k = logsumexp_d_dx([M_k+P_j, M_j+P_k], (grad_k, prior_grad_k))
+            grad_j = logsumexp_d_dx([M_k+P_j, M_j+P_k], (prior_grad_j, grad_j))
+
+            log_probs[m] = logsumexp([M_k+P_j, M_j+P_k])
+            gradients[m] = [grad_k, grad_j]
+        end
+    
+        estimated_log_prob = logsumexp(log_probs)
+        estimated_gradient = logsumexp_d_dx(log_probs, gradients) 
+
+        return (estimated_log_prob, estimated_gradient)
+    end
+
+    function update_particles!(eta::Vector{Float64},
+                               D_k::Int64,
+                               particles,
+                               model_spec::ModelSpecification,
+                               data::DataState)
+
+
+    end
+
+    kernel_logpdf_k = tree_kernel_logpdf(model_k, model_star_k, model_spec, data, parent_prune_index_k,
+                                       eta_Temp=eta_Temp)
+    kernel_logpdf_j = tree_kernel_logpdf(model_j, model_star_j, model_spec, data, parent_prune_index_j,
+                                       eta_Temp=eta_Temp)
+    model_k_pdf = full_pdf(model_k, model_spec, data)
+    model_j_pdf = full_pdf(model_j, model_spec, data)
+
+    term_k = model_k_pdf + kernel_logpdf_j
+    term_j = model_j_pdf + kernel_logpdf_k
+
+    splits = [term_k, term_j]
+
+    model_star_k_pdf = full_pdf(model_star_k, model_spec, data)
+    model_star_j_pdf = full_pdf(model_star_j, model_spec, data)
+    probs = exp_normalize(splits)
+    println("model_k_pdf: $model_k_pdf")
+    println("model_j_pdf: $model_j_pdf")
+    println("model_star_k_pdf: $model_star_k_pdf")
+    println("model_star_j_pdf: $model_star_j_pdf")
+    println("kernel_pdf_k: $kernel_logpdf_k")
+    println("kernel_pdf_j: $kernel_logpdf_j")
+    println("splits: $splits")
+    println("probs: $probs")
+    new_model = rand(Categorical(probs)) == 1 ? model_k : model_j
+     
+    if kernel_logpdf_j == -Inf && model_k_pdf > model_j_pdf && false
+        Z = model_j.Z
+        u = zeros(Int64, 2N-1)
+        for i=1:length(Z)
+            u[Z[i]] += 1
+        end 
+
+        ZZ, leaf_times, Etas, inds = model2array(model_j, return_leaf_times=true)
+        p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+
+        Z = model_star_j.Z
+        u = zeros(Int64, 2N-1)
+        for i=1:length(Z)
+            u[Z[i]] += 1
+        end 
+        ZZ, leaf_times, Etas, inds = model2array(model_star_j, return_leaf_times=true)
+        p_dendrogram_star = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+        tbl = Table(2,1)
+        tbl[1,1] = p_dendrogram_star
+        tbl[2,1] = p_dendrogram
+
+        display(tbl)
+        @assert false
+    end
+
+    global update_accept_counts = true
+
+    return new_model
+
+end
 
 
 function sample_num_leaves(model::ModelState,
