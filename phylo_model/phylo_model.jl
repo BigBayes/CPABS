@@ -1,4 +1,5 @@
 require("tree.jl")
+require("wang_landau.jl")
 
 import Base.copy
 import Base.ref
@@ -23,10 +24,12 @@ type ModelSpecification
     debug::Bool
     verbose::Bool
     plot::Bool
+
+    WL_state::WangLandauState
 end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.rrj_jump_probabilities, ms.debug,
-                                                  ms.verbose, ms.plot)
+                                                  ms.verbose, ms.plot, copy(ms.WL_state))
 
 type DataState
     reference_counts::Matrix{Float64}
