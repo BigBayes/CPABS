@@ -1564,6 +1564,11 @@ function grow_prune_kernel_sample(model::ModelState,
 
         parent = tree.nodes[node_index]
 
+        eta2 = parent.state
+
+        prod_eta = eta .* eta2
+        p_reverse += sum([logpdf(Beta(5*prod_eta[k]+1, 5*(1-prod_eta[k])+1), eta2[k]) for k = 1:length(eta2)])
+
         # new_internal is the new root, take assignments from sibling
         if parent == Nil()
             moved_assignments_index = sibling_index
@@ -1734,6 +1739,15 @@ function grow_prune_kernel_sample(model::ModelState,
         p_reverse += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
 
         # end compute p_reverse
+
+        dest = tree.nodes[dest_index]
+        eta1 = dest.state
+        eta2 = parent.state
+        prod_eta = (eta1.*eta2)
+        for k = 1:length(dest.state)
+            dest.state[k] = rand(Beta(5*prod_eta[k]+1, 5*(1-prod_eta[k])+1))
+        end
+        p_forward += sum([logpdf(Beta(5*prod_eta[k]+1, 5*(1-prod_eta[k])+1), dest.state[k]) for k = 1:length(dest.state)])
 
         Z[moving_mutations] = dest_index
 

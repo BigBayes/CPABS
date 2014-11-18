@@ -1553,8 +1553,16 @@ function sample_num_leaves_grow_prune(model::ModelState,
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
-   
-    proposal_model, proposal_ratio = grow_prune_kernel_sample( model, model_spec, data, rand() < 0.5) 
+ 
+    grow_prob = 0.2 
+    grow = rand() < grow_prob
+    p_forward = grow ? log(grow_prob) : log(1-grow_prob)
+    p_reverse = grow ? log(1-grow_prob) : log(grow_prob) 
+    
+    proposal_model, proposal_ratio = grow_prune_kernel_sample( model, model_spec, data, grow) 
+
+    proposal_ratio += p_forward - p_reverse
+ 
     new_N::Int = (length(proposal_model.tree.nodes)+1) / 2
 
     pi_0 = full_pdf(model, model_spec, data)

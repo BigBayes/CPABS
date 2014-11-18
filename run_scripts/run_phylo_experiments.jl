@@ -76,7 +76,7 @@ function run_phylo_experiment(filename, alpha::Float64;
         jump_lag = 1
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
-        init_K = 4
+        init_K = 3
         D = int(m.captures[1])
         count = int(m.captures[2])
         rand_restarts=0
