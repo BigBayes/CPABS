@@ -24,14 +24,22 @@ function run_all_aldous_experiments(alpha)
     end
 end
 
-function run_phylo_experiment(filename, alpha::Float64)
+function run_phylo_experiment(filename, alpha::Float64; 
+                              wl_boundaries::Vector{Float64} = [Inf], #[-1400:50:-1250.0],
+                              wl_K_boundaries::Vector{Float64} = [4,5,6,7,Inf],
+                              wl_f0::Float64 = 1.0,
+                              wl_histogram_test_ratio::Float64 = 0.3)
+
     (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
 
     (M, S) = size(AA)
+
+    WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
+
     if !isdefined(:plotting)
-        model_spec = ModelSpecification(ones(3)/3, false, false, false)
+        model_spec = ModelSpecification(ones(3)/3, false, false, false, WL_state)
     else
-        model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
+        model_spec = ModelSpecification(ones(3)/3, false, false, plotting, WL_state)
     end
 
 
@@ -80,22 +88,33 @@ function run_phylo_experiment(filename, alpha::Float64)
 
     data = DataState(AA, DD, mu_r, mu_v, names)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 10000, 50, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 500, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
+
+    wl_state = model_spec.WL_state
+    total_partition_mass = logsumexp(wl_state.partition_function)
 
     cocluster_matrix = zeros(M,M)
     (iters, Ks, trainLLs, models) = result
+    sum_w = 0.0
     for n = 1:length(models)
         model = models[n]
+        N::Int = (length(model.tree.nodes)+1)/2
+
+        log_pdf = full_pdf(model, model_spec, data)
+        w = get_partition_function(wl_state, N-1, log_pdf)
+        w = exp(w - total_partition_mass)
+        sum_w += w
+
         Z = model.Z
         C = [Int64[] for x=1:maximum(Z)]
         for i = 1:length(Z)
             push!(C[Z[i]], i)
         end
         for c in C
-            cocluster_matrix[c,c] += 1
+            cocluster_matrix[c,c] += w
         end
     end
-    cocluster_matrix /= length(models)
+    cocluster_matrix /= sum_w
 
     if filename_base == "emptysims"
         writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")

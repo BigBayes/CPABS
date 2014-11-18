@@ -120,6 +120,12 @@ function mcmc(data::DataState,
             N = ifloor((length(tree.nodes)+1) / 2)
         end
 
+        if iter > burnin_iterations
+            update_partition_function(model_spec.WL_state, N-1, full_pdf(model, model_spec, data))
+        end
+
+        println("WL estimated partition function: $(model_spec.WL_state.partition_function)")
+
         if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
 
@@ -304,7 +310,7 @@ function mcmc_sweep(model::ModelState,
 
     slice_iterations = 5
     nu_time = time()
-    sample_nu_nutd(model, model_spec, slice_iterations, verbose=verbose)
+    sample_nu_nutd(model, model_spec, data, slice_iterations, verbose=verbose)
     nu_time = time() - nu_time
 
     if verbose
@@ -348,8 +354,12 @@ end
 # nutd_l = l.rhot 
 function sample_nu_nutd(model::ModelState,
                         model_spec::ModelSpecification,
+                        data::DataState,
                         slice_iterations::Int;
                         verbose::Bool=true)
+
+    full_logpdf = full_pdf(model, model_spec, data)
+    wl_state = model_spec.WL_state
 
     if verbose
         println("Sample nu, nu-tilde")
@@ -376,7 +386,7 @@ function sample_nu_nutd(model::ModelState,
 
     Pki = [Array(Node,0) for i = 1:2N-1] # {j | i in P[j]}
     An_i = [Array(Node,0) for i = 1:2N-1] # {j | i in ancestors[j]}
-    An_tau = [Array(Node,0) for i = 1:2N-1] #{j | i in ancestor[tau(j)]}
+    An_tau = [Array(Node,0) for i = 1:2N-1] # {j | i in ancestor[tau(j)]}
 
     A_I = zeros(2N-1)
     A_tau = zeros(2N-1)
@@ -528,6 +538,9 @@ function sample_nu_nutd(model::ModelState,
             
 
             if l > N
+                f_vals = nu_tilde_splits(nu_r, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sl, node="l")
+                fx0 = nutd_l == 1.0 ? f_vals[1] : f_vals[2]
 
                 # Sample nutd_l
                 f = x -> logsumexp( nu_tilde_splits(nu_r, x, nutd_r, gam, U, U_i[l], U_i[r], u, 
@@ -543,9 +556,29 @@ function sample_nu_nutd(model::ModelState,
 
                 f_ind = rand(Categorical(exp_normalize(f_vals)))
                 nutd_l = f_ind == 1 ? 1.0 : nutd_u
+
+                # WL adjustment
+                fx1 = nutd_l == 1.0 ? f_vals[1] : f_vals[2]
+                full_logpdf_1 = fx1 - fx0 + full_logpdf
+
+                e0 = get_partition_function(wl_state, N-1, full_logpdf)
+                e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+                if log(rand()) < e0 - e1 
+                    left_child.rhot = nutd_l
+                    full_logpdf = full_logpdf_1
+                end
+
+                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
             end
 
             if r > N
+
+                f_vals = nu_tilde_splits(nu_r, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u, 
+                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sr, node="r")
+                fx0 = nutd_r == 1.0 ? f_vals[1] : f_vals[2]
+
+
                 # Sample nutd_r
                 f = x -> logsumexp( nu_tilde_splits(nu_r, nutd_l, x, gam, U, U_i[l], U_i[r], u, 
                                         K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], p_sr, node="r"))
@@ -558,6 +591,19 @@ function sample_nu_nutd(model::ModelState,
 
                 f_ind = rand(Categorical(exp_normalize(f_vals)))
                 nutd_r = f_ind == 1 ? 1.0 : nutd_u
+
+                # WL adjustment
+                fx1 = nutd_r == 1.0 ? f_vals[1] : f_vals[2]
+                full_logpdf_1 = fx1 - fx0 + full_logpdf
+
+                e0 = get_partition_function(wl_state, N-1, full_logpdf)
+                e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+                if log(rand()) < e0 - e1 
+                    right_child.rhot = nutd_r
+                    full_logpdf = full_logpdf_1
+                end
+                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
             end
 
             # Sample nu_r = 1-nu_l
@@ -565,36 +611,22 @@ function sample_nu_nutd(model::ModelState,
             f = x -> nu_logpdf(x, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u,
                                 K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r], cur.state, alpha, N_l, N_r)
 
-#            f1 = x -> p_z_given_nu_nutd(x, nutd_l, nutd_r, gam, U, U_i[l], U_i[r], u, 
-#                                        K[l,:], K[r,:], C_l, C_r, D, Pki[l], Pki[r]) + p_nu_Nl_Nr(x, N_l, N_r)
-#
-#
-#            left_child.rhot = nutd_l
-#            right_child.rhot = nutd_r
-#            f2 = x -> (tree.nodes[i].rho = x; full_pdf(model, model_spec, data))
-#
-#                    x_range = [0.01:0.01:0.99]
-#                    f1_vals = [f(x) for x in x_range]
-#                    f2_vals = [f2(x) for x in x_range]
-#
-#                    f1_vals -= maximum(f1_vals)
-#                    f2_vals -= maximum(f2_vals)
-#
-#                    c1 = Curve(x_range, f1_vals, color="blue")
-#                    c2 = Curve(x_range, f2_vals, color="red")
-#
-#                    p = FramedPlot()
-#                    add(p, c2) 
-#                    add(p, c1) 
-#                    tbl = Table(1,2)
-#                    tbl[1,1] = p
-#                    tbl[1,2] = dend
-#                    display(tbl)
-#                    @assert false
+            fx0 = f(nu_r)
  
             (nu_r, f_nu) = slice_sampler(nu_r, f, 0.1, 10, 0.0, 1.0)
 
-            cur.rho = nu_r
+            # WL adjustment
+            fx1 = f(nu_r)
+            full_logpdf_1 = fx1 - fx0 + full_logpdf_1
+
+            e0 = get_partition_function(wl_state, N-1, full_logpdf)
+            e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+            if log(rand()) < e0 - e1
+                cur.rho = nu_r
+                full_logpdf = full_logpdf_1
+            end
+            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
 
             if i == root.index
                 update_nu_nutd_constants!(i,[i], gam, ancestors, Tau, Pki, P, An_i, An_tau, root_An_ni, root_An_ntau, K, A_I, A_tau, B_I, B_tau)
@@ -603,35 +635,14 @@ function sample_nu_nutd(model::ModelState,
                 D = B_tau[i] - B_I[i]
 
                 nutd_p = cur.rhot 
+                f_vals = root_nu_tilde_splits(nutd_p, gam, U, U_i[i], u,
+                                        K[i,:], C_i, D, Pki[i], p_s)
+                fx0 = nutd_p == 1.0 ? f_vals[1] : f_vals[2]
+
                 nutd_p = nutd_p == 1.0 ? rand(Uniform(0,1)) : nutd_p
 
                 f = x -> logsumexp( root_nu_tilde_splits(x, gam, U, U_i[i], u, 
                                         K[i,:], C_i, D, Pki[i], p_s))
-                ##########
-#                    println("i: $i")
-#                    f1 = x -> root_nu_tilde_splits(x, gam, U, U_i[i], u, 
-#                                            K[i,:], C_i, D, Pki[i], p_s)[2]
-#                    f2 = x -> (tree.nodes[i].rhot = x; prior(model, model_spec, debug=false))
-#
-#                    x_range = [0.01:0.01:0.99]
-#                    f1_vals = [f1(x) for x in x_range]
-#                    f2_vals = [f2(x) for x in x_range]
-#
-#                    f1_vals -= maximum(f1_vals)
-#                    f2_vals -= maximum(f2_vals)
-#
-#                    c1 = Curve(x_range, f1_vals, color="blue")
-#                    c2 = Curve(x_range, f2_vals, color="red")
-#
-#                    p = FramedPlot()
-#                    add(p, c2) 
-#                    add(p, c1) 
-#                    tbl = Table(1,2)
-#                    tbl[1,1] = p
-#                    tbl[1,2] = dend
-#                    display(tbl)
-#                    @assert false
-                ##########
             
                 (nutd_u, f_nutd) = slice_sampler(nutd_p, f, 0.1, 10, 0.0, 1.0)
                 f_vals = root_nu_tilde_splits(nutd_u, gam, U, U_i[i], u,
@@ -639,7 +650,20 @@ function sample_nu_nutd(model::ModelState,
                 f_ind = rand(Categorical(exp_normalize(f_vals)))
                 nutd_p = f_ind == 1 ? 1.0 : nutd_u
                 @assert nutd_p != 1.0
-                cur.rhot = nutd_p
+
+                # WL adjustment
+                fx1 = f_vals[2]
+                full_logpdf_1 = fx1 - fx0 + full_logpdf
+
+                e0 = get_partition_function(wl_state, N-1, full_logpdf)
+                e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+                if log(rand()) < e0 - e1
+                    cur.rhot = nutd_p
+                    full_logpdf = full_logpdf_1
+                end
+                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+
             end
 
 
@@ -862,6 +886,8 @@ function sample_psi(model::ModelState,
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
 
+    full_logpdf = full_pdf(model, model_spec, data)
+
     if verbose
         println("psi: ")
     end
@@ -875,10 +901,10 @@ function sample_psi(model::ModelState,
             old_LL = likelihood(model, model_spec, data)
         end
 
-        if mod(parent_prune_index-N+1,ceil(N/10)) == 0 && verbose
-            percent = ceil((parent_prune_index-N+1)/ceil(N/10))*10
-            println(" ",percent , "% ")
-        end
+#        if mod(parent_prune_index-N+1,ceil(N/10)) == 0 && verbose
+#            percent = ceil((parent_prune_index-N+1)/ceil(N/10))*10
+#            println(" ",percent , "% ")
+#        end
 
         old_model = copy(model)
         old_tree = old_model.tree
@@ -928,7 +954,17 @@ function sample_psi(model::ModelState,
 #        println("likelihoods (correct): $correct_likelihoods")
 
         logprobs = priors + likelihoods
-        probs = exp_normalize(logprobs/Temp)
+
+        # Shift all logprobs to be the full logdensity values
+        original_sibling_state_index = find(pstates .== original_sibling.index)[1]
+        logprobs += full_logpdf - logprobs[original_sibling_state_index]
+
+        wl_state = model_spec.WL_state
+        wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in logprobs]  
+        wl_logprobs = logprobs - wl_adjustments
+
+        probs = exp_normalize(wl_logprobs/Temp)
+
 
         if any(isnan(probs))
             nan_ind = find(isnan(probs))[1]
@@ -943,6 +979,11 @@ function sample_psi(model::ModelState,
         end
 
         state_index = randmult(probs)
+
+        # update the current state's full density value
+        full_logpdf = logprobs[state_index]
+
+        #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
 
         subtree_indices = GetSubtreeIndicies(tree, prune_index)
         i = 1
@@ -1205,6 +1246,9 @@ function sample_eta(model::ModelState,
                     hmc_iterations::Int64;
                     Temp::Float64 = 1.0)
 
+    wl_state = model_spec.WL_state
+    full_logpdf = full_pdf(model, model_spec, data)
+
     tree  = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
     M, S = size(data.reference_counts)
@@ -1244,6 +1288,21 @@ function sample_eta(model::ModelState,
                 global ref_accepts += eta != eta0
                 global ref_count += 1
             end
+
+            # WL adjustment
+            fx0 = eta_density(eta0)
+            fx = eta_density(eta)
+            full_logpdf_1 = full_logpdf - fx0 + fx
+
+            e0 = get_partition_function(wl_state, N-1, full_logpdf)
+            e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+            if log(rand()) < e0 - e1
+                full_logpdf = full_logpdf_1
+            else
+                eta = eta0
+            end
+            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
         end
     else
         for i = 1:hmc_iterations
@@ -1253,6 +1312,21 @@ function sample_eta(model::ModelState,
                 global hmc_accepts += eta != eta0
                 global hmc_count += 1
             end
+
+            # WL adjustment
+            fx0 = eta_density(eta0)
+            fx = eta_density(eta)
+            full_logpdf_1 = full_logpdf - fx0 + fx
+
+            e0 = get_partition_function(wl_state, N-1, full_logpdf)
+            e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
+
+            if log(rand()) < e0 - e1
+                full_logpdf = full_logpdf_1
+            else
+                eta = eta0
+            end
+            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
         end
 
     end
@@ -1355,6 +1429,9 @@ function sample_assignments(model::ModelState,
                             num_iterations::Int64;
                             Temp::Float64 = 1.0)
 
+    wl_state = model_spec.WL_state
+    full_logpdf = full_pdf(model, model_spec, data)
+
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
     M,S = size(data.reference_counts)
@@ -1375,6 +1452,11 @@ function sample_assignments(model::ModelState,
             cur_z = Z[i]-N
             z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp)
 
+            # WL adjustment
+            full_z_probs = z_probs + full_logpdf - z_probs[cur_z]
+            wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in full_z_probs]  
+            z_probs -= wl_adjustments
+
 #            full_logpdf = k -> (model.Z[i] = k+N; full_pdf(model, model_spec, data))
 #            full_z_probs = [full_logpdf(k) for k = 1:N-1]
 #            z_probs -= maximum(z_probs)
@@ -1385,6 +1467,9 @@ function sample_assignments(model::ModelState,
 
 
             new_z = rand(Categorical(exp_normalize(z_probs)))
+
+            full_logpdf = full_z_probs[new_z]
+            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
             U[cur_z] -= 1
             U[new_z] += 1
             Z[i] = new_z+N
@@ -1464,17 +1549,28 @@ end
 function sample_num_leaves_grow_prune(model::ModelState,
                                       model_spec::ModelSpecification,
                                       data::DataState)
+    wl_state = model_spec.WL_state
 
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
    
     proposal_model, proposal_ratio = grow_prune_kernel_sample( model, model_spec, data, rand() < 0.5) 
+    new_N::Int = (length(proposal_model.tree.nodes)+1) / 2
 
     pi_0 = full_pdf(model, model_spec, data)
     pi_1 = full_pdf(proposal_model, model_spec, data)
 
-    acceptance_prob = pi_1 - pi_0 - proposal_ratio
+    e0 = get_partition_function(wl_state, N-1, pi_0) 
+    e1 = get_partition_function(wl_state, new_N-1, pi_1) 
+
+    acceptance_prob = pi_1 - pi_0 - proposal_ratio + e0 - e1
     println("acceptance_prob: $acceptance_prob")
  
-    log(rand()) < acceptance_prob ? proposal_model : model 
+    new_model = log(rand()) < acceptance_prob ? proposal_model : model
+     
+    #update_partition_function(model_spec.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
+
+    new_model
 end
 
 function sample_num_leaves_pseudo_marginal(model::ModelState,

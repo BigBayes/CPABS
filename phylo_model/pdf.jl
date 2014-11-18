@@ -1495,21 +1495,45 @@ function grow_prune_kernel_sample(model::ModelState,
         end
 
         if root.index in splittable_nodes
-            branch_index = rand(1:2*length(splittable_nodes)+1)
+            branch_index = rand(1:3*length(splittable_nodes)+1)
             if branch_index == 1
                 sibling_index = root.index
             else
                 node_index = splittable_nodes[rand(1:length(splittable_nodes))] + N
-                child_index = rand(1:2)
-                sibling_index = tree.nodes[node_index].children[child_index].index
+                child_index = rand(1:3)
+
+                if child_index == 3
+                    sibling_index = node_index
+                    parent = tree.nodes[node_index].parent
+                    if parent != Nil() && parent.index
+                        p_reverse += -log(2)
+                    end 
+                else
+                    sibling_index = tree.nodes[node_index].children[child_index].index
+                    if sibling_index > N
+                        p_reverse += -log(2)
+                    end
+                end
             end
-            p_forward += -log(2*length(splittable_nodes)+1) 
+            p_forward += -log(3*length(splittable_nodes)+1) 
         else
             node_index = splittable_nodes[rand(1:length(splittable_nodes)) ] + N
-            child_index = rand(1:2)
-            sibling_index = tree.nodes[node_index].children[child_index].index
+            child_index = rand(1:3)
 
-            p_forward += -log(2*length(splittable_nodes)) 
+            if child_index == 3
+                sibling_index = node_index
+                parent = tree.nodes[node_index].parent
+                if parent != Nil()
+                    p_reverse += -log(2)
+                end 
+            else
+                sibling_index = tree.nodes[node_index].children[child_index].index
+                if sibling_index > N
+                    p_reverse += -log(2)
+                end
+            end
+
+            p_forward += -log(3*length(splittable_nodes)) 
         end 
 
         new_leaf = TreeNode(zeros(S), 2N)
@@ -1542,26 +1566,68 @@ function grow_prune_kernel_sample(model::ModelState,
 
         # new_internal is the new root, take assignments from sibling
         if parent == Nil()
-            assignments = find(Z .== sibling_index )
+            moved_assignments_index = sibling_index
         # new_internal is a child, take assignments from parent
         else
-            assignments = find(Z .== parent.index )
+            moved_assignments_index = parent.index
         end
+        moving_mutations = find(Z .== moved_assignments_index )
 
-        Z_perm = randperm(length(assignments))
-        num_moved_assignments = rand(1:length(Z_perm)-1)
-        Z[assignments[Z_perm[1:num_moved_assignments]]] = 2N+1
+#        Z_perm = randperm(length(assignments))
+#        num_moved_assignments = rand(1:length(Z_perm)-1)
+#        Z[assignments[Z_perm[1:num_moved_assignments]]] = 2N+1
+#
+#        p_forward += -log(length(Z_perm)-1) # choose number to move
+#        p_forward += -lbinomial( length(Z_perm), num_moved_assignments) # select assignments to move
 
-        p_forward += -log(length(Z_perm)-1) # choose number to move
-        p_forward += -lbinomial( length(Z_perm), num_moved_assignments) # select assignments to move
  
         InsertIndexIntoTree!(tree, 2N, sibling_index)
         SwapIndices!(tree, 2N, N+1) # new leaf should have index N+1
 
         swapped_assignments = find(Z .== N+1) 
         Z[swapped_assignments] = 2N
- 
+
+
+        moved_assignments_index = moved_assignments_index == N+1 ? 2N : moved_assignments_index
+
         new_N = N + 1
+
+        times = compute_times(new_model)
+        Tau = compute_taus(new_model)
+        phi = compute_phis(new_model)
+        # dummy U and Z set to ones as z_logpdf takes into account
+        # the fact that we shouldn't leave clusters empty (but we don't want that here)
+        U = ones(Int64,length(model.Z))
+        new_model.Z = ones(Int64, length(Z)) + new_N
+
+        Z_logpdfs = zeros(new_N-1, length(moving_mutations))
+        for i = 1:length(moving_mutations)
+            m = moving_mutations[i]
+            Z_logpdfs[:,i] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi) 
+        end
+        new_model.Z = Z
+
+        possible_Z_states = [moved_assignments_index, 2N+1]
+
+        Z_logpdf_diffs = Z_logpdfs[moved_assignments_index-new_N, :] - Z_logpdfs[2N+1-new_N,:]
+
+        remaining_driver = findmax(Z_logpdf_diffs)[2]
+        moving_driver = findmin(Z_logpdf_diffs)[2]
+
+        Z[moving_mutations[moving_driver]] = 2N+1
+        
+        for i = 1:length(moving_mutations)
+            if i != remaining_driver && i != moving_driver
+                m = moving_mutations[i]
+                Z_probs = exp_normalize(Z_logpdfs[ possible_Z_states-new_N, i])
+                Zm_index = rand(Categorical(Z_probs))
+                Z[m] = possible_Z_states[Zm_index]
+
+                p_forward += logpdf(Categorical(Z_probs), Zm_index)
+            end
+        end
+
+
 
         # compute p_reverse
         right_children = [tree.nodes[i].children[1].index for i = new_N+1:2new_N-1]
@@ -1582,20 +1648,94 @@ function grow_prune_kernel_sample(model::ModelState,
   
         grandparent = parent.parent
 
-        moving_assignments = find(Z .== parent.index )
+        moving_mutations = find(Z .== parent.index )
 
         # Removing the root, so move all assignments to left child
         if grandparent == Nil()
             dest_index = parent.children[2].index
         # Move all assignments to parent 
         else
-            dest_index = grandparent.index
+            cur = tree.nodes[prune_index]
+            cur_direction = find(parent.children .== cur)[1]
+            sibling = parent.children[2-cur_direction]
+            if  sibling != Nil() && sibling.index > N
+                if rand(1:2) == 1
+                    dest_index = sibling.index
+                else
+                    dest_index = grandparent.index
+                end
+                p_forward += -log(2)
+            else
+                dest_index = grandparent.index
+            end
         end
 
-        dest_assignments = find(Z .== dest_index)
-        Z[moving_assignments] = dest_index
+        # compute p_reverse
+        new_N = N - 1
+        splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
+
+        root = FindRoot(tree,1)
+        if root.index in splittable_nodes
+            p_reverse += -log(3*length(splittable_nodes)+1) 
+        else
+            p_reverse += -log(3*length(splittable_nodes)) 
+        end 
+
+        times = compute_times(new_model)
+        Tau = compute_taus(new_model)
+        phi = compute_phis(new_model)
+        # dummy U and Z set to ones as z_logpdf takes into account
+        # the fact that we shouldn't leave clusters empty (but we don't want that here)
+        U = ones(Int64,length(model.Z))
+        new_model.Z = ones(Int64, length(Z)) + N
+
+        dest_moved_mutations = find(Z .== dest_index)
+        moved_mutations = [moving_mutations, dest_moved_mutations]
+
+
+        Z_logpdfs = zeros(N-1, length(moved_mutations))
+        for i = 1:length(moved_mutations)
+            m = moved_mutations[i]
+            Z_logpdfs[:,i] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi) 
+        end
+        new_model.Z = Z
+
+        possible_Z_states = unique(Z[moved_mutations])
+        @assert length(possible_Z_states) == 2
+ 
+        Z_logpdf_diffs = Z_logpdfs[possible_Z_states[1]-N, :] - Z_logpdfs[possible_Z_states[2]-N,:]
+
+        remaining_driver = findmax(Z_logpdf_diffs)[2]
+        moving_driver = findmin(Z_logpdf_diffs)[2]
+
+        if possible_Z_states[1] != Z[moved_mutations[remaining_driver]] ||
+           possible_Z_states[2] != Z[moved_mutations[moving_driver]]
+            println("impossible reverse move")
+            p_reverse = -Inf
+        end
+
+        for i = 1:length(moving_mutations)
+            if i != remaining_driver && i != moving_driver
+                m = moved_mutations[i]
+                Z_probs = exp_normalize(Z_logpdfs[ possible_Z_states-N, i])
+                Zm_index = rand(Categorical(Z_probs))
+                p_reverse += logpdf(Categorical(Z_probs), Zm_index)
+            end
+        end
+
+        nutd = parent.rhot
+        nu = parent.rho
+        eta = parent.state
 
         N_cur = parent.num_leaves
+        xi = 1- 2/(N_cur+1)
+
+        p_reverse += nutd == 1.0 ? 0.0 : logpdf(Beta(xi, 1.0), nutd)
+        p_reverse += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
+
+        # end compute p_reverse
+
+        Z[moving_mutations] = dest_index
 
         parent_index = parent.index
         PruneIndexFromTree!(tree, prune_index)
@@ -1603,7 +1743,6 @@ function grow_prune_kernel_sample(model::ModelState,
         SwapIndices!(tree, parent_index, 2N-1)
         SwapIndices!(tree, 2N-2, N)
 
-        new_N = N - 1
         tree.nodes = tree.nodes[1:2new_N-1]
 
         swapped_assignments = find(Z .== 2N-1) 
@@ -1612,31 +1751,14 @@ function grow_prune_kernel_sample(model::ModelState,
         swapped_assignments = find(Z .== 2N-2)
         Z[swapped_assignments] = N
 
-        # compute p_reverse
+#        d = length(dest_assignments)
+#        m = length(moving_mutations)
+#        total_assignments = d + m
+#        p_reverse += -log(total_assignments - 1)
+#        p_reverse += -lbinomial(total_assignments, m)
 
-        splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
 
-        root = FindRoot(tree,1)
-        if root.index in splittable_nodes
-            p_reverse += -log(2*length(splittable_nodes)+1) 
-        else
-            p_reverse += -log(2*length(splittable_nodes)) 
-        end 
 
-        d = length(dest_assignments)
-        m = length(moving_assignments)
-        total_assignments = d + m
-        p_reverse += -log(total_assignments - 1)
-        p_reverse += -lbinomial(total_assignments, m)
-
-        nutd = parent.rhot
-        nu = parent.rho
-        eta = parent.state
-
-        xi = 1- 2/(N_cur+1)
-
-        p_reverse += nutd == 1.0 ? 0.0 : logpdf(Beta(xi, 1.0), nutd)
-        p_reverse += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
 
     end
 
@@ -1644,25 +1766,6 @@ function grow_prune_kernel_sample(model::ModelState,
     return new_model, p_forward-p_reverse
 end
 
-function grow_prune_kernel_logpdf(model::ModelState,
-                                  model0::ModelState,
-                                  model_spec::ModelSpecification,
-                                  data::DataState)
-
-
-    M, S = size(data.reference_counts)
-    alpha = model.alpha
-
-    tree = model.tree
-    N::Int = (length(tree.nodes) + 1) / 2
-    Z = model.Z
-
-    tree0 = model0.tree
-    N0::Int = (length(tree0.nodes) + 1) / 2
-    Z0 = model0.Z
-
-    
-end
 ###################################
 ###### pdfs for vardim updates ####
 ###################################
