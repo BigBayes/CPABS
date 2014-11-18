@@ -1635,18 +1635,20 @@ function grow_prune_kernel_sample(model::ModelState,
 
 
         # compute p_reverse
-        right_children = [tree.nodes[i].children[1].index for i = new_N+1:2new_N-1]
-        prunable_indices = right_children[find(right_children .<= new_N)]
+#        right_children = [tree.nodes[i].children[1].index for i = new_N+1:2new_N-1]
+#        prunable_indices = right_children[find(right_children .<= new_N)]
 
-        p_reverse += -log(length(prunable_indices))
+        p_reverse += -log(new_N)
 
     else #prune
         @assert N > 2
-     
-        right_children = [tree.nodes[i].children[1].index for i = N+1:2N-1]
-        prunable_indices = right_children[find(right_children .<= N)]
 
-        prune_index = prunable_indices[rand(1:length(prunable_indices))]
+        prunable_indices = [1:N]     
+#        right_children = [tree.nodes[i].children[1].index for i = N+1:2N-1]
+#        left_children = [tree.nodes[i].children[2].index for i = N+1:2N-1]
+#        prunable_indices = [right_children[find(right_children .<= N)],
+
+        prune_index = rand(1:N) #prunable_indices[rand(1:length(prunable_indices))]
         parent = tree.nodes[prune_index].parent
  
         p_forward += -log(length(prunable_indices))
@@ -1655,14 +1657,17 @@ function grow_prune_kernel_sample(model::ModelState,
 
         moving_mutations = find(Z .== parent.index )
 
-        # Removing the root, so move all assignments to left child
+        println("check1")
+        # Removing the root, so move all assignments to sibling
         if grandparent == Nil()
-            dest_index = parent.children[2].index
+            cur = tree.nodes[prune_index]
+            cur_direction = find(parent.children .== cur)[1]
+            dest_index = parent.children[3-cur_direction].index
         # Move all assignments to parent 
         else
             cur = tree.nodes[prune_index]
             cur_direction = find(parent.children .== cur)[1]
-            sibling = parent.children[2-cur_direction]
+            sibling = parent.children[3-cur_direction]
             if  sibling != Nil() && sibling.index > N
                 if rand(1:2) == 1
                     dest_index = sibling.index
@@ -1675,6 +1680,7 @@ function grow_prune_kernel_sample(model::ModelState,
             end
         end
 
+        println("check2")
         # compute p_reverse
         new_N = N - 1
         splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
@@ -1743,7 +1749,7 @@ function grow_prune_kernel_sample(model::ModelState,
         dest = tree.nodes[dest_index]
         eta1 = dest.state
         eta2 = parent.state
-        prod_eta = (eta1.*eta2)
+        prod_eta = sqrt(eta1.*eta2)
         for k = 1:length(dest.state)
             dest.state[k] = rand(Beta(5*prod_eta[k]+1, 5*(1-prod_eta[k])+1))
         end

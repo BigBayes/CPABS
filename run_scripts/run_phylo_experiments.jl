@@ -76,7 +76,7 @@ function run_phylo_experiment(filename, alpha::Float64;
         jump_lag = 1
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
-        init_K = 3
+        init_K = 4
         D = int(m.captures[1])
         count = int(m.captures[2])
         rand_restarts=0
@@ -88,7 +88,7 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     data = DataState(AA, DD, mu_r, mu_v, names)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 500, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 50, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
 
     wl_state = model_spec.WL_state
     total_partition_mass = logsumexp(wl_state.partition_function)
