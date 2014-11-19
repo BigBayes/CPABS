@@ -1685,16 +1685,6 @@ function grow_prune_kernel_sample(model::ModelState,
 
         # compute p_reverse
         new_N = N - 1
-        splittable_nodes = find([ sum(Z .== k) for k = N+1:2N-1] .> 1)
-
-        println("splittable_nodes: $splittable_nodes")
-
-        root = FindRoot(tree,1)
-        if root.index in splittable_nodes
-            p_reverse += -log(3*length(splittable_nodes)+1) 
-        else
-            p_reverse += -log(3*length(splittable_nodes)) 
-        end 
 
         times = compute_times(new_model)
         Tau = compute_taus(new_model)
@@ -1774,6 +1764,18 @@ function grow_prune_kernel_sample(model::ModelState,
 
         swapped_assignments = find(Z .== 2N-2)
         Z[swapped_assignments] = N
+
+
+        # p_reverse
+        splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
+
+        root = FindRoot(tree,1)
+        if root.index in splittable_nodes
+            p_reverse += -log(3*length(splittable_nodes)+1) 
+        else
+            p_reverse += -log(3*length(splittable_nodes)) 
+        end 
+        # end p_reverse
 
 #        d = length(dest_assignments)
 #        m = length(moving_mutations)
