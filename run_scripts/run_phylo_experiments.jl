@@ -16,11 +16,15 @@ function run_all_emptysims_experiments(alpha)
     end
 end
 
-function run_all_aldous_experiments(alpha)
+function run_aldous_experiments(alpha; max_count=Inf)
     filenames = readdir("../data/phylosub/aldous")
 
     for fname in filenames
-        @spawn run_phylo_experiment("aldous/$fname", alpha)
+        m = match(r"\.([0-9]+)\.([0-9]+)\.", fname)
+        count = int(m.captures[2])
+        if count <= max_count
+            @spawn run_phylo_experiment("aldous/$fname", alpha)
+        end
     end
 end
 
@@ -33,15 +37,6 @@ function run_phylo_experiment(filename, alpha::Float64;
     (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
 
     (M, S) = size(AA)
-
-    WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
-
-    if !isdefined(:plotting)
-        model_spec = ModelSpecification(ones(3)/3, false, false, false, WL_state)
-    else
-        model_spec = ModelSpecification(ones(3)/3, false, false, plotting, WL_state)
-    end
-
 
     #model_spec.debug = true
 
@@ -79,8 +74,24 @@ function run_phylo_experiment(filename, alpha::Float64;
         init_K = 4
         D = int(m.captures[1])
         count = int(m.captures[2])
+
+        if count < 100
+            wl_K_boundaries -= 1
+        end
+
         rand_restarts=0
     end
+
+
+    WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
+
+    if !isdefined(:plotting)
+        model_spec = ModelSpecification(ones(3)/3, false, false, false, WL_state)
+    else
+        model_spec = ModelSpecification(ones(3)/3, false, false, plotting, WL_state)
+    end
+
+
 
     if !isdefined(:num_trials)
         num_trials = 1

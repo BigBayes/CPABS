@@ -135,6 +135,10 @@ function prior(model::ModelState,
         assignment_term += U[i]*log(Tau[i])
     end
 
+    if !all( Tau .> 0)
+        return -Inf
+    end
+
     psi_term + assignment_term
 end
 
@@ -1657,7 +1661,6 @@ function grow_prune_kernel_sample(model::ModelState,
 
         moving_mutations = find(Z .== parent.index )
 
-        println("check1")
         # Removing the root, so move all assignments to sibling
         if grandparent == Nil()
             cur = tree.nodes[prune_index]
@@ -1680,10 +1683,11 @@ function grow_prune_kernel_sample(model::ModelState,
             end
         end
 
-        println("check2")
         # compute p_reverse
         new_N = N - 1
-        splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
+        splittable_nodes = find([ sum(Z .== k) for k = N+1:2N-1] .> 1)
+
+        println("splittable_nodes: $splittable_nodes")
 
         root = FindRoot(tree,1)
         if root.index in splittable_nodes

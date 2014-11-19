@@ -617,7 +617,7 @@ function sample_nu_nutd(model::ModelState,
 
             # WL adjustment
             fx1 = f(nu_r)
-            full_logpdf_1 = fx1 - fx0 + full_logpdf_1
+            full_logpdf_1 = fx1 - fx0 + full_logpdf
 
             e0 = get_partition_function(wl_state, N-1, full_logpdf)
             e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
