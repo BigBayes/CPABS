@@ -16,13 +16,13 @@ function run_all_emptysims_experiments(alpha)
     end
 end
 
-function run_aldous_experiments(alpha; max_count=Inf)
+function run_aldous_experiments(alpha; max_depth=Inf)
     filenames = readdir("../data/phylosub/aldous")
 
     for fname in filenames
         m = match(r"\.([0-9]+)\.([0-9]+)\.", fname)
-        count = int(m.captures[2])
-        if count <= max_count
+        D = int(m.captures[1])
+        if D <= max_depth
             @spawn run_phylo_experiment("aldous/$fname", alpha)
         end
     end
@@ -75,7 +75,7 @@ function run_phylo_experiment(filename, alpha::Float64;
         D = int(m.captures[1])
         count = int(m.captures[2])
 
-        if count < 100
+        if D < 100
             wl_K_boundaries -= 1
         end
 
