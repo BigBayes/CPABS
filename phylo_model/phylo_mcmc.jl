@@ -138,21 +138,21 @@ function mcmc(data::DataState,
             ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
             p_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
 
-            parent_prune_index = rand(N+1:2N-1)
-            grandparent = tree.nodes[parent_prune_index].parent
-
-
-            while grandparent == Nil()
-                parent_prune_index = rand(N+1:2N-1)
-                grandparent = tree.nodes[parent_prune_index].parent
-            end
+            # if N > 2
+#            parent_prune_index = rand(N+1:2N-1)
+#            grandparent = tree.nodes[parent_prune_index].parent
+#
+#
+#            while grandparent == Nil()
+#                parent_prune_index = rand(N+1:2N-1)
+#                grandparent = tree.nodes[parent_prune_index].parent
+#            end
 
 
             #new_model = draw_neighboring_tree(model, model_spec, data, N)
 #            new_model = tree_kernel_sample(model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
 #
 #            kernel_logpdf = tree_kernel_logpdf(new_model, model, model_spec, data, parent_prune_index, eta_Temp=eta_Temp)
-
 #
 #
 #            ZZ, leaf_times, Etas, inds = model2array(new_model, return_leaf_times=true)
@@ -162,6 +162,7 @@ function mcmc(data::DataState,
 #                new_u[x] += 1
 #            end 
 #            p_dendrogram2 = dendrogram(ZZ,new_u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+            #end
 
             if iter > burnin_iterations
                 c = Curve([burnin_iterations:iter], chain_probs[burnin_iterations:iter], color="blue")
