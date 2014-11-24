@@ -815,7 +815,8 @@ end
 
 function root_nu_tilde_splits(nutd, gam, U, U_i, u, K_i, C_i, D, Pki_i, xi)
 
-    p_z1 = p_z_given_nutd(1.0, gam, U, U_i, u, K_i, C_i, D, Pki_i)
+    # p_z1 should always be 0
+    p_z1 = -Inf #p_z_given_nutd(1.0, gam, U, U_i, u, K_i, C_i, D, Pki_i)
     p_z2 = p_z_given_nutd(nutd, gam, U, U_i, u, K_i, C_i, D, Pki_i)
  
     f1 = log(xi) + p_z1

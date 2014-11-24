@@ -644,7 +644,7 @@ function sample_nu_nutd(model::ModelState,
 
                 f = x -> logsumexp( root_nu_tilde_splits(x, gam, U, U_i[i], u, 
                                         K[i,:], C_i, D, Pki[i], p_s))
-            
+          
                 (nutd_u, f_nutd) = slice_sampler(nutd_p, f, 0.1, 10, 0.0, 1.0)
                 f_vals = root_nu_tilde_splits(nutd_u, gam, U, U_i[i], u,
                                         K[i,:], C_i, D, Pki[i], p_s)
@@ -1555,10 +1555,13 @@ function sample_num_leaves_grow_prune(model::ModelState,
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
  
-    grow_prob = 0.2 
+    grow_prob = N > 2 ? 0.2 : 1.0
+    rev_prune_prob = 0.8
+    rev_grow_prob = N > 3 ? 0.2 : 1.0
+
     grow = rand() < grow_prob
     p_forward = grow ? log(grow_prob) : log(1-grow_prob)
-    p_reverse = grow ? log(1-grow_prob) : log(grow_prob) 
+    p_reverse = grow ? log(rev_prune_prob) : log(rev_grow_prob) 
     
     proposal_model, proposal_ratio = grow_prune_kernel_sample( model, model_spec, data, grow) 
 
