@@ -822,6 +822,35 @@ function ConstructZ{T}(tree::Tree{T})
     full(sparse(Z_I, Z_J, Z_S, N, sum(U)))
 end
 
+# Is a an ancestor of b from the right subtree?
+function IsRightAncestor{T}(tree::Tree{T},
+                            index_a::Int64,
+                            index_b::Int64)
+
+    node_a = tree.nodes[index_a]
+    node_b = tree.nodes[index_b]
+
+    if node_a == node_b
+        return true
+    end
+
+    last_node = node_b
+
+    while node_b != Nil()
+        if node_b == node_a
+            if last_node == node_a.children[1]
+                return true
+            else
+                return false
+            end
+        end
+        last_node = node_b
+        node_b = node_b.parent
+    end
+
+    return false
+end
+
 function tree2array(tree::Tree,
                     gam::Float64;
                     return_leaf_times::Bool=false)

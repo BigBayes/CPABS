@@ -6,7 +6,7 @@ function refractive_sampler(init_x::Vector{Float64},
                             f::Function,
                             grad_f::Function,
                             opts::Options) 
-  @defaults opts w=.01 refractive_index_ratio=nothing m=10 transformation=IdentityTransformation verify_gradient=false
+  @defaults opts w=.01 refractive_index_ratio=nothing m=10 transformation=IdentityTransformation verify_gradient=false always_accept=false
   
   T = transformation.transformation_function
   T_inv = transformation.transformation_inverse
@@ -125,6 +125,10 @@ function refractive_sampler(init_x::Vector{Float64},
 #  println("fx: $fx")
 #  println("fx0: $fx0")
 #  println("accept_logprob: $accept_logprob")
+
+  if always_accept
+    return T(x), accept_logprob
+  end
 
   if rand() < exp(accept_logprob)
     return T(x)

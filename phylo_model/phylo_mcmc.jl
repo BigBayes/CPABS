@@ -25,9 +25,7 @@ function mcmc(data::DataState,
               model_spec::ModelSpecification,
               iterations::Int64,
               burnin_iterations::Int64;
-              jump_lag=100,
-              jump_scan_length=100,
-              eta_Temp=1.0,
+              aisrj_lag=10,
               rand_restarts::Int64=0)
 
     
@@ -47,6 +45,7 @@ function mcmc(data::DataState,
         rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha)
     end 
 
+    global ais_accepts = 0
 
     global hmc_accepts = 0
     global hmc_count = 0
@@ -77,23 +76,13 @@ function mcmc(data::DataState,
         tree_LL = likelihood(model, model_spec, data)
         println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
 
-        if iter == 1 || tree_prior + tree_LL > chain_probs[end]+100
-            Temp = 1.0
-        end
 
         push!(chain_probs, tree_prior + tree_LL)
         if iter == 2 && debug
             model_spec.debug = true
         end
 
-#        if iter < 0.5*iterations
-#            Temp += 0.5
-#        else
-#            Temp = 1.0
-#        end
-
-        mcmc_sweep(model, model_spec, data, Temp=Temp)
-
+        mcmc_sweep(model, model_spec, data)
 
         if iter == burnin_iterations && remaining_restarts > 0
             rand_restart_models[remaining_restarts] = model
@@ -112,9 +101,13 @@ function mcmc(data::DataState,
             end 
         end
 
-        if iter > burnin_iterations && mod(iter, jump_lag) == 0 
-            #model = sample_num_leaves(model, model_spec, data, jump_scan_length, 0, eta_Temp=eta_Temp)
-            model = sample_num_leaves_grow_prune(model, model_spec, data)
+        if iter > burnin_iterations
+
+            if mod(iter, aisrj_lag) == 0
+                model = sample_num_leaves_ais_rjmcmc(model, model_spec, data)
+            else
+                model = sample_num_leaves_grow_prune(model, model_spec, data)
+            end
             tree = model.tree
             Z = model.Z
             N = ifloor((length(tree.nodes)+1) / 2)
@@ -289,63 +282,78 @@ function mcmc_sweep(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState;
                     Temp::Float64 = 1.0,
-                    verbose::Bool=true)
+                    verbose::Bool=true,
+                    parameter_order = ["psi", "nu", "eta", "Z"])
 
     tree = model.tree
-
     if verbose
         tree_prior = prior(model,model_spec) 
         tree_LL = likelihood(model, model_spec, data)
         println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
     end
 
-    psi_time = time()
-    sample_psi(model, model_spec, data, Temp=Temp, verbose=verbose)
-    psi_time = time() - psi_time
+    psi_time = 0.0
+    nu_time = 0.0
+    eta_time = 0.0
+    Z_time = 0.0
 
-    if verbose
-        tree_prior = prior(model,model_spec) 
-        tree_LL = likelihood(model, model_spec, data)
-        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+    for parameter in parameter_order
+
+        if parameter == "psi"
+            psi_time = time()
+            sample_psi(model, model_spec, data, Temp=Temp, verbose=verbose)
+            psi_time = time() - psi_time
+            if verbose
+                tree_prior = prior(model,model_spec) 
+                tree_LL = likelihood(model, model_spec, data)
+                println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            end
+
+        elseif parameter == "nu"
+
+            slice_iterations = 5
+            nu_time = time()
+            sample_nu_nutd(model, model_spec, data, slice_iterations, verbose=verbose)
+            nu_time = time() - nu_time
+
+            if verbose
+                tree_prior = prior(model,model_spec) 
+                tree_LL = likelihood(model, model_spec, data)
+                println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            end
+
+        elseif parameter == "eta"
+            hmc_iterations = 5
+            eta_time = time()
+            sample_eta(model, model_spec, data, hmc_iterations, Temp=Temp)
+            eta_time = time() - eta_time
+
+            if isdefined(:update_accept_counts) && update_accept_counts && verbose
+                println("HMC accept rate: $hmc_accepts/$hmc_count")
+                println("Refractive accept rate: $ref_accepts/$ref_count")
+            end
+
+            if verbose
+                tree_prior = prior(model,model_spec) 
+                tree_LL = likelihood(model, model_spec, data)
+                println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            end
+
+        elseif parameter == "Z"
+            Z_iterations = 1
+            Z_time = time()
+            sample_assignments(model, model_spec, data, Z_iterations, Temp=Temp)
+            Z_time = time() - Z_time
+            if verbose
+                tree_prior = prior(model,model_spec) 
+                tree_LL = likelihood(model, model_spec, data)
+                println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            end
+        end
+
     end
 
-    slice_iterations = 5
-    nu_time = time()
-    sample_nu_nutd(model, model_spec, data, slice_iterations, verbose=verbose)
-    nu_time = time() - nu_time
-
     if verbose
-        tree_prior = prior(model,model_spec) 
-        tree_LL = likelihood(model, model_spec, data)
-        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-    end
-
-    hmc_iterations = 5
-    eta_time = time()
-    sample_eta(model, model_spec, data, hmc_iterations, Temp=Temp)
-    eta_time = time() - eta_time
-
-    if isdefined(:update_accept_counts) && update_accept_counts && verbose
-        println("HMC accept rate: $hmc_accepts/$hmc_count")
-        println("Refractive accept rate: $ref_accepts/$ref_count")
-    end
-
-    if verbose
-        tree_prior = prior(model,model_spec) 
-        tree_LL = likelihood(model, model_spec, data)
-        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-    end
-
-    Z_iterations = 1
-    Z_time = time()
-    sample_assignments(model, model_spec, data, Z_iterations, Temp=Temp)
-    Z_time = time() - Z_time
-
-    if verbose
-        tree_prior = prior(model,model_spec) 
-        tree_LL = likelihood(model, model_spec, data)
-        println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
         println("MCMC Timings (psi, nu, eta, Z) = ", (psi_time, nu_time, eta_time, Z_time))
     end
 end
@@ -357,7 +365,8 @@ function sample_nu_nutd(model::ModelState,
                         model_spec::ModelSpecification,
                         data::DataState,
                         slice_iterations::Int;
-                        verbose::Bool=true)
+                        verbose::Bool=true,
+                        random_order::Bool=false)
 
     full_logpdf = full_pdf(model, model_spec, data)
     wl_state = model_spec.WL_state
@@ -469,7 +478,13 @@ function sample_nu_nutd(model::ModelState,
         end
     end
 
-    for i = reverse(indices)
+    indices = reverse(indices)
+
+    if random_order
+        indices = indices[randperm(length(indices))]
+    end
+
+    for i = indices
         if i > N
             cur = tree.nodes[i]
             left_child = tree.nodes[i].children[2]
@@ -504,8 +519,6 @@ function sample_nu_nutd(model::ModelState,
 
 
             times = compute_times(model)
-
-
 
             C_l = A_tau[l] - A_I[l]
             C_r = A_tau[r] - A_I[r]
@@ -882,17 +895,30 @@ function sample_psi(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState;
                     Temp::Float64 = 1.0,
-                    verbose::Bool=true)
+                    verbose::Bool=true,
+                    random_order::Bool=false)
 
     tree = model.tree
     N::Int = (length(tree.nodes)+1)/2
 
-    full_logpdf = full_pdf(model, model_spec, data)
+    full_prior = prior(model, model_spec)
+    full_likelihood = likelihood(model, model_spec, data)
+ 
+    #full_logpdf = full_pdf(model, model_spec, data)
+    full_logpdf = full_prior + full_likelihood
 
     if verbose
         println("psi: ")
     end
-    for parent_prune_index = N+1:2N-1
+
+    indices = [N+1:2N-1]
+    if random_order
+        indices = indices[ randperm(N-1)]
+    end
+
+    transition_logprob = 0.0
+
+    for parent_prune_index = indices
          
         parent = tree.nodes[parent_prune_index]
         prune_index = parent.children[1].index
@@ -954,18 +980,23 @@ function sample_psi(model::ModelState,
 #        println("likelihoods (efficient): $likelihoods")
 #        println("likelihoods (correct): $correct_likelihoods")
 
-        logprobs = priors + likelihoods
 
-        # Shift all logprobs to be the full logdensity values
         original_sibling_state_index = find(pstates .== original_sibling.index)[1]
-        logprobs += full_logpdf - logprobs[original_sibling_state_index]
+        likelihoods += (full_likelihood - likelihoods[original_sibling_state_index])
+        priors += (full_prior - priors[original_sibling_state_index])
 
-        wl_state = model_spec.WL_state
-        wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in logprobs]  
-        wl_logprobs = logprobs - wl_adjustments
+        logprobs = priors + likelihoods/Temp
 
-        probs = exp_normalize(wl_logprobs/Temp)
 
+        if length(model_spec.WL_state.energy_boundaries) > 1 || length(model_spec.WL_state.K_boundaries) > 1
+            wl_state = model_spec.WL_state
+            wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in logprobs]  
+            wl_logprobs = logprobs - wl_adjustments
+
+            probs = exp_normalize(wl_logprobs)
+        else
+            probs = exp_normalize(logprobs)
+        end
 
         if any(isnan(probs))
             nan_ind = find(isnan(probs))[1]
@@ -981,10 +1012,13 @@ function sample_psi(model::ModelState,
 
         state_index = randmult(probs)
 
-        # update the current state's full density value
-        full_logpdf = logprobs[state_index]
+        transition_logprob += log(probs[state_index])
 
-        #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+        # update the current state's full density value
+        full_prior = priors[state_index]
+        full_likelihood = likelihoods[state_index]
+
+        #update_partition_function(model_spec.WL_state, N-1, )
 
         subtree_indices = GetSubtreeIndicies(tree, prune_index)
         i = 1
@@ -1071,6 +1105,8 @@ function sample_psi(model::ModelState,
             end
         end
     end
+
+    return transition_logprob
 end
 
 
@@ -1245,7 +1281,8 @@ function sample_eta(model::ModelState,
                     model_spec::ModelSpecification,
                     data::DataState,
                     hmc_iterations::Int64;
-                    Temp::Float64 = 1.0)
+                    Temp::Float64 = 1.0,
+                    always_accept=false)
 
     wl_state = model_spec.WL_state
     full_logpdf = full_pdf(model, model_spec, data)
@@ -1278,13 +1315,21 @@ function sample_eta(model::ModelState,
         return grad
     end
 
-    hmcopts = @options numsteps=8 stepsize=0.001 transformation=ReducedNaturalTransformation
-    refopts = @options m=2 w=0.04 refractive_index_ratio=1.1 transformation=ReducedNaturalTransformation #verify_gradient=true
+    hmcopts = @options numsteps=8 stepsize=0.001 transformation=ReducedNaturalTransformation always_accept=always_accept
+    refopts = @options m=2 w=0.04 refractive_index_ratio=1.1 transformation=ReducedNaturalTransformation always_accept=always_accept
+
+    total_accept_logprob = 0.0
 
     if rand() < 0.5
         for i = 1:hmc_iterations
             eta0 = copy(eta)
             eta = refractive_sampler(eta, eta_density, eta_grad, refopts)
+
+            if always_accept
+                eta, accept_logprob = eta
+                total_accept_logprob += accept_logprob
+            end
+
             if isdefined(:update_accept_counts) && update_accept_counts
                 global ref_accepts += eta != eta0
                 global ref_count += 1
@@ -1298,17 +1343,26 @@ function sample_eta(model::ModelState,
             e0 = get_partition_function(wl_state, N-1, full_logpdf)
             e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
 
-            if log(rand()) < e0 - e1
-                full_logpdf = full_logpdf_1
-            else
-                eta = eta0
+            total_accept_logprob += e0 - e1
+
+            if !always_accept
+                if log(rand()) < e0 - e1
+                    full_logpdf = full_logpdf_1
+                else
+                    eta = eta0
+                end
             end
-            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
         end
     else
         for i = 1:hmc_iterations
             eta0 = copy(eta)
             eta = hmc_sampler(eta, eta_density, eta_grad, hmcopts)
+
+            if always_accept
+                eta, accept_logprob = eta
+                total_accept_logprob += accept_logprob
+            end
+
             if isdefined(:update_accept_counts) && update_accept_counts
                 global hmc_accepts += eta != eta0
                 global hmc_count += 1
@@ -1322,12 +1376,15 @@ function sample_eta(model::ModelState,
             e0 = get_partition_function(wl_state, N-1, full_logpdf)
             e1 = get_partition_function(wl_state, N-1, full_logpdf_1)
 
-            if log(rand()) < e0 - e1
-                full_logpdf = full_logpdf_1
-            else
-                eta = eta0
+            total_accept_logprob += e0 - e1
+
+            if !always_accept
+                if log(rand()) < e0 - e1
+                    full_logpdf = full_logpdf_1
+                else
+                    eta = eta0
+                end
             end
-            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
         end
 
     end
@@ -1350,6 +1407,10 @@ function sample_eta(model::ModelState,
  
     for j = N+1:2N-1
         tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
+    end
+
+    if always_accept
+        return total_accept_logprob
     end
 end
 
@@ -1428,7 +1489,8 @@ function sample_assignments(model::ModelState,
                             model_spec::ModelSpecification,
                             data::DataState,
                             num_iterations::Int64;
-                            Temp::Float64 = 1.0)
+                            Temp::Float64 = 1.0,
+                            random_order::Bool=false)
 
     wl_state = model_spec.WL_state
     full_logpdf = full_pdf(model, model_spec, data)
@@ -1448,15 +1510,22 @@ function sample_assignments(model::ModelState,
     end 
     U = U .- 1
 
+    indices = [1:M]
+    if random_order
+        indices = indices[randperm(M)]
+    end
+
+    transition_logprob = 0.0
+
     for iter = 1:num_iterations    
-        for i = 1:M
+        for i = indices
             cur_z = Z[i]-N
             z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp)
 
-            # WL adjustment
             full_z_probs = z_probs + full_logpdf - z_probs[cur_z]
-            wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in full_z_probs]  
-            z_probs -= wl_adjustments
+            # WL adjustment
+#            wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in full_z_probs]  
+#            z_probs -= wl_adjustments
 
 #            full_logpdf = k -> (model.Z[i] = k+N; full_pdf(model, model_spec, data))
 #            full_z_probs = [full_logpdf(k) for k = 1:N-1]
@@ -1474,8 +1543,12 @@ function sample_assignments(model::ModelState,
             U[cur_z] -= 1
             U[new_z] += 1
             Z[i] = new_z+N
+
+            transition_logprob += log(exp_normalize(full_z_probs)[new_z])
         end
     end
+
+    return transition_logprob
 end
 
 function sample_assignments_from_f(model::ModelState,
@@ -1584,6 +1657,111 @@ function sample_num_leaves_grow_prune(model::ModelState,
 
     new_model
 end
+
+function sample_num_leaves_ais_rjmcmc(model::ModelState,
+                                      model_spec::ModelSpecification,
+                                      data::DataState)
+
+    println("AISRJ accepts: $ais_accepts")
+    wl_state = model_spec.WL_state
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    M,S = size(data.reference_counts)
+
+    lambda = model.lambda
+
+    new_N = rand(3:7)
+    # Don't allow N=1 as we cannot define sensible time variables in this case with beta-splitting 
+#    N_diff = 0
+#    while new_N <= 1
+#        N_diff = rand(Poisson(1.0))
+#        diff_sign = 2*rand(0:1) - 1
+#        new_N = N + diff_sign*N_diff
+#    end
+
+    p_forward = 0.0 #logpdf(Poisson(1.0), N_diff)
+    p_reverse = 0.0 #logpdf(Poisson(1.0), N_diff)
+    proposal_ratio = p_forward - p_reverse
+
+    model_copy = copy(model)
+    proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha)
+
+    pi_0k = full_pdf(model, model_spec, data) 
+    pi_0j = prior(proposal_model, model_spec, force_nonunit_root_nutd=true)
+
+    param_order = ["psi", "nu", "eta", "Z"]
+    param_order = param_order[randperm(4)]
+
+    model_order = randperm(2)
+
+    #temp_schedule =  [[0.5*0.75^(t-1) for t = 12:-1:1], [1- 0.5*0.75^(t-1) for t = 2:12]] #[0.0:0.025:1.0]
+    temp_schedule =  [0.0:0.005:1.0]
+
+    rho = 0.0
+
+
+    for temp_index = 1:length(temp_schedule)
+        iTemp = temp_schedule[temp_index]
+        rTemp = 1.0-iTemp
+
+        old_rho = copy(rho)
+
+        rho += full_pdf(model_copy, model_spec, data, Temp=1.0/rTemp) + full_pdf(proposal_model, model_spec, data, Temp=1.0/iTemp)
+
+        num_sweeps = 1 #temp_index == 1 || temp_index == length(temp_schedule) ? 5 : 1
+
+        for i = 1:num_sweeps
+            for model_index in model_order
+                if model_index == 1
+                    if rTemp == 0.0
+                        model_copy = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+                    else
+                        mcmc_sweep(model_copy, model_spec, data, Temp=1.0/rTemp, parameter_order=param_order, verbose=false)
+                    end
+                else
+                    if iTemp == 0.0
+                        proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha)
+                    else
+                        mcmc_sweep(proposal_model, model_spec, data, Temp=1.0/iTemp, parameter_order=param_order, verbose=false)
+                    end
+                end
+            end 
+        end
+
+        rho -= full_pdf(model_copy, model_spec, data, Temp=1.0/rTemp) + full_pdf(proposal_model, model_spec, data, Temp=1.0/iTemp)
+
+    end 
+
+    pi_1j = full_pdf(proposal_model, model_spec, data)
+    pi_1k = prior(model_copy, model_spec, force_nonunit_root_nutd=true)
+
+    e0 = get_partition_function(wl_state, N-1, pi_0k) 
+    e1 = get_partition_function(wl_state, new_N-1, pi_1j) 
+
+    pi_0 = pi_0k + pi_0j
+    pi_1 = pi_1k + pi_1j
+
+    acceptance_prob = pi_1 - pi_0 - proposal_ratio + rho + e0 - e1
+    println("N: $N")
+    println("new_N: $new_N")
+    println("AISRJ acceptance_prob: $acceptance_prob")
+    println("pi_1k, pi_1j: $pi_1k, $pi_1j") 
+    println("pi_0k, pi_0j: $pi_0k, $pi_0j") 
+    println("rho: $rho")
+    println("e0, e1: $e0, $e1")
+    println("proposal_ratio: $proposal_ratio")
+
+    accept = log(rand()) < acceptance_prob
+
+    global ais_accepts += accept
+    new_model = accept ? proposal_model : model
+     
+    #update_partition_function(model_spec.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
+
+    new_model
+end
+
 
 function sample_num_leaves_pseudo_marginal(model::ModelState,
                                            model_spec::ModelSpecification,

@@ -10,6 +10,7 @@ import NumericExtensions.evaluate, NumericExtensions.result_type
 function full_pdf(model::ModelState,
                   model_spec::ModelSpecification,
                   data::DataState;
+                  Temp::Float64=1.0,
                   nutd_aug::Float64=-1.0,
                   nutd_index::Int64=0)
 
@@ -23,9 +24,9 @@ function full_pdf(model::ModelState,
         l2 = likelihood(model, model_spec, data)
         model.tree.nodes[nutd_index].rhot = nutd
 
-        return [p1 + l1, p2 + l2]
+        return [p1 + l1, p2 + l2] + paired_reads_loglikelihood(model, model_spec, data)
     else
-        prior(model,model_spec)+likelihood(model,model_spec,data)
+        prior(model,model_spec) + likelihood(model,model_spec,data, Temp=Temp) + paired_reads_loglikelihood(model, model_spec, data) 
     end
 end
 
@@ -145,7 +146,8 @@ end
 
 function likelihood(model::ModelState,
                     model_spec::ModelSpecification,
-                    data::DataState)
+                    data::DataState;
+                    Temp::Float64=1.0)
 
     AA = data.reference_counts
     DD = data.total_counts
@@ -217,7 +219,108 @@ function likelihood(model::ModelState,
         
     end
 
-    total_prob + eta_term
+
+    total_prob/Temp + eta_term
+end
+
+function paired_reads_loglikelihood(model::ModelState,
+                                    model_spec::ModelSpecification,
+                                    data::DataState)
+
+
+
+    PR = data.paired_reads
+
+    Np, _ = size(PR)
+
+    populations = {[0,0], [0,1], [1,0], [1,1]}
+
+    phi = compute_phis(model)
+
+    log_prob = 0.0
+
+    for n = 1:Np
+        A = PR[n,1]
+        B = PR[n,2]
+      
+        cophase_prob = PR[n, 3]
+        sample_index = PR[n, 4]
+        error_rate = PR[n, 5]
+        
+        observed_reads = zeros(2,2)
+
+        observed_reads[1,1] = PR[n, 6]       
+        observed_reads[2,1] = PR[n, 7]       
+        observed_reads[1,2] = PR[n, 8]       
+        observed_reads[2,2] = PR[n, 9]       
+
+        ZA = model.Z[A]
+        ZB = model.Z[B]
+
+        pA = phi[ZA, sample_index]
+        pB = phi[ZB, sample_index]
+
+        p = zeros(2,2)
+
+        if ZA == ZB
+            p[2,2] = pA
+            p[2,1] = 0.0
+            p[1,2] = 0.0
+            p[1,1] = 1.0 - p[2,2]
+        elseif IsRightAncestor(model.tree, ZA, ZB)
+            p[2,2] = pB
+            p[1,2] = 0.0
+            p[2,1] = pA - p[2,2]
+            p[1,1] = 1.0 - p[2,2] - p[2,1]
+        elseif IsRightAncestor(model.tree, ZB, ZA)
+            p[2,2] = pA
+            p[2,1] = 0.0
+            p[1,2] = pB - p[2,2]
+            p[1,1] = 1.0 - p[2,2] - p[1,2]
+        else
+            p[2,2] = 0.0
+            p[2,1] = pA
+            p[1,2] = pB
+            p[1,1] = 1.0 - pA - pB
+        end
+
+        valid_state_probs = [0.5 * cophase_prob, 0.5 * cophase_prob, 0.5*(1 - cophase_prob), 0.5*(1 - cophase_prob)]
+
+        # We have 4 types of reads
+        for obs_read in populations
+
+            prob = 0.0 
+            n_reads = observed_reads[(obs_read+1)...]
+
+            if n_reads == 0
+                continue
+            end
+
+            # Each type of read could have come from any of the 4 possible populations
+            for pop in populations
+
+                valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
+              
+                for state_index = 1:4
+                    state = valid_states[state_index]
+                    state_prob = valid_state_probs[state_index]
+
+                    state_diff = abs(obs_read - state)
+                    # Size of population that is consistent with pop, 
+                    # eg if pop = [1,0] then it is the size of the population with A and not B
+                    pop_size = p[(pop+1)...]
+
+                    prob += pop_size * state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
+                                                    error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2])  
+                end 
+
+
+            end
+            log_prob += n_reads*log(prob)
+        end 
+    end 
+
+    return log_prob
 end
 
 # Local pdfs for sampling
@@ -935,7 +1038,7 @@ function eta_logpdf(model::ModelState,
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
 
-    log_pdf = 0.0
+    log_pdf::Float64 = 0.0
 
     Phi = zeros(2N - 1, S)
 
@@ -963,18 +1066,17 @@ function eta_logpdf(model::ModelState,
             end
             phi .*= eta
             for i = C[j]
-                r = (1.-phi)*mu_r[i] + phi*mu_v[i]
-                logr = log(r)
-                log1mr = log(1.-r) 
+                #r = (1.-phi)*mu_r[i] + phi*mu_v[i]
                 for s = 1:length(eta)
-                    log_pdf += AA[i,s]*log(r[s]) + (DD[i,s]-AA[i,s])*log(1-r[s])
+                    r = (1.0-phi[s])*mu_r[i] + phi[s]*mu_v[i]
+                    log_pdf += (AA[i,s]*log(r) + (DD[i,s]-AA[i,s])*log(1.0-r))/Temp
                 end
             end
 
         end 
     end
 
-    log_pdf/Temp
+    log_pdf
 end
 
 function eta_log_gradient(model::ModelState,
@@ -1049,14 +1151,13 @@ function eta_log_gradient(model::ModelState,
                 if j > N
                     phi_j_k = phi[j-N,:]
                     for s = 1:S
-                            
                         phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / eta_k[s]
                     end
                     for i = C[j]
-                        r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
-                            gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))
+                            r = (1.0 .- phi[j-N,s]).*mu_r[i] + phi[j-N,s].*mu_v[i]
+                            gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1.0-r))/Temp
                         end
                     end
                 end
@@ -1071,10 +1172,10 @@ function eta_log_gradient(model::ModelState,
                         phi_j_k[s] = phi_j_k[s] == 0.0 ? 0.0 : phi_j_k[s] / (1 - eta_k[s])
                     end
                     for i = C[j]
-                        r = (1 .- phi[j-N,:]).*mu_r[i] + phi[j-N,:].*mu_v[i]
                         for s = 1:S
-                            gradient[k-N,s] -= (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r[s] +
-                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1-r[s]))                        
+                            r = (1 .- phi[j-N,s]).*mu_r[i] + phi[j-N,s].*mu_v[i]
+                            gradient[k-N,s] -= (AA[i,s]*(mu_v[i]-mu_r[i])*phi_j_k[s]/r +
+                                               (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_j_k[s]/(1.0-r))/Temp 
                         end
                     end
                 end
@@ -1086,10 +1187,10 @@ function eta_log_gradient(model::ModelState,
                 phi_k_k[s] = phi_k_k[s] == 0.0 ? 0.0 : phi_k_k[s] / eta_k[s]
             end
             for i = C[k]
-                r = (1 .- phi[k-N,:]).*mu_r[i] + phi[k-N,:].*mu_v[i]
                 for s = 1:S
-                    gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r[s] +
-                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1-r[s]))
+                    r = (1.0 .- phi[k-N,s]).*mu_r[i] + phi[k-N,s].*mu_v[i]
+                    gradient[k-N,s] += (AA[i,s]*(mu_v[i]-mu_r[i])*phi_k_k[s]/r +
+                                       (DD[i,s] - AA[i,s])*(mu_r[i]-mu_v[i])*phi_k_k[s]/(1.0-r))/Temp
                 end
             end
             
@@ -1097,7 +1198,7 @@ function eta_log_gradient(model::ModelState,
         end 
 
     end
-    gradient'[:]./Temp
+    gradient'[:]
 end
 
 
@@ -1192,13 +1293,12 @@ function z_logpdf(model::ModelState,
 #            if index == 1
 #                println("j=1 s=$s k=$k, phi, ref prob (fast): $(phi[k,s]) $r_ks")
 #            end
-            log_pdf[k-N] += AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks)
+            log_pdf[k-N] += (AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks))/Temp
         end
 
     end
 
-
-    log_pdf/Temp 
+    log_pdf
 end
 
 

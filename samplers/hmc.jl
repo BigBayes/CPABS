@@ -8,7 +8,7 @@ function hmc_sampler(x::Vector{Float64},
                      opts::Options)
 
 
-  @defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 transformation=identity_transformation
+  @defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 transformation=identity_transformation always_accept=false
 
   T = transformation.transformation_function
   T_inv = transformation.transformation_inverse
@@ -82,6 +82,9 @@ function hmc_sampler(x::Vector{Float64},
     println("gradient_norm: $(sqrt(dot(gradient,gradient) ))")
   end
 
+  if always_accept
+    return T(q), -(H_proposed - H_initial)
+  end
 
   if rand() < accept_prob 
     return T(q)

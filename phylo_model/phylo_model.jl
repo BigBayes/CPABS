@@ -36,6 +36,11 @@ type DataState
     total_counts::Matrix{Float64}
     mu_r::Vector{Float64}
     mu_v::Vector{Float64}
+
+    paired_reads::Matrix{Float64} # Nx9 matrix, each row is (index_A, index_B, phasing, sample_index, errorRate, var0Reads, varAReads, varBReads, varABReads) 
+                                  # where phasing is probability that the mutations are co-phased (ie 1/2 for no information)
+                                  # and read indicates whether the mutation is present  
+
     mutation_names::Vector{ASCIIString}
 end
 

@@ -53,12 +53,12 @@ function run_phylo_experiment(filename, alpha::Float64;
         init_K=4
         filename_base="CLL"
         eta_Temp = 0.0000001
-        jump_lag = Inf #100
+        aisrj_lag = Inf
         jump_scan_length = 100
     elseif contains(filename, "emptysims")
         filename_base="emptysims"
         eta_Temp = 0.001
-        jump_lag = 20
+        aisrj_lag = Inf
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = int(m.captures[1])-1
@@ -68,7 +68,7 @@ function run_phylo_experiment(filename, alpha::Float64;
     elseif contains(filename, "aldous")
         filename_base="aldous"
         eta_Temp = 0.1
-        jump_lag = 1
+        aisrj_lag = Inf
         jump_scan_length = 20
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = 4
@@ -97,9 +97,31 @@ function run_phylo_experiment(filename, alpha::Float64;
         num_trials = 1
     end
 
-    data = DataState(AA, DD, mu_r, mu_v, names)
+    # generate synthetic paired reads for now
+    Npairs = 30
+    paired_reads = zeros(Npairs,9)
+    error_rate = 0.01
+    sample_index = 1
+    
+    for n = 1:Npairs
+        i = rand(1:M)
+        j = i
+        while j == i
+            j = rand(1:M)
+        end
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 50, jump_lag = jump_lag, jump_scan_length = jump_scan_length, eta_Temp=eta_Temp, rand_restarts=rand_restarts)
+        phasing_prob = rand()
+        var0Reads = rand(Poisson(1))
+        varAReads = rand(Poisson(1))
+        varBReads = rand(Poisson(1))
+        varABReads = rand(Poisson(1))
+        paired_reads[n,:] = [i,j,phasing_prob, sample_index, error_rate, var0Reads, varAReads, varBReads, varABReads] 
+
+    end
+
+    data = DataState(AA, DD, mu_r, mu_v, paired_reads, names)
+
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 50, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts)
 
     wl_state = model_spec.WL_state
     total_partition_mass = logsumexp(wl_state.partition_function)
