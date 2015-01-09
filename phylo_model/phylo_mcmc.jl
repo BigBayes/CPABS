@@ -224,7 +224,7 @@ end
 # Not quite the same as a draw from the prior, as we don't let nu-tilde of the root be 1.0
 function draw_random_tree(N::Int64, M::Int64, S::Int64, 
                           lambda::Float64, gam::Float64, alpha::Float64)
-    eta = [rand(S) for i = 1:2N-1]
+    eta = [ i <= N ? -ones(S) : zeros(S) for i = 1:2N-1]
     tree = Tree(eta)
 
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
@@ -949,6 +949,8 @@ function sample_psi(model::ModelState,
         end
 
 
+
+        coread_likelihoods = prune_graft_coread_likelihoods(model, data, prune_index)
 #        correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
 
         PruneIndexFromTree!(model.tree, prune_index)
@@ -985,7 +987,7 @@ function sample_psi(model::ModelState,
         likelihoods += (full_likelihood - likelihoods[original_sibling_state_index])
         priors += (full_prior - priors[original_sibling_state_index])
 
-        logprobs = priors + likelihoods/Temp
+        logprobs = priors + (likelihoods + coread_likelihoods)/Temp
 
 
         if length(model_spec.WL_state.energy_boundaries) > 1 || length(model_spec.WL_state.K_boundaries) > 1
@@ -1304,6 +1306,7 @@ function sample_eta(model::ModelState,
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
         e_pdf = eta_logpdf(model, model_spec, data, Temp=Temp)
+        e_pdf += coread_loglikelihood(model, data)  
         return e_pdf
     end
 
@@ -1312,6 +1315,8 @@ function sample_eta(model::ModelState,
             tree.nodes[j].state = eta[1 + (j-N-1)*S : (j-N)*S]
         end
         grad = eta_log_gradient(model, model_spec, data, Temp=Temp)
+        coread_grad = coread_loglikelihood_deta(model, data)
+        grad += coread_grad 
         return grad
     end
 
@@ -1515,12 +1520,27 @@ function sample_assignments(model::ModelState,
         indices = indices[randperm(M)]
     end
 
+    z_probs = zeros(N-1)
+
     transition_logprob = 0.0
+
+    relevant_pairs = [ Int64[] for i = indices]
+
+    PR = data.paired_reads
+    for n = 1:size(PR,1)
+        read1 = PR[n,1]
+        read2 = PR[n,2]
+
+        push!(relevant_pairs[read1], n)
+        push!(relevant_pairs[read2], n)
+    end
+
 
     for iter = 1:num_iterations    
         for i = indices
             cur_z = Z[i]-N
-            z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp)
+            z_probs[:] = 0.0
+            z_probs = z_logpdf(model, model_spec, data, i, U, t, Tau, phi, Temp=Temp, log_pdf = z_probs, relevant_coread_indices = relevant_pairs[i])
 
             full_z_probs = z_probs + full_logpdf - z_probs[cur_z]
             # WL adjustment

@@ -163,31 +163,122 @@ function compute_phis(model::ModelState)
     indices = GetLeafToRootOrdering(tree, root.index)
 
     for i = reverse(indices)
+        if i > N
+            cur = tree.nodes[i]
+            parent = cur.parent    
+
+            if i != root.index
+                self_direction = find(parent.children .== cur)[1]
+
+                for s = 1:S
+                    # the eta variable held by a node is the eta for the right child
+                    eta_self = self_direction == 1 ? parent.state[s] : (1 - parent.state[s])
+                    B[i,s] = B[parent.index,s]*eta_self
+                end
+            else
+                B[i,:] = 1.0
+            end
+        end
+    end
+
+    for i = indices
+        if i > N
+            cur = tree.nodes[i]
+            for s = 1:S
+                B[i,s] .*= cur.state[s]
+            end
+        end
+    end
+
+    return B
+end
+
+function compute_dphi_deta(model::ModelState)
+    tree = model.tree
+
+    S = length(tree.nodes[end].state)
+    _2Nm1 = length(tree.nodes)
+    N::Int = (_2Nm1+1)/2
+
+    B = zeros(2N-1,S)
+
+    dphi_deta = zeros(2N-1, S, N-1, S)
+
+    root = FindRoot(tree, 1)
+    indices = GetLeafToRootOrdering(tree, root.index)
+
+    for i = reverse(indices)
+        if i > N
+            cur = tree.nodes[i]
+            parent = cur.parent    
+
+            if i != root.index
+                self_direction = find(parent.children .== cur)[1]
+
+                for s = 1:S
+                    # the eta variable held by a node is the eta for the right child
+                    eta_self = self_direction == 1 ? parent.state[s] : (1 - parent.state[s])
+
+                    B[i,s] = B[parent.index,s]*eta_self
+                end
+            else
+                B[i,:] = 1.0
+            end
+        end
+    end
+
+    for i = indices
+        if i > N
+            cur = tree.nodes[i]
+            for s = 1:S
+                B[i,s] .*= cur.state[s]
+            end
+        end
+    end
+
+
+    for i = reverse(indices)
         cur = tree.nodes[i]
         parent = cur.parent    
 
         if i != root.index
             self_direction = find(parent.children .== cur)[1]
-
             for s = 1:S
-                # the eta variable held by a node is the eta for the right child
-                eta_self = self_direction == 1 ? parent.state[s] : (1 - parent.state[s])
-                B[i,s] = B[parent.index,s]*eta_self
-            end
-        else
-            B[i,:] = 1.0
-        end
+                is_right = self_direction == 1
+                eta_self = is_right ? parent.state[s] : (1 - parent.state[s])
 
-    end
+                ancestors = GetAncestors(model.tree, i)
+
+                for anc = ancestors
+                    j = anc.index
+                    for t = 1:S
+                        d_eta = B[j, t] / eta_self
+                        dphi_deta[j,t, parent.index-N,s] += is_right ? d_eta : -d_eta
+                    end
+                end
+            end
+
+        end
+    end 
 
     for i = indices
-        cur = tree.nodes[i]
-        for s = 1:S
-            B[i,s] .*= cur.state[s]
+
+        if i > N
+            cur = tree.nodes[i]
+            for s = 1:S
+                ancestors = GetAncestors(model.tree, i)
+                for anc = ancestors
+                    j = anc.index
+                    for t = 1:S
+                        dphi_deta[j,t, i-N,s] = B[j, t] / cur.state[s]
+
+                    end
+
+                end
+            end
         end
     end
-
-    return B
+    return dphi_deta
 end
 
 function model2array(model::ModelState; return_leaf_times::Bool=false)

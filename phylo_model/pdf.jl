@@ -24,9 +24,9 @@ function full_pdf(model::ModelState,
         l2 = likelihood(model, model_spec, data)
         model.tree.nodes[nutd_index].rhot = nutd
 
-        return [p1 + l1, p2 + l2] + paired_reads_loglikelihood(model, model_spec, data)
+        return [p1 + l1, p2 + l2] + coread_loglikelihood(model, data)
     else
-        prior(model,model_spec) + likelihood(model,model_spec,data, Temp=Temp) + paired_reads_loglikelihood(model, model_spec, data) 
+        prior(model,model_spec) + likelihood(model,model_spec,data, Temp=Temp) + coread_loglikelihood(model, data) 
     end
 end
 
@@ -223,9 +223,11 @@ function likelihood(model::ModelState,
     total_prob/Temp + eta_term
 end
 
-function paired_reads_loglikelihood(model::ModelState,
-                                    model_spec::ModelSpecification,
-                                    data::DataState)
+function coread_loglikelihood(model::ModelState,
+                              data::DataState;
+                              phi::Matrix{Float64} = compute_phis(model),
+                              eval_pairs = 1:size(data.paired_reads,1),
+                              Z::Vector{Int64} = model.Z)
 
 
 
@@ -235,11 +237,12 @@ function paired_reads_loglikelihood(model::ModelState,
 
     populations = {[0,0], [0,1], [1,0], [1,1]}
 
-    phi = compute_phis(model)
+    #phi = compute_phis(model)
 
     log_prob = 0.0
 
-    for n = 1:Np
+
+    for n = eval_pairs
         A = PR[n,1]
         B = PR[n,2]
       
@@ -254,8 +257,8 @@ function paired_reads_loglikelihood(model::ModelState,
         observed_reads[1,2] = PR[n, 8]       
         observed_reads[2,2] = PR[n, 9]       
 
-        ZA = model.Z[A]
-        ZB = model.Z[B]
+        ZA = Z[A]
+        ZB = Z[B]
 
         pA = phi[ZA, sample_index]
         pB = phi[ZB, sample_index]
@@ -300,6 +303,7 @@ function paired_reads_loglikelihood(model::ModelState,
             for pop in populations
 
                 valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
+                pop_size = p[(pop+1)...]
               
                 for state_index = 1:4
                     state = valid_states[state_index]
@@ -308,7 +312,6 @@ function paired_reads_loglikelihood(model::ModelState,
                     state_diff = abs(obs_read - state)
                     # Size of population that is consistent with pop, 
                     # eg if pop = [1,0] then it is the size of the population with A and not B
-                    pop_size = p[(pop+1)...]
 
                     prob += pop_size * state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
                                                     error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2])  
@@ -322,6 +325,155 @@ function paired_reads_loglikelihood(model::ModelState,
 
     return log_prob
 end
+
+
+# gradient w.r.t. phi
+function coread_loglikelihood_deta(model::ModelState,
+                                   data::DataState)
+
+
+
+    PR = data.paired_reads
+
+    Np, _ = size(PR)
+
+    populations = {[0,0], [0,1], [1,0], [1,1]}
+
+    phi = compute_phis(model)
+
+    phi_gradient = zeros(size(phi))
+
+    log_prob = 0.0
+
+    for n = 1:Np
+        A = PR[n,1]
+        B = PR[n,2]
+      
+        cophase_prob = PR[n, 3]
+        sample_index = PR[n, 4]
+        error_rate = PR[n, 5]
+        
+        observed_reads = zeros(2,2)
+
+        observed_reads[1,1] = PR[n, 6]       
+        observed_reads[2,1] = PR[n, 7]       
+        observed_reads[1,2] = PR[n, 8]       
+        observed_reads[2,2] = PR[n, 9]       
+
+        ZA = model.Z[A]
+        ZB = model.Z[B]
+
+        pA = phi[ZA, sample_index]
+        pB = phi[ZB, sample_index]
+
+
+        p = zeros(2,2)
+        dphiA = zeros(2,2)
+        dphiB = zeros(2,2)
+
+        if ZA == ZB
+            p[2,2] = pA
+            p[2,1] = 0.0
+            p[1,2] = 0.0
+            p[1,1] = 1.0 - pA
+
+            dphiA[2,2] = 1.0
+            dphiA[1,1] = -1.0
+
+        elseif IsRightAncestor(model.tree, ZA, ZB)
+            p[2,2] = pB
+            p[1,2] = 0.0
+            p[2,1] = pA - pB
+            p[1,1] = 1.0 - pA
+
+            dphiB[2,2] = 1.0
+            dphiA[2,1] = 1.0
+            dphiB[2,1] = -1.0
+            dphiA[1,1] = -1.0
+ 
+        elseif IsRightAncestor(model.tree, ZB, ZA)
+            p[2,2] = pA
+            p[2,1] = 0.0
+            p[1,2] = pB - pA
+            p[1,1] = 1.0 - pB
+
+            dphiA[2,2] = 1.0
+            dphiB[2,1] = 1.0
+            dphiA[2,1] = -1.0
+            dphiB[1,1] = -1.0
+        else
+            p[2,2] = 0.0
+            p[2,1] = pA
+            p[1,2] = pB
+            p[1,1] = 1.0 - pA - pB
+
+            dphiA[2,1] = 1.0
+            dphiB[1,2] = 1.0
+            dphiA[1,1] = -1.0
+            dphiB[1,1] = -1.0
+        end
+
+        valid_state_probs = [0.5 * cophase_prob, 0.5 * cophase_prob, 0.5*(1 - cophase_prob), 0.5*(1 - cophase_prob)]
+
+        # We have 4 types of reads
+        for obs_read in populations
+
+            prob = 0.0 
+            grad_A = 0.0
+            grad_B = 0.0
+
+            n_reads = observed_reads[(obs_read+1)...]
+
+            if n_reads == 0
+                continue
+            end
+
+            # Each type of read could have come from any of the 4 possible populations
+            for pop in populations
+
+                valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
+                pop_size = p[(pop+1)...]
+                for state_index = 1:4
+                    state = valid_states[state_index]
+                    state_prob = valid_state_probs[state_index]
+
+                    state_diff = abs(obs_read - state)
+                    # Size of population that is consistent with pop, 
+                    # eg if pop = [1,0] then it is the size of the population with A and not B
+
+                    prob_state_index = state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
+                                                    error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2])
+                    prob += pop_size * prob_state_index 
+
+                    grad_A += dphiA[(pop+1)...] * prob_state_index 
+                    grad_B += dphiB[(pop+1)...] * prob_state_index 
+                end 
+
+
+            end
+            log_prob += n_reads*log(prob)
+
+            phi_gradient[ZA, sample_index] += n_reads*grad_A/prob
+            phi_gradient[ZB, sample_index] += n_reads*grad_B/prob
+            
+        end 
+    end 
+
+    dphi_deta = compute_dphi_deta(model)
+
+    n, S = size(phi)
+    N::Int = (n+1)/2
+    eta_gradient = zeros(N-1,S)
+
+    for i = 1:N-1
+        for s = 1:S
+            eta_gradient[i,s] = sum(dphi_deta[:,:,i,s].*phi_gradient)
+        end
+    end
+
+    return eta_gradient'[:]
+end
+
 
 # Local pdfs for sampling
 
@@ -879,6 +1031,35 @@ function prune_graft_logprobs(input_model::ModelState,
     return (priors, likelihoods)
 end
 
+function prune_graft_coread_likelihoods(input_model::ModelState,
+                                        data::DataState,
+                                        prune_index::Int64)
+
+    model = copy(input_model)
+    tree = model.tree
+    PruneIndexFromTree!(tree, prune_index)
+    subtree_indices = GetSubtreeIndicies(model.tree, prune_index)
+    i = 1
+    while in(i,subtree_indices)
+        i += 1
+    end
+    root = FindRoot(tree, i)
+    path = GetLeafToRootOrdering(tree, root.index)
+
+    likelihoods = Float64[]
+
+    for graft_index = path
+        InsertIndexIntoTree!(tree, prune_index, graft_index)
+        likelihood_term = coread_loglikelihood(model, data)
+
+        push!(likelihoods, likelihood_term)
+        PruneIndexFromTree!(tree, prune_index)
+    end
+
+    return likelihoods
+end
+
+
 ###################################
 ###### pdfs for nu, nutd updates #
 ###################################
@@ -1034,6 +1215,7 @@ function eta_logpdf(model::ModelState,
     mu_v = data.mu_v
 
     M, S = size(AA)
+    phi = ones(S)
 
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)
@@ -1042,9 +1224,7 @@ function eta_logpdf(model::ModelState,
 
     Phi = zeros(2N - 1, S)
 
-    for j = reverse(indices)
-
-
+    for j = indices
 
         if j > N
             cur = tree.nodes[j]
@@ -1054,7 +1234,7 @@ function eta_logpdf(model::ModelState,
             log_pdf += (alpha*nu_r)*sum(log(eta)) + (alpha*(1-nu_r))*sum(log(1 .- eta))
 
  
-            phi = ones(size(eta))
+            phi[:] = 1 #ones(size(eta))
             An = GetAncestors(tree, cur.index)
             for a = An
                 p = a.parent
@@ -1067,7 +1247,7 @@ function eta_logpdf(model::ModelState,
             phi .*= eta
             for i = C[j]
                 #r = (1.-phi)*mu_r[i] + phi*mu_v[i]
-                for s = 1:length(eta)
+                for s = 1:S
                     r = (1.0-phi[s])*mu_r[i] + phi[s]*mu_v[i]
                     log_pdf += (AA[i,s]*log(r) + (DD[i,s]-AA[i,s])*log(1.0-r))/Temp
                 end
@@ -1248,13 +1428,16 @@ function z_logpdf(model::ModelState,
                   times::Vector{Float64},
                   Tau::Vector{Int64},
                   phi::Matrix{Float64};
-                  Temp::Float64 = 1.0)
+                  Temp::Float64 = 1.0,
+                  log_pdf = nothing,
+                  relevant_coread_indices::Vector{Int64} = Int64[])
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
 
     alpha = model.alpha
     Z = model.Z
+    Z_tmp = copy(Z)    
 
     current_k = Z[index]
 
@@ -1265,6 +1448,8 @@ function z_logpdf(model::ModelState,
         return result
     end
 
+    log_pdf = log_pdf == nothing ? zeros(N-1) : log_pdf
+
     AA = data.reference_counts
     DD = data.total_counts
     mu_r = data.mu_r
@@ -1272,9 +1457,12 @@ function z_logpdf(model::ModelState,
 
     (M,S) = size(AA)
 
-    log_pdf = zeros(N-1)
+#    PR = data.paired_reads
+#    relevant_coread_indices = [find(PR[:,1] .== index), find(PR[:,2] .== index)] 
 
     for k = N+1:2N-1
+        Z_tmp[index] = k
+
         tau_t = Tau[k] == 0 ? 1.0 : times[Tau[k]]
         v_k = tau_t - times[k]
 
@@ -1296,6 +1484,7 @@ function z_logpdf(model::ModelState,
             log_pdf[k-N] += (AA[index,s]*log(r_ks) + (DD[index,s] - AA[index,s])*log(1-r_ks))/Temp
         end
 
+        log_pdf[k-N] += coread_loglikelihood(model, data, phi=phi, eval_pairs = relevant_coread_indices, Z=Z_tmp) 
     end
 
     log_pdf
