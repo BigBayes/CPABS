@@ -149,8 +149,8 @@ function likelihood(model::ModelState,
                     data::DataState;
                     Temp::Float64=1.0)
 
-    AA = data.reference_counts
-    DD = data.total_counts
+    AA = int(data.reference_counts)
+    DD = int(data.total_counts)
 
     mu_r = data.mu_r
     mu_v = data.mu_v
@@ -744,8 +744,8 @@ function psi_observation_logpdf(model::ModelState,
                                 pruned_index::Int64,
                                 path::Array{Int64,1})
 
-    AA = data.reference_counts
-    DD = data.total_counts
+    AA = int(data.reference_counts)
+    DD = int(data.total_counts)
 
     mu_r = data.mu_r
     mu_v = data.mu_v

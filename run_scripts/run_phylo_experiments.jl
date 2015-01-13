@@ -8,11 +8,18 @@ require("data_utils/read_phylosub_data.jl")
 #    filename = "CLL077.csv"
 #end
 
-function run_all_emptysims_experiments(alpha)
+function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
     filenames = readdir("../data/phylosub/emptysims")
 
     for fname in filenames
-        @spawn run_phylo_experiment("emptysims/$fname", alpha)
+        m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", fname)
+        N_SSMs = int(m.captures[3])
+        if N_SSMs <= max_SSMs
+            println("running experment with $N_SSMs mutations")
+            @spawn run_phylo_experiment("emptysims/$fname", alpha)
+        else
+            println("skipping experment with $N_SSMs mutations")
+        end
     end
 end
 
