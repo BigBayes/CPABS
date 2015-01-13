@@ -104,26 +104,29 @@ function run_phylo_experiment(filename, alpha::Float64;
         num_trials = 1
     end
 
-    # generate synthetic paired reads for now
-    Npairs = 30
-    paired_reads = zeros(Npairs,9)
-    error_rate = 0.01
-    sample_index = 1
-    
-    for n = 1:Npairs
-        i = rand(1:M)
-        j = i
-        while j == i
-            j = rand(1:M)
+    paired_reads = zeros(0,9)
+    if false
+        # generate synthetic paired reads for now
+        Npairs = 30
+        error_rate = 0.01
+        sample_index = 1
+        paired_reads = zeros(Npairs,9)
+        
+        for n = 1:Npairs
+            i = rand(1:M)
+            j = i
+            while j == i
+                j = rand(1:M)
+            end
+
+            phasing_prob = rand()
+            var0Reads = rand(Poisson(1))
+            varAReads = rand(Poisson(1))
+            varBReads = rand(Poisson(1))
+            varABReads = rand(Poisson(1))
+            paired_reads[n,:] = [i,j,phasing_prob, sample_index, error_rate, var0Reads, varAReads, varBReads, varABReads] 
+
         end
-
-        phasing_prob = rand()
-        var0Reads = rand(Poisson(1))
-        varAReads = rand(Poisson(1))
-        varBReads = rand(Poisson(1))
-        varABReads = rand(Poisson(1))
-        paired_reads[n,:] = [i,j,phasing_prob, sample_index, error_rate, var0Reads, varAReads, varBReads, varABReads] 
-
     end
 
     data = DataState(AA, DD, mu_r, mu_v, paired_reads, names)
