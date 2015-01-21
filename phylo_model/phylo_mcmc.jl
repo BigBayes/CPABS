@@ -101,6 +101,8 @@ function mcmc(data::DataState,
             end 
         end
 
+        sample_node_swaps(model, model_spec, data)
+
         if iter > burnin_iterations
 
             if mod(iter, aisrj_lag) == 0
@@ -1638,6 +1640,56 @@ function compute_assignment_probs(model::ModelState,
     end
 
     return z_probs
+end
+
+function sample_node_swaps(model::ModelState,
+                           model_spec::ModelSpecification,
+                           data::DataState)
+
+    tree = model.tree
+    N::Int = (length(tree.nodes) + 1) / 2
+    # try to swap every pair
+    for i = 1:N-1
+
+        lprobs = zeros(N-1)
+        for j = 1:N-1
+
+            tmodel = copy(model)
+            swap_nodes!(tmodel, i+N, j+N)
+
+            lprobs[j] = full_pdf(tmodel, model_spec, data)
+        end
+
+        sampled_j = rand(Categorical( exp_normalize(lprobs))) 
+       
+        swap_nodes!(model, i+N, sampled_j+N) 
+#        if sampled_j != i
+#            println("lprobs: $lprobs")
+#            println("nodes $(i+N) and $(sampled_j+N) swapped!")
+#            @assert false
+#        end
+    end
+
+
+end
+
+function swap_nodes!(tmodel, i, j)
+    tree = tmodel.tree
+    tZ = tmodel.Z
+
+    tZi = find(tZ .== i)
+    tZj = find(tZ .== j)
+
+    eta1 = deepcopy(tree.nodes[i].state)
+    eta2 = deepcopy(tree.nodes[j].state)
+
+    tree.nodes[j].state = eta1
+    tree.nodes[i].state = eta2
+
+    tZ[tZi] = j
+    tZ[tZj] = i
+
+    return tmodel
 end
 
 function sample_num_leaves_grow_prune(model::ModelState,

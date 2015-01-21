@@ -21,7 +21,7 @@ require("utils/probability_util.jl")
 #    end
 #end
 #
-imagesc(xrange, yrange, data) = imagesc(xrange, yrange, data, (minimum(data), minimum(data) == maximum(data) ? maximum(data)+1 : maximum(data)))
+#imagesc(xrange, yrange, data) = imagesc(xrange, yrange, data, (minimum(data), minimum(data) == maximum(data) ? maximum(data)+1 : maximum(data)))
 #imagegs(data; plot=true) = ((h, w) = size(data); imagegs((0,w), (0,h), max(data)-data, plot=plot))
 
 # Upper order form -- push zeros upwards, giving leftwards columns priority 
@@ -356,3 +356,76 @@ function make_monk_labels()
     labels[18] = "+";
     labels
 end
+
+function box_plot_along_dim(data::Array{Float64}, dim::Int64; offset=0.0, p = FramedPlot())
+
+    nd = ndims(data)
+
+    N = size(data,dim)
+
+    labels = [string(i) for i = 1:N]
+    dict = Dict{ASCIIString, Vector{Float64}}()
+
+    for i = 1:N
+
+        indices = [ [1:size(data,j)] for j = 1:nd]
+        indices[dim] = [i]
+
+        dict[labels[i]] = data[indices...][:]
+    end
+
+
+    p = box_plot(dict, order=labels, labels=labels, offset=offset, p = p)
+end
+
+function box_plot(data::Dict{ASCIIString, Vector{Float64}};
+                  labels::Vector{ASCIIString} = [k for k in keys(data)],
+                  order::Vector{ASCIIString} = [k for k in keys(data)],
+                  offset::Float64=0.0,
+                  p = FramedPlot())
+    vals::Vector{Vector{Float64}} = [data[k] for k in order]
+    p = box_plot(vals, offset, p=p)
+    setattr(p.x1,"ticklabels", labels)
+    p
+end
+
+function box_plot(data::Vector{Vector{Float64}}, offset::Float64; p = FramedPlot())
+
+    width = 0.1
+    cl = 0x3083FF
+    for i = 1:length(data)
+        Q3 = quantile(data[i],0.75)
+        Q2 = quantile(data[i],0.5)
+        Q1 = quantile(data[i],0.25)
+
+        IQR = Q3-Q1
+
+        lower_whisker = Q1-1.5*IQR
+        upper_whisker = Q3+1.5*IQR
+
+        u = find(data[i] .< upper_whisker)
+        upper_whisker = maximum(data[i][u])
+
+        l = find(data[i] .> lower_whisker)
+        lower_whisker = minimum(data[i][l])
+
+        X = i+offset
+        Xl = X-width
+        Xr = X+width
+
+        whisker_mean = (upper_whisker+lower_whisker)/2.0
+        whisker_err = upper_whisker-whisker_mean
+        add(p, SymmetricErrorBarsY(X, whisker_mean, whisker_err))
+        add(p, FillBetween( [Xl, Xr], [Q1, Q1], [Xl, Xr], [Q3, Q3], "color", cl ))
+        add(p, Curve([Xl, Xr] , [Q2, Q2]))
+
+        outliers = find( data[i] .< lower_whisker)
+        outliers = [outliers, find(data[i] .> upper_whisker)]
+        if length(outliers) > 0
+            add(p, Points(X*ones(length(outliers)), data[i][outliers], "symboltype", "asterisk"))
+        end
+    end
+    setattr(p.x1, "ticks", [1.0:length(data)])
+    p
+end
+
