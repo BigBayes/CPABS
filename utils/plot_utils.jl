@@ -374,7 +374,6 @@ function box_plot_along_dim(data::Array{Float64}, dim::Int64; offset=0.0, p = Fr
         dict[labels[i]] = data[indices...][:]
     end
 
-
     p = box_plot(dict, order=labels, labels=labels, offset=offset, p = p)
 end
 
@@ -404,10 +403,10 @@ function box_plot(data::Vector{Vector{Float64}}, offset::Float64; p = FramedPlot
         upper_whisker = Q3+1.5*IQR
 
         u = find(data[i] .< upper_whisker)
-        upper_whisker = maximum(data[i][u])
+        upper_whisker = length(u) > 0 ? maximum(data[i][u]) : maximum(data[i])
 
         l = find(data[i] .> lower_whisker)
-        lower_whisker = minimum(data[i][l])
+        lower_whisker = length(l) > 0 ? minimum(data[i][l]) : minimum(data[i])
 
         X = i+offset
         Xl = X-width

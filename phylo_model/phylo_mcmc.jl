@@ -26,7 +26,8 @@ function mcmc(data::DataState,
               iterations::Int64,
               burnin_iterations::Int64;
               aisrj_lag=10,
-              rand_restarts::Int64=0)
+              rand_restarts::Int64=0,
+              WL_state = WangLandauState() )
 
     
     # number of leaves is the number of split points plus one
@@ -34,7 +35,7 @@ function mcmc(data::DataState,
 
     (M,S) = size(data.reference_counts)
 
-    model = draw_random_tree(N, M, S, lambda, gam, alpha)
+    model = draw_random_tree(N, M, S, lambda, gam, alpha, WL_state)
     tree = model.tree
     Z = model.Z
 
@@ -42,7 +43,7 @@ function mcmc(data::DataState,
     rand_restart_models = Array(Any, rand_restarts)
     rand_restart_pdfs = zeros(rand_restarts)
     for r = 1:rand_restarts
-        rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha)
+        rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha, WL_state)
     end 
 
     global ais_accepts = 0
@@ -103,7 +104,7 @@ function mcmc(data::DataState,
 
         sample_node_swaps(model, model_spec, data)
 
-        if iter > burnin_iterations
+        if iter > 50
 
             if mod(iter, aisrj_lag) == 0
                 model = sample_num_leaves_ais_rjmcmc(model, model_spec, data)
@@ -115,11 +116,11 @@ function mcmc(data::DataState,
             N = ifloor((length(tree.nodes)+1) / 2)
         end
 
-        if iter > burnin_iterations
-            update_partition_function(model_spec.WL_state, N-1, full_pdf(model, model_spec, data))
+        if iter > 50
+            update_partition_function(model.WL_state, N-1, full_pdf(model, model_spec, data))
         end
 
-        println("WL estimated partition function: $(model_spec.WL_state.partition_function)")
+        println("WL estimated partition function: $(model.WL_state.partition_function)")
 
         if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
@@ -206,7 +207,7 @@ function mcmc(data::DataState,
         end
 
 
-        if (mod(iter, 10) == 0 && iter > burnin_iterations) || iter == iterations
+        if (iter > burnin_iterations) || iter == iterations
             push!(models,copy(model))
             push!(iters, iter)
         end
@@ -225,7 +226,11 @@ end
 
 # Not quite the same as a draw from the prior, as we don't let nu-tilde of the root be 1.0
 function draw_random_tree(N::Int64, M::Int64, S::Int64, 
-                          lambda::Float64, gam::Float64, alpha::Float64)
+                          lambda::Float64, gam::Float64, alpha::Float64,
+                          WL_state::WangLandauState)
+
+    @assert M >= N
+    
     eta = [ i <= N ? -ones(S) : zeros(S) for i = 1:2N-1]
     tree = Tree(eta)
 
@@ -260,7 +265,7 @@ function draw_random_tree(N::Int64, M::Int64, S::Int64,
     end
     remaining_mutations = perm[N:end]
 
-    model = ModelState(lambda, gam, alpha, tree, Z)
+    model = ModelState(lambda, gam, alpha, tree, Z, WL_state)
     times = compute_times(model)
     Tau = compute_taus(model)
 
@@ -371,7 +376,7 @@ function sample_nu_nutd(model::ModelState,
                         random_order::Bool=false)
 
     full_logpdf = full_pdf(model, model_spec, data)
-    wl_state = model_spec.WL_state
+    wl_state = model.WL_state
 
     if verbose
         println("Sample nu, nu-tilde")
@@ -585,7 +590,7 @@ function sample_nu_nutd(model::ModelState,
                     full_logpdf = full_logpdf_1
                 end
 
-                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+                #update_partition_function(model.WL_state, N-1, full_logpdf)
             end
 
             if r > N
@@ -619,7 +624,7 @@ function sample_nu_nutd(model::ModelState,
                     right_child.rhot = nutd_r
                     full_logpdf = full_logpdf_1
                 end
-                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+                #update_partition_function(model.WL_state, N-1, full_logpdf)
             end
 
             # Sample nu_r = 1-nu_l
@@ -642,7 +647,7 @@ function sample_nu_nutd(model::ModelState,
                 cur.rho = nu_r
                 full_logpdf = full_logpdf_1
             end
-            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+            #update_partition_function(model.WL_state, N-1, full_logpdf)
 
             if i == root.index
                 update_nu_nutd_constants!(i,[i], gam, ancestors, Tau, Pki, P, An_i, An_tau, root_An_ni, root_An_ntau, K, A_I, A_tau, B_I, B_tau)
@@ -678,7 +683,7 @@ function sample_nu_nutd(model::ModelState,
                     cur.rhot = nutd_p
                     full_logpdf = full_logpdf_1
                 end
-                #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+                #update_partition_function(model.WL_state, N-1, full_logpdf)
 
             end
 
@@ -992,8 +997,8 @@ function sample_psi(model::ModelState,
         logprobs = priors + (likelihoods + coread_likelihoods)/Temp
 
 
-        if length(model_spec.WL_state.energy_boundaries) > 1 || length(model_spec.WL_state.K_boundaries) > 1
-            wl_state = model_spec.WL_state
+        if length(model.WL_state.energy_boundaries) > 1 || length(model.WL_state.K_boundaries) > 1
+            wl_state = model.WL_state
             wl_adjustments = [get_partition_function(wl_state, N-1, logp) for logp in logprobs]  
             wl_logprobs = logprobs - wl_adjustments
 
@@ -1022,7 +1027,7 @@ function sample_psi(model::ModelState,
         full_prior = priors[state_index]
         full_likelihood = likelihoods[state_index]
 
-        #update_partition_function(model_spec.WL_state, N-1, )
+        #update_partition_function(model.WL_state, N-1, )
 
         subtree_indices = GetSubtreeIndicies(tree, prune_index)
         i = 1
@@ -1288,7 +1293,7 @@ function sample_eta(model::ModelState,
                     Temp::Float64 = 1.0,
                     always_accept=false)
 
-    wl_state = model_spec.WL_state
+    wl_state = model.WL_state
     full_logpdf = full_pdf(model, model_spec, data)
 
     tree  = model.tree
@@ -1499,7 +1504,7 @@ function sample_assignments(model::ModelState,
                             Temp::Float64 = 1.0,
                             random_order::Bool=false)
 
-    wl_state = model_spec.WL_state
+    wl_state = model.WL_state
     full_logpdf = full_pdf(model, model_spec, data)
 
     tree = model.tree
@@ -1561,7 +1566,7 @@ function sample_assignments(model::ModelState,
             new_z = rand(Categorical(exp_normalize(z_probs)))
 
             full_logpdf = full_z_probs[new_z]
-            #update_partition_function(model_spec.WL_state, N-1, full_logpdf)
+            #update_partition_function(model.WL_state, N-1, full_logpdf)
             U[cur_z] -= 1
             U[new_z] += 1
             Z[i] = new_z+N
@@ -1695,7 +1700,7 @@ end
 function sample_num_leaves_grow_prune(model::ModelState,
                                       model_spec::ModelSpecification,
                                       data::DataState)
-    wl_state = model_spec.WL_state
+    wl_state = model.WL_state
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -1725,7 +1730,7 @@ function sample_num_leaves_grow_prune(model::ModelState,
  
     new_model = log(rand()) < acceptance_prob ? proposal_model : model
      
-    #update_partition_function(model_spec.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
+    #update_partition_function(model.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
 
     new_model
 end
@@ -1735,7 +1740,7 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
                                       data::DataState)
 
     println("AISRJ accepts: $ais_accepts")
-    wl_state = model_spec.WL_state
+    wl_state = model.WL_state
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
@@ -1757,7 +1762,7 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
     proposal_ratio = p_forward - p_reverse
 
     model_copy = copy(model)
-    proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha)
+    proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
 
     pi_0k = full_pdf(model, model_spec, data) 
     pi_0j = prior(proposal_model, model_spec, force_nonunit_root_nutd=true)
@@ -1787,13 +1792,13 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
             for model_index in model_order
                 if model_index == 1
                     if rTemp == 0.0
-                        model_copy = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+                        model_copy = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
                     else
                         mcmc_sweep(model_copy, model_spec, data, Temp=1.0/rTemp, parameter_order=param_order, verbose=false)
                     end
                 else
                     if iTemp == 0.0
-                        proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha)
+                        proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
                     else
                         mcmc_sweep(proposal_model, model_spec, data, Temp=1.0/iTemp, parameter_order=param_order, verbose=false)
                     end
@@ -1829,7 +1834,7 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
     global ais_accepts += accept
     new_model = accept ? proposal_model : model
      
-    #update_partition_function(model_spec.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
+    #update_partition_function(model.WL_state, new_N-1, full_pdf(new_model, model_spec, data))
 
     new_model
 end
@@ -1862,13 +1867,13 @@ function sample_num_leaves_pseudo_marginal(model::ModelState,
     D_k = 0 
     # W = (K-1, K) 
     if rand() < 0.5
-        model_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha)
+        model_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
         model_j = model
         println("W = (K-1, K)")
         D_k = N-1 
     # W = (K, K+1) 
     else
-        model_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha)
+        model_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
         model_j = model
         println("W = (K, K+1)")
         D_k = N+1 
@@ -2013,8 +2018,8 @@ function sample_num_leaves(model::ModelState,
  
     # W = (K-1, K) 
     if rand() < 0.5
-        model_star_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
-        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
 
         for i = 1:num_scan_iterations
             mcmc_sweep(model_star_k, model_spec, data, verbose=false)
@@ -2043,8 +2048,8 @@ function sample_num_leaves(model::ModelState,
  
     # W = (K, K+1) 
     else
-        model_star_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
-        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
 
         for i = 1:num_scan_iterations
             mcmc_sweep(model_star_k, model_spec, data, verbose=false)
@@ -2234,7 +2239,7 @@ function sample_num_leaves_fixed_j(model::ModelState,
             model_pdf = full_pdf(model, model_spec, data) 
 
             if rand() < 0.5
-                model_star = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N-1)
+                model_star = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
             else
                 model_star = draw_neighboring_tree(model, model_spec, data, N-1)
             end
@@ -2281,12 +2286,12 @@ function sample_num_leaves_fixed_j(model::ModelState,
 #                sample_assignments_from_f(model_k, model_spec, data, Z_iterations, f_psi)
 #            end
         else # reverse move for W=(K,K+1) forward move
-            model_k0 = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha)
+            model_k0 = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
             model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
             model_pdf = full_pdf(model_k0, model_spec, data)
 
             if rand() < 0.5
-                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
             else
                 model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
             end
@@ -2326,7 +2331,7 @@ function sample_num_leaves_fixed_j(model::ModelState,
             model_prior = prior(model, model_spec) 
             model_pdf = full_pdf(model, model_spec, data) 
             if rand() < 0.5
-                model_star = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha) #draw_neighboring_tree(model, model_spec, data, N+1)
+                model_star = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N+1)
             else
                 model_star = draw_neighboring_tree(model, model_spec, data, N+1)
             end
@@ -2371,12 +2376,12 @@ function sample_num_leaves_fixed_j(model::ModelState,
             println("W = (K, K+1), forward")
             new_model = rand(Categorical(probs)) == 1 ? model_k : model
         else # reverse move for W = (K-1,K) forward move
-            model_k0 = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha)
+            model_k0 = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
             model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
             model_pdf = full_pdf(model_k0, model_spec, data)
 
             if rand() < 0.5
-                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha)
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
             else
                 model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
             end

@@ -10,6 +10,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         Ytrue = get_true_clustering()
         depths = [20,30,50,70,100,200,300]
         auprs = zeros(length(depths), 10)
+        aucs = zeros(length(depths), 10)
 
         triu_inds = find(triu(ones(288,288),1))
 
@@ -41,7 +42,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         add(p, pts)
         display(p)
 
-        return auprs, p, pts
+        return auprs, aucs, p, pts
 
     elseif contains(filename_base, "emptysim")
 
@@ -51,6 +52,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
 
         auprs = zeros(length(n_clusters), length(depths), length(n_mutations))
+        aucs = zeros(length(n_clusters), length(depths), length(n_mutations))
 
         for fname in filenames
             if contains(fname, filename_base)
@@ -73,10 +75,11 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 Ytrue = get_true_clustering_emptysims(C, N)
 
                 auprs[C_index, D_index, N_index] = aupr(Ypred[triu_inds], Ytrue[triu_inds])
+                aucs[C_index, D_index, N_index] = auc(Ypred[triu_inds], Ytrue[triu_inds])
             end
         end
 
-        return auprs
+        return auprs, aucs
     end
 end
 
@@ -160,7 +163,8 @@ function read_phylosub_results()
         N_index = find(N .== n_mutations)[1]
 
         auprs[C_index, D_index, N_index] = float(A[i,4])
+        aucs[C_index, D_index, N_index] = float(A[i,5])
     end
 
-    auprs
+    auprs, aucs
 end

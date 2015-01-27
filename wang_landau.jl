@@ -35,13 +35,17 @@ function WangLandauState(energy_boundaries::Vector{Float64},
     WangLandauState(energy_boundaries, K_boundaries, partition_function, histogram, initial_stepsize,
                     stepsize_epoch, stepsize_function, flat_histogram_test)
 end
-    
+
+# WL without any partitions
+function WangLandauState()
+    WangLandauState([Inf], [Inf], 0.0, 0.0) 
+end    
 
 function copy(wl_state::WangLandauState)
     WangLandauState(copy(wl_state.energy_boundaries), copy(wl_state.K_boundaries), 
                     copy(wl_state.partition_function), copy(wl_state.histogram),
-                    wl_state.modification_factor, wl_state.stepsize_epoch, wl_state.initial_stepsize,
-                    wl_state.stepsize_update, wl_state.flat_histogram_test)
+                    wl_state.initial_stepsize, wl_state.stepsize_epoch, 
+                    wl_state.stepsize, wl_state.flat_histogram_test)
 end
 
 function stepsize(wl_state::WangLandauState)

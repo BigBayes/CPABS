@@ -93,9 +93,9 @@ function run_phylo_experiment(filename, alpha::Float64;
     WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
 
     if !isdefined(:plotting)
-        model_spec = ModelSpecification(ones(3)/3, false, false, false, WL_state)
+        model_spec = ModelSpecification(ones(3)/3, false, false, false)
     else
-        model_spec = ModelSpecification(ones(3)/3, false, false, plotting, WL_state)
+        model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
     end
 
 
@@ -131,13 +131,13 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     data = DataState(AA, DD, mu_r, mu_v, paired_reads, names)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 50, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts)
+    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, 100000, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state)
+    (iters, Ks, trainLLs, models) = result
 
-    wl_state = model_spec.WL_state
+    wl_state = models[end].WL_state
     total_partition_mass = logsumexp(wl_state.partition_function)
 
     cocluster_matrix = zeros(M,M)
-    (iters, Ks, trainLLs, models) = result
     sum_w = 0.0
     for n = 1:length(models)
         model = models[n]
@@ -158,9 +158,14 @@ function run_phylo_experiment(filename, alpha::Float64;
         end
     end
     cocluster_matrix /= sum_w
+    
 
     if filename_base == "emptysims"
-        writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")
+        #writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.csv", cocluster_matrix, ",")
+        f = open("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.models", "w")
+        serialize(f, models) 
+        close(f)
+        
     elseif filename_base == "aldous"
         writedlm("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$count.csv", cocluster_matrix, ",")
     else

@@ -1,6 +1,7 @@
 import Base.copy
 import Base.show
 import Base.==
+import Base.serialize
 abstract Node
 
 type Nil <: Node
@@ -921,6 +922,68 @@ function tree2array(tree::Tree,
         (Z, states, sorted_inds)
     end
 end
+
+function serialize(stream, tree::Tree)
+    nodes = tree.nodes
+    _2Nm1 = length(nodes)
+
+    states = [nodes[i].state for i = 1:_2Nm1] 
+    rhos = [nodes[i].rho for i = 1:_2Nm1]
+    rhots = [nodes[i].rhot for i = 1:_2Nm1]
+   
+    n_leaves = [nodes[i].num_leaves for i = 1:_2Nm1]
+    n_ancestors = [nodes[i].num_ancestors for i = 1:_2Nm1]
+
+    parents = [ get_parent_index(nodes[i]) for i = 1:_2Nm1]
+    childrens = [ get_children_indices(nodes[i]) for i = 1:_2Nm1] 
+
+   
+    all_values = (states, rhos, rhots, parents, childrens, n_leaves, n_ancestors)
+    serialize(stream, all_values) 
+end
+
+function get_parent_index(node::TreeNode)
+    p = node.parent
+    return p == Nil() ? 0 : p.index
+end
+
+function get_children_indices(node::TreeNode)
+    c = node.children
+    c1 = c[1] == Nil() ? 0 : c[1].index
+    c2 = c[2] == Nil() ? 0 : c[2].index
+
+    return (c1,c2)
+end
+
+function deserializeTree(stream)
+
+    (states, rhos, rhots, parents, childrens, n_leaves, n_ancestors) = deserialize(stream)
+
+    tree = Tree(states)
+    nodes = tree.nodes
+
+    _2Nm1 = length(states)
+
+    for i = 1:_2Nm1
+        nodes[i].rho = rhos[i]
+        nodes[i].rhot = rhots[i]
+
+        nodes[i].num_leaves = n_leaves[i]
+        nodes[i].num_ancestors = n_ancestors[i]
+
+        p_index = parents[i]
+        c1_index, c2_index = childrens[i]
+
+        nodes[i].parent = p_index == 0 ? Nil() : nodes[p_index]
+        nodes[i].children[1] = c1_index == 0 ? Nil() : nodes[c1_index]
+        nodes[i].children[2] = c2_index == 0 ? Nil() : nodes[c2_index]
+
+    end
+
+    tree
+end
+
+
 
 function total_branch_length(tree::Tree,
                              gam::Float64)

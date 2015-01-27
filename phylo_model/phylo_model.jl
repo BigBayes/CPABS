@@ -4,6 +4,7 @@ require("wang_landau.jl")
 import Base.copy
 import Base.ref
 import Base.assign
+import Base.serialize
 
 type ModelState
     lambda::Float64
@@ -12,10 +13,48 @@ type ModelState
 
     tree::Tree{Vector{Float64}} # Tree state holds the \eta variables (one eta variable for each observed sample)
     Z::Vector{Int64} # Assignment of datapoints to nodes
+    WL_state::WangLandauState
 end
 
 function copy(model::ModelState)
-    ModelState(model.lambda, model.gamma, model.alpha, copy(model.tree), copy(model.Z))
+    ModelState(model.lambda, model.gamma, model.alpha, copy(model.tree), copy(model.Z), copy(model.WL_state))
+end
+
+function serialize(stream, model::ModelState)
+    serialize(stream, (model.lambda, model.gamma, model.alpha)) 
+    serialize(stream, model.tree)
+    serialize(stream, model.Z)
+    serialize(stream, model.WL_state)
+end
+
+function serialize(stream, models::Vector{ModelState})
+    N = length(models)
+
+    serialize(stream, N)
+    for i = 1:N
+        serialize(stream, models[i])
+    end
+
+end
+
+function deserializeModel(stream)
+    (lambda, gamma, alpha) = deserialize(stream)
+    tree = deserializeTree(stream)
+    Z = deserialize(stream)
+    WL_state = deserialize(stream)
+
+    ModelState(lambda, gamma, alpha, tree, Z, WL_state)
+end
+
+function deserializeModels(stream)
+    N = deserialize(stream)
+    models = Array(ModelState, N)
+
+    for i = 1:N
+        models[i] = deserializeModel(stream)
+    end
+
+    models
 end
 
 type ModelSpecification
@@ -25,11 +64,10 @@ type ModelSpecification
     verbose::Bool
     plot::Bool
 
-    WL_state::WangLandauState
 end
 
 copy(ms::ModelSpecification) = ModelSpecification(ms.rrj_jump_probabilities, ms.debug,
-                                                  ms.verbose, ms.plot, copy(ms.WL_state))
+                                                  ms.verbose, ms.plot)
 
 type DataState
     reference_counts::Matrix{Float64}
