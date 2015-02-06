@@ -83,6 +83,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 D_index = find(D .== depths)[1]
                 N_index = find(N .== n_mutations)[1]
 
+                println("Beginning evaluation ($C, $D, $N) from .models")
                 S[C_index, D_index, N_index] = @spawn eval_emptysims_experiment(data_file, models_fname, Ytrue)
 
             elseif contains(fname, filename_base) && contains(fname, ".csv")
@@ -108,10 +109,12 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 Ypred = readdlm("$path/$fname", delim)
                 Ytrue = get_true_clustering_emptysims(C, N)
 
+                println("Beginning evaluation ($C, $D, $N) from .csv")
                 S[C_index, D_index, N_index] = @spawn aupr(Ypred[triu_inds], Ytrue[triu_inds])
             end
         end
 
+        println("Fetching results")
         for i = 1:length(S)
             auprs[i] = fetch(S[i])
         end
