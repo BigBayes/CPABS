@@ -72,7 +72,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                     continue
                 end
 
-                data_file = "emptysims/emptysim.$C.$D.$N.ssm.txt"
+                data_file = "emptysims/emptysim.$(C+1).$D.$N.ssm.txt"
                 Ytrue = get_true_clustering_emptysims(C, N)
                 models_fname = "$path/$fname"
 
