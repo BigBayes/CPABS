@@ -198,6 +198,7 @@ function eval_emptysims_experiment(data_filename, models_filename, ground_truth)
     data = constructDataState(data_filename)
 
     predicted = compute_cocluster_matrix(models_filename, data)
+    N, N = size(predicted)
 
     triu_inds = find(triu(ones(N,N),1))
     c_aupr = aupr(predicted[triu_inds], ground_truth[triu_inds])
