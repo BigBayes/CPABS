@@ -1,6 +1,5 @@
 using HDF5, JLD
 
-require("utils/plot_utils.jl")
 require("eval/eval_utils.jl")
 require("phylo_model/phylo_model.jl")
 require("data_utils/read_phylosub_data.jl")
