@@ -236,6 +236,7 @@ function coread_loglikelihood(model::ModelState,
     Np, _ = size(PR)
 
     populations = {[0,0], [0,1], [1,0], [1,1]}
+    v_states = [{pop, [0,0], [pop[1], 0], [0, pop[2]]} for pop in populations]
 
     #phi = compute_phis(model)
 
@@ -289,6 +290,12 @@ function coread_loglikelihood(model::ModelState,
 
         valid_state_probs = [0.5 * cophase_prob, 0.5 * cophase_prob, 0.5*(1 - cophase_prob), 0.5*(1 - cophase_prob)]
 
+        pop_sizes = [p[(pop+1)...] for pop in populations]
+
+        error_terms = zeros(2)
+        error_terms[1] = error_rate
+        error_terms[2] = 1-error_rate
+
         # We have 4 types of reads
         for obs_read in populations
 
@@ -300,21 +307,28 @@ function coread_loglikelihood(model::ModelState,
             end
 
             # Each type of read could have come from any of the 4 possible populations
-            for pop in populations
+            for pop_index in 1:length(populations)
+                #pop = populations[pop_index]
 
-                valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
-                pop_size = p[(pop+1)...]
+                valid_states = v_states[pop_index] #{pop, [0,0], [pop[1], 0], [0, pop[2]]}
+                pop_size = pop_sizes[pop_index] #p[(pop+1)...]
               
                 for state_index = 1:4
                     state = valid_states[state_index]
                     state_prob = valid_state_probs[state_index]
 
-                    state_diff = abs(obs_read - state)
+                    state_diff1 = abs(obs_read[1] - state[1])
+                    state_diff2 = abs(obs_read[2] - state[2])
                     # Size of population that is consistent with pop, 
                     # eg if pop = [1,0] then it is the size of the population with A and not B
 
-                    prob += pop_size * state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
-                                                    error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2])  
+                    #prob += pop_size * state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
+                    #                                error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2]) 
+
+                    error1 = state_diff1 == 1 ? error_rate : 1.0-error_rate
+                    error2 = state_diff2 == 1 ? error_rate : 1.0-error_rate 
+                    prob += pop_size * state_prob * error1 * error2 
+                                                      
                 end 
 
 
@@ -338,6 +352,7 @@ function coread_loglikelihood_deta(model::ModelState,
     Np, _ = size(PR)
 
     populations = {[0,0], [0,1], [1,0], [1,1]}
+    v_states = [{pop, [0,0], [pop[1], 0], [0, pop[2]]} for pop in populations]
 
     phi = compute_phis(model)
 
@@ -415,6 +430,12 @@ function coread_loglikelihood_deta(model::ModelState,
 
         valid_state_probs = [0.5 * cophase_prob, 0.5 * cophase_prob, 0.5*(1 - cophase_prob), 0.5*(1 - cophase_prob)]
 
+        pop_sizes = [p[(pop+1)...] for pop in populations]
+
+        dphiAs = [dphiA[(pop+1)...] for pop in populations]
+        dphiBs = [dphiB[(pop+1)...] for pop in populations]
+        
+
         # We have 4 types of reads
         for obs_read in populations
 
@@ -429,24 +450,36 @@ function coread_loglikelihood_deta(model::ModelState,
             end
 
             # Each type of read could have come from any of the 4 possible populations
-            for pop in populations
+            for pop_index in 1:length(populations)
+                valid_states = v_states[pop_index]
+                pop_size = pop_sizes[pop_index] 
 
-                valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
-                pop_size = p[(pop+1)...]
+                dA = dphiAs[pop_index]
+                dB = dphiBs[pop_index]
+
+                #valid_states = {pop, [0,0], [pop[1], 0], [0, pop[2]]}
+                #pop_size = p[(pop+1)...]
+                #dA = dphiA[(pop+1)...]
+                #dB = dphiB[(pop+1)...]
                 for state_index = 1:4
                     state = valid_states[state_index]
                     state_prob = valid_state_probs[state_index]
 
-                    state_diff = abs(obs_read - state)
+                    state_diff1 = abs(obs_read[1] - state[1])
+                    state_diff2 = abs(obs_read[2] - state[2])
+                    #state_diff = abs(obs_read - state)
                     # Size of population that is consistent with pop, 
                     # eg if pop = [1,0] then it is the size of the population with A and not B
 
-                    prob_state_index = state_prob * error_rate^state_diff[1] * (1-error_rate)^(1-state_diff[1]) *
-                                                    error_rate^state_diff[2] * (1-error_rate)^(1-state_diff[2])
+                    error1 = state_diff1 == 1 ? error_rate : 1.0-error_rate
+                    error2 = state_diff2 == 1 ? error_rate : 1.0-error_rate 
+
+                    prob_state_index = state_prob * error1 * error2
+                                                    
                     prob += pop_size * prob_state_index 
 
-                    grad_A += dphiA[(pop+1)...] * prob_state_index 
-                    grad_B += dphiB[(pop+1)...] * prob_state_index 
+                    grad_A += dA * prob_state_index 
+                    grad_B += dB * prob_state_index 
                 end 
 
 
@@ -2005,7 +2038,6 @@ function grow_prune_kernel_sample(model::ModelState,
 
         if possible_Z_states[1] != Z[moved_mutations[remaining_driver]] ||
            possible_Z_states[2] != Z[moved_mutations[moving_driver]]
-            println("impossible reverse move")
             p_reverse = -Inf
         end
 
@@ -2078,7 +2110,6 @@ function grow_prune_kernel_sample(model::ModelState,
 
     end
 
-    println("proposal N: $new_N")
     return new_model, p_forward-p_reverse
 end
 

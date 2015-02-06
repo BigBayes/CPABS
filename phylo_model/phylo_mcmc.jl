@@ -72,18 +72,25 @@ function mcmc(data::DataState,
     iter = 0
     while iter < iterations
         iter += 1
-        println("Iteration: ", iter)
+
+        if model_spec.verbose
+            println("Iteration: ", iter)
+        elseif mod(iter, 100) == 0
+            println("Iteration: ", iter)
+        end
         tree_prior = prior(model,model_spec)
         tree_LL = likelihood(model, model_spec, data)
-        println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
-
+        
+        if model_spec.verbose
+            println("tree probability, prior, LL, testLL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+        end
 
         push!(chain_probs, tree_prior + tree_LL)
         if iter == 2 && debug
             model_spec.debug = true
         end
 
-        mcmc_sweep(model, model_spec, data)
+        mcmc_sweep(model, model_spec, data, verbose = model_spec.verbose)
 
         if iter == burnin_iterations && remaining_restarts > 0
             rand_restart_models[remaining_restarts] = model
@@ -120,7 +127,9 @@ function mcmc(data::DataState,
             update_partition_function(model.WL_state, N-1, full_pdf(model, model_spec, data))
         end
 
-        println("WL estimated partition function: $(model.WL_state.partition_function)")
+        if model_spec.verbose
+            println("WL estimated partition function: $(model.WL_state.partition_function)")
+        end
 
         if model_spec.plot && plot_utils_loaded && mod(iter,10) == 0
 
@@ -1726,7 +1735,7 @@ function sample_num_leaves_grow_prune(model::ModelState,
     e1 = get_partition_function(wl_state, new_N-1, pi_1) 
 
     acceptance_prob = pi_1 - pi_0 - proposal_ratio + e0 - e1
-    println("acceptance_prob: $acceptance_prob")
+    #println("acceptance_prob: $acceptance_prob")
  
     new_model = log(rand()) < acceptance_prob ? proposal_model : model
      
@@ -1820,14 +1829,14 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
     pi_1 = pi_1k + pi_1j
 
     acceptance_prob = pi_1 - pi_0 - proposal_ratio + rho + e0 - e1
-    println("N: $N")
-    println("new_N: $new_N")
-    println("AISRJ acceptance_prob: $acceptance_prob")
-    println("pi_1k, pi_1j: $pi_1k, $pi_1j") 
-    println("pi_0k, pi_0j: $pi_0k, $pi_0j") 
-    println("rho: $rho")
-    println("e0, e1: $e0, $e1")
-    println("proposal_ratio: $proposal_ratio")
+#    println("N: $N")
+#    println("new_N: $new_N")
+#    println("AISRJ acceptance_prob: $acceptance_prob")
+#    println("pi_1k, pi_1j: $pi_1k, $pi_1j") 
+#    println("pi_0k, pi_0j: $pi_0k, $pi_0j") 
+#    println("rho: $rho")
+#    println("e0, e1: $e0, $e1")
+#    println("proposal_ratio: $proposal_ratio")
 
     accept = log(rand()) < acceptance_prob
 
