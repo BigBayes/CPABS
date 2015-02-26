@@ -59,6 +59,10 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         
         S = Array(Any, length(n_clusters), length(depths), length(n_mutations))
 
+        spawn_counter = 0
+        running_procs = Array(Any, nworkers())
+
+
         for fname in filenames
             if contains(fname, filename_base) && contains(fname, ".models")
                 m = match(r"\.1\.0\.([0-9]+)\.([0-9]+)\.([0-9]+)\.models", fname)
@@ -82,8 +86,12 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 D_index = find(D .== depths)[1]
                 N_index = find(N .== n_mutations)[1]
 
+                
+
                 println("Beginning evaluation ($C, $D, $N) from .models")
                 S[C_index, D_index, N_index] = @spawn eval_emptysims_experiment(data_file, models_fname, Ytrue)
+                spawn_counter += 1
+                running_procs[spawn_counter] = S[C_index, D_index, N_index]
 
             elseif contains(fname, filename_base) && contains(fname, ".csv")
                 m = match(r"\.1\.0\.([0-9]+)\.([0-9]+)\.([0-9]+)\.csv", fname)
@@ -110,6 +118,16 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
                 println("Beginning evaluation ($C, $D, $N) from .csv")
                 S[C_index, D_index, N_index] = @spawn aupr(Ypred[triu_inds], Ytrue[triu_inds])
+                spawn_counter += 1
+                running_procs[spawn_counter] = S[C_index, D_index, N_index]
+            end
+
+            if spawn_counter == nworkers()
+                println("Waiting for $(nworkers()) jobs to finish")
+                for i = 1:nworkers()
+                    wait( running_procs[i])
+                end
+                spawn_counter = 0
             end
         end
 
