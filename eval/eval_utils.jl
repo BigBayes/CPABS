@@ -14,6 +14,11 @@ end
 function aupr(predictions::Vector{Float64}, targets::Vector{Float64})
     N = length(targets)
     Npos = sum(targets)
+
+    if Npos == 0
+        return 0.0
+    end
+
     Nneg = N - Npos
    
     s_ind = sortperm(predictions)

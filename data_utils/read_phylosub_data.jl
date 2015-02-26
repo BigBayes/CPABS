@@ -61,12 +61,11 @@ function read_multilocus_data(filename, name2index::Dict{ASCIIString, Int64})
 
     paired_reads = zeros(num_entries, 9)
     name_pairs = Array(ASCIIString, (num_entries, 2))
-    
+   
     for i = 1:num_entries
         paired_reads[i,1:2] = [name2index[data[i,1]], name2index[data[i,2]]]
         paired_reads[i,3:end] = float64(data[i,3:end])
         paired_reads[i,4] += 1
-        #paired_reads[i,5] = 0.5
     end
 
     paired_reads

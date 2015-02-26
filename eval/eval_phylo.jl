@@ -161,13 +161,40 @@ function eval_phylospan_experiment(data_filename, multilocus_filename, models_fi
     data = constructDataState(data_filename, multilocus_filename=multilocus_filename)
 
     predicted = compute_ancestorship_matrix(models_filename, data)
-    ground_truth = get_true_ancestorship_phylospan(kind)
+    ground_truth, ground_truth_cluster = get_true_ancestorship_phylospan(kind)
   
     N, N = size(ground_truth)
- 
-    nondiagonals = find(1 .- eye(N)) 
 
-    aupr(predicted[nondiagonals], ground_truth[nondiagonals])
+    triu_inds = find(triu(ones(N,N),1))
+    tril_inds = find(tril(ones(N,N),-1))
+ 
+    N_a = sum(ground_truth[triu_inds])
+    N_d = sum(ground_truth[tril_inds])
+
+    a_aupr = aupr(predicted[triu_inds], ground_truth[triu_inds])
+    d_aupr = aupr(predicted[tril_inds], ground_truth[tril_inds])
+   
+    predicted_cluster = compute_cocluster_matrix(models_filename, data)
+
+    N_c = sum(ground_truth_cluster[triu_inds])
+    c_aupr = aupr(predicted_cluster[triu_inds], ground_truth_cluster[triu_inds])
+
+    P_truth = ground_truth_cluster + ground_truth + ground_truth'
+    @assert length(find(P_truth[triu_inds] .> 1)) == 0
+    P_truth[find(P_truth .!=0)] = 1.0
+    P_truth = 1.0 - P_truth
+
+    P_pred = predicted_cluster + predicted + predicted'
+    P_pred = 1.0 - P_pred
+
+    n_aupr = aupr(P_pred[triu_inds], P_truth[triu_inds])
+
+    N_n = length(find(P_truth[triu_inds] .== 1))
+
+    println("auprs: $a_aupr, $d_aupr, $c_aupr, $n_aupr")
+    println("Ns: $N_a, $N_d, $N_c, $N_n")
+
+    (a_aupr * N_a + d_aupr * N_d + c_aupr * N_c + n_aupr * N_n) / (N_a + N_d + N_c + N_n)
 end
 
 function eval_betasplit_experiment(data_filename, models_filename, clusters, kind)
@@ -239,8 +266,14 @@ function get_true_ancestorship_phylospan(kind)
         Y[1:100, 101:end] = 1
         Y[101:200, 201:end] = 0.5
     end
-    
-    return Y
+   
+    Y2 = zeros(300,300)
+   
+    Y2[1:100, 1:100] = 1 
+    Y2[101:200, 101:200] = 1 
+    Y2[201:300, 201:300] = 1 
+ 
+    return Y, Y2
 end
 
 # assumes clusters is ordered from root to leaves
