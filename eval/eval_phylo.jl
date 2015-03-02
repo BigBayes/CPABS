@@ -89,47 +89,19 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
                 
 
-                println("Beginning evaluation ($C, $D, $N) from .models")
                 s = RemoteRef()
                 worker = pop!(available_workers)
-                @async put!(s, remotecall_fetch( worker, eval_emptysims_experiment, data_file, models_filename, Ytrue) )
+                println("Beginning evaluation ($C, $D, $N) on worker $worker")
+                @async put!(s, remotecall_fetch( worker, eval_emptysims_experiment, data_file, models_fname, Ytrue) )
                 S[C_index, D_index, N_index] = s
                 running_procs[worker-1] = S[C_index, D_index, N_index]
 
-#            elseif contains(fname, filename_base) && contains(fname, ".csv")
-#                m = match(r"\.1\.0\.([0-9]+)\.([0-9]+)\.([0-9]+)\.csv", fname)
-#                C = int(m.captures[1])
-#                D = int(m.captures[2])
-#                N = int(m.captures[3])
-#
-#                m = match(r"(.*)\.csv", fname)
-#                fname_base = m.captures[1]
-#      
-#                # skip if we have the new .models runs 
-#                if N > 500 || "$fname_base.models" in filenames
-#                    continue
-#                end
-#
-#                triu_inds = find(triu(ones(C*N,C*N),1))
-#
-#                C_index = find(C .== n_clusters)[1]
-#                D_index = find(D .== depths)[1]
-#                N_index = find(N .== n_mutations)[1]
-#
-#                Ypred = readdlm("$path/$fname", delim)
-#                Ytrue = get_true_clustering_emptysims(C, N)
-#
-#                println("Beginning evaluation ($C, $D, $N) from .csv")
-#                S[C_index, D_index, N_index] = @spawn aupr(Ypred[triu_inds], Ytrue[triu_inds])
-#                spawn_counter += 1
-#                running_procs[spawn_counter] = S[C_index, D_index, N_index]
             end
 
             while length(available_workers) == 0
-                println("Waiting for available workers")
-                sleep(10)
+                sleep(100)
                 for i = 1:nworkers()
-                    if isready(running_procs[i+1])
+                    if isready(running_procs[i])
                         push!(available_workers, i+1)
                     end
                 end
