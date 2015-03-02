@@ -126,7 +126,8 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
             end
 
             while length(available_workers) == 0
-                sleep(3600)
+                println("Waiting for available workers")
+                sleep(10)
                 for i = 1:nworkers()
                     if isready(running_procs[i+1])
                         push!(available_workers, i+1)
