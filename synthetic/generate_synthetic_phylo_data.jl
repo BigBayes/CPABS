@@ -84,7 +84,7 @@ end
 
 function generate_datasets(kind)
     for i = 1:8
-        A, clusters = generate_data(500.0, 50, 0.999, 0.5, kind)
+        A, clusters = generate_data(100.0, 50, 0.999, 0.5, kind)
         AA = Array(Any, size(A,1)+1, size(A,2))
 
         AA[2:end,:] = A
