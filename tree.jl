@@ -169,10 +169,10 @@ function Tree(U::Array{Vector{Float64},1})
         tree.nodes[i].children[1] = Nil();
         tree.nodes[i].children[2] = Nil();
     end
-    coalescing_nodes = [1:N]
-    coalescing_nodes_remaining = N
+    coalescing_nodes = [1:N-1]
+    coalescing_nodes_remaining = N-1
 
-    for i = N+1:2N-1
+    for i = N+1:2N-2
         tree.nodes[i] = TreeNode(U[i], i)
 
         #coalesce pairs uniformly at random
@@ -206,6 +206,22 @@ function Tree(U::Array{Vector{Float64},1})
         tree.nodes[i].num_leaves = tree.nodes[l].num_leaves +
                                    tree.nodes[r].num_leaves 
     end
+
+    # We require that the left subtree from the root is a leaf 
+    # for the purposes of the subclonal reconstruction model, we don't expect two independent cancer populations, etc
+
+    tree.nodes[2N-1] = TreeNode(U[2N-1], 2N-1)
+    l = N
+    r = 2N-2
+    tree.nodes[l].parent = tree.nodes[2N-1]
+    tree.nodes[r].parent = tree.nodes[2N-1]
+
+    # likelihood functions assume right child is first, and here it matters 
+    tree.nodes[2N-1].children = [tree.nodes[r], tree.nodes[l]]
+
+    tree.nodes[2N-1].num_leaves = tree.nodes[l].num_leaves +
+                                  tree.nodes[r].num_leaves 
+    
 
 
     tree.nodes[2N-1].num_ancestors = 1

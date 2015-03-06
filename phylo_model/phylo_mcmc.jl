@@ -965,6 +965,8 @@ function sample_psi(model::ModelState,
         end
 
 
+        droot = FindRoot(tree, 1)
+
 
         coread_likelihoods = prune_graft_coread_likelihoods(model, data, prune_index)
 #        correct_priors, correct_likelihoods = prune_graft_logprobs(model, model_spec, data, prune_index)
@@ -980,7 +982,6 @@ function sample_psi(model::ModelState,
         end
         root = FindRoot(tree, i)
         path = GetLeafToRootOrdering(tree, root.index)
-      
 
         (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
         (likelihoods, lstates) = psi_observation_logpdf(model, model_spec, data, prune_index, path)

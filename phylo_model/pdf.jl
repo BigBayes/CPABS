@@ -170,6 +170,11 @@ function likelihood(model::ModelState,
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
 
+    root_l = root.children[2].index
+    if root_l > N
+        return -Inf
+    end
+
     num_mutations, num_samples = size(AA)
 
     t = ones(2N - 1)
@@ -853,7 +858,6 @@ function psi_observation_logpdf(model::ModelState,
 
         parent = cur.parent
 
-
         subtree_probs = 0.0
         for j = pruned_indices
             if j > N
@@ -905,6 +909,11 @@ function psi_observation_logpdf(model::ModelState,
                 subtree_probs += logpdf(Binomial(DD[c,s], p_j), AA[c,s])
             end
 
+        end
+
+
+        if (parent == root && i <= N && parent.children[2].index == i) || i == root.index
+            subtree_probs = -Inf
         end
 
 

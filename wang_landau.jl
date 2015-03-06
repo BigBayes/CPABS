@@ -88,6 +88,7 @@ function update_partition_function(wl_state::WangLandauState, K::Int64, energy::
 end
 
 function get_partition_function(wl_state::WangLandauState, K::Int64, energy::Float64)
+    @assert energy < Inf
     energy_boundaries = wl_state.energy_boundaries
     K_boundaries = wl_state.K_boundaries
 
