@@ -449,8 +449,8 @@ function read_phylosub_results()
         N_index = find(N .== n_mutations)[1]
 
         auprs[C_index, D_index, N_index] = float(A[i,4])
-        aucs[C_index, D_index, N_index] = float(A[i,5])
+        #aucs[C_index, D_index, N_index] = float(A[i,5])
     end
 
-    auprs, aucs
+    auprs #, aucs
 end
