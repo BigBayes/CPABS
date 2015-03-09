@@ -169,7 +169,7 @@ function Tree(U::Array{Vector{Float64},1})
         tree.nodes[i].children[1] = Nil();
         tree.nodes[i].children[2] = Nil();
     end
-    coalescing_nodes = [1:N-1]
+    coalescing_nodes = [2:N]
     coalescing_nodes_remaining = N-1
 
     for i = N+1:2N-2
@@ -211,7 +211,7 @@ function Tree(U::Array{Vector{Float64},1})
     # for the purposes of the subclonal reconstruction model, we don't expect two independent cancer populations, etc
 
     tree.nodes[2N-1] = TreeNode(U[2N-1], 2N-1)
-    l = N
+    l = 1
     r = 2N-2
     tree.nodes[l].parent = tree.nodes[2N-1]
     tree.nodes[r].parent = tree.nodes[2N-1]
@@ -979,7 +979,6 @@ function deserializeTree(stream)
     nodes = tree.nodes
 
     _2Nm1 = length(states)
-
     for i = 1:_2Nm1
         nodes[i].rho = rhos[i]
         nodes[i].rhot = rhots[i]
