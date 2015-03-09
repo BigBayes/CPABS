@@ -28,7 +28,6 @@ function mcmc(data::DataState,
               aisrj_lag=10,
               rand_restarts::Int64=0,
               WL_state = WangLandauState() )
-
     
     # number of leaves is the number of split points plus one
     N = init_K+1
@@ -369,11 +368,39 @@ function mcmc_sweep(model::ModelState,
 
     end
 
+    sample_lambda(model, model_spec)
+
     if verbose
         println("MCMC Timings (psi, nu, eta, Z) = ", (psi_time, nu_time, eta_time, Z_time))
     end
 end
 
+function sample_lambda(model::ModelState,
+                       model_spec::ModelSpecification)
+   
+    if isdefined(:alpha_lambda) && isdefined(:beta_lambda)
+
+        tree = model.tree
+        N::Int = (length(tree.nodes)+1)/2
+        Msum = length(model.Z)
+       
+        times = compute_times(model)
+         
+        v = zeros(N-1)
+        for j = 1:2N-1
+            jcur = tree.nodes[j]
+            parent = jcur.parent
+            if j > N
+                tau_node = tau(jcur)
+                tau_t = tau_node == Nil() ? 1.0 : times[tau_node.index]
+                v[j-N] = tau_t - times[j]
+            end
+        end
+        branch_sum = sum(v)
+ 
+        model.lambda = rand(Gamma( alpha_lambda + Msum, 1/(beta_lambda + branch_sum)))
+    end 
+end
 
 # nu = nu_r = 1-nu_l = parent.rho
 # nutd_l = l.rhot 

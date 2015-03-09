@@ -11,6 +11,9 @@ type ModelState
     gamma::Float64
     alpha::Float64
 
+#    alpha_lambda::Float64
+#    beta_lambda::Float64 
+
     tree::Tree{Vector{Float64}} # Tree state holds the \eta variables (one eta variable for each observed sample)
     Z::Vector{Int64} # Assignment of datapoints to nodes
     WL_state::WangLandauState

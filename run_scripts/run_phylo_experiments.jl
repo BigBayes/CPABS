@@ -12,6 +12,9 @@ require("data_utils/read_phylosub_data.jl")
 function run_all_betasplit_experiments(alpha, kind)
     filenames = readdir("../data/phylosub/beta_split")
 
+    alpha_lambda = 1.0
+    beta_lambda = 1.0
+
     for fname in filenames
         if contains(fname, "csv") && contains(fname, kind)
             m = match(r"_([0-9]+).csv", fname)
@@ -29,10 +32,10 @@ function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", fname)
         N_SSMs = int(m.captures[3])
         if N_SSMs <= max_SSMs
-            println("running experment with $N_SSMs mutations")
+            println("running experiment with $N_SSMs mutations")
             @spawn run_phylo_experiment("emptysims/$fname", alpha)
         else
-            println("skipping experment with $N_SSMs mutations")
+            println("skipping experiment with $N_SSMs mutations")
         end
     end
 end
