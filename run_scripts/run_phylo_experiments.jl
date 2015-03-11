@@ -2,6 +2,7 @@ require("phylo_model/phylo_mcmc.jl")
 require("samplers/hmc.jl")
 require("samplers/refractive_sampler.jl")
 require("data_utils/read_phylosub_data.jl")
+require("utils/parallel_utils.jl")
 
 #if !isdefined(:filename)
 #    println("Using default input file CLL077.csv")    
@@ -28,16 +29,25 @@ end
 function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
     filenames = readdir("../data/phylosub/emptysims")
 
+    smart_sync, get_job_counter, get_jobs = initialize_smart_sync()
+
     for fname in filenames
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", fname)
         N_SSMs = int(m.captures[3])
         if N_SSMs <= max_SSMs
             println("running experiment with $N_SSMs mutations")
-            @spawn run_phylo_experiment("emptysims/$fname", alpha)
+            #@spawn run_phylo_experiment("emptysims/$fname", alpha)
+           
+            job_id, job_ref = smart_spawn( run_phylo_experiment, "emptysims/$fname", alpha)
+ 
+
         else
             println("skipping experiment with $N_SSMs mutations")
         end
     end
+
+    
+
 end
 
 function run_aldous_experiments(alpha; max_depth=Inf)
