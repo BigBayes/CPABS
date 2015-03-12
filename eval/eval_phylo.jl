@@ -66,7 +66,9 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
         for fname in filenames
             if contains(fname, filename_base) && contains(fname, ".models")
-                m = match(r"\.1\.0\.([0-9]+)\.([0-9]+)\.([0-9]+)\.models", fname)
+		println("evaluating $fname")
+                m = match(r"\.1\.0\.([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]*).?models", fname)
+		@assert m != Nothing
                 C = int(m.captures[1])
                 D = int(m.captures[2])
                 N = int(m.captures[3])
