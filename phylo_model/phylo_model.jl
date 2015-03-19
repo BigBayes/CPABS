@@ -11,22 +11,23 @@ type ModelState
     gamma::Float64
     alpha::Float64
 
-#    alpha_lambda::Float64
-#    beta_lambda::Float64 
+    rate_k::Float64
 
     tree::Tree{Vector{Float64}} # Tree state holds the \eta variables (one eta variable for each observed sample)
     Z::Vector{Int64} # Assignment of datapoints to nodes
+    rates::Vector{Float64} # Mutation rate variables for each branch 
     WL_state::WangLandauState
 end
 
 function copy(model::ModelState)
-    ModelState(model.lambda, model.gamma, model.alpha, copy(model.tree), copy(model.Z), copy(model.WL_state))
+    ModelState(model.lambda, model.gamma, model.alpha, model.rate_k, copy(model.tree), copy(model.Z), copy(model.rates), copy(model.WL_state))
 end
 
 function serialize(stream, model::ModelState)
-    serialize(stream, (model.lambda, model.gamma, model.alpha)) 
+    serialize(stream, (model.lambda, model.gamma, model.alpha, model.rate_k )) 
     serialize(stream, model.tree)
     serialize(stream, model.Z)
+    serialize(stream, model.rates)
     serialize(stream, model.WL_state)
 end
 
@@ -41,12 +42,13 @@ function serialize(stream, models::Vector{ModelState})
 end
 
 function deserializeModel(stream)
-    (lambda, gamma, alpha) = deserialize(stream)
+    (lambda, gamma, alpha, rate_k) = deserialize(stream)
     tree = deserializeTree(stream)
     Z = deserialize(stream)
+    rates = deserialize(stream)
     WL_state = deserialize(stream)
 
-    ModelState(lambda, gamma, alpha, tree, Z, WL_state)
+    ModelState(lambda, gamma, alpha, rate_k, tree, Z, rates, WL_state)
 end
 
 function deserializeModels(stream)
@@ -61,6 +63,8 @@ function deserializeModels(stream)
 end
 
 type ModelSpecification
+    latent_rates::Bool # do we use the latent rate variables model.rates
+
     rrj_jump_probabilities::Array{Float64} #assumes L \in {k-1,k,k+1}
 
     debug::Bool
@@ -69,7 +73,7 @@ type ModelSpecification
 
 end
 
-copy(ms::ModelSpecification) = ModelSpecification(ms.rrj_jump_probabilities, ms.debug,
+copy(ms::ModelSpecification) = ModelSpecification(ms.latent_rates, ms.rrj_jump_probabilities, ms.debug,
                                                   ms.verbose, ms.plot)
 
 type DataState

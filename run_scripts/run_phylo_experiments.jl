@@ -3,6 +3,7 @@ require("samplers/hmc.jl")
 require("samplers/refractive_sampler.jl")
 require("data_utils/read_phylosub_data.jl")
 require("utils/parallel_utils.jl")
+require("utils/general_macros.jl")
 
 #if !isdefined(:filename)
 #    println("Using default input file CLL077.csv")    
@@ -75,6 +76,7 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     lambda = 0.2
     gamma = 1.0
+    rates_shape = 1.0
 
     #if filename == "CLL077.csv" || filename == "CLL003.csv"
     #    init_K = 4
@@ -119,7 +121,7 @@ function run_phylo_experiment(filename, alpha::Float64;
         elseif contains(filename, "branch")
             filename_base = "betasplit_branch"
         end
-        wl_K_boundaries = [2,3,4,Inf]
+        wl_K_boundaries = [3,4,Inf]
         aisrj_lag = Inf
         init_K = 3 
         D = 0
@@ -134,7 +136,7 @@ function run_phylo_experiment(filename, alpha::Float64;
             filename_base= contains(multilocus_filename, "chain") ? "phylospan_chain" : "phylospan_branch"
         end
 
-        wl_K_boundaries = [2,3,4,Inf]
+        wl_K_boundaries = [3,4,Inf]
         aisrj_lag = Inf
         init_K = 3 
         D = 0
@@ -146,10 +148,15 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
 
+    use_latent_rates = true
+    #use_latent_rates = false
+
+    @ifndef verbose false
+
     if !isdefined(:plotting)
-        model_spec = ModelSpecification(ones(3)/3, false, false, false)
+        model_spec = ModelSpecification(use_latent_rates, ones(3)/3, false, verbose, false)
     else
-        model_spec = ModelSpecification(ones(3)/3, false, false, plotting)
+        model_spec = ModelSpecification(use_latent_rates, ones(3)/3, false, verbose, plotting)
     end
 
 
@@ -177,7 +184,7 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     data = constructDataState(filename, multilocus_filename=multilocus_filename)
 
-    result = mcmc(data, lambda, gamma, alpha, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state)
+    result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state)
     (iters, Ks, trainLLs, models) = result
 
     f = open("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.$index.models", "w")

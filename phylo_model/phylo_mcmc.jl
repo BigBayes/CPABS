@@ -21,6 +21,7 @@ function mcmc(data::DataState,
               lambda::Float64,
               gam::Float64,
               alpha::Float64,
+              rates_shape::Float64,
               init_K::Int64,
               model_spec::ModelSpecification,
               iterations::Int64,
@@ -34,7 +35,7 @@ function mcmc(data::DataState,
 
     (M,S) = size(data.reference_counts)
 
-    model = draw_random_tree(N, M, S, lambda, gam, alpha, WL_state)
+    model = draw_random_tree(N, M, S, lambda, gam, alpha, rates_shape, WL_state)
     tree = model.tree
     Z = model.Z
 
@@ -42,7 +43,7 @@ function mcmc(data::DataState,
     rand_restart_models = Array(Any, rand_restarts)
     rand_restart_pdfs = zeros(rand_restarts)
     for r = 1:rand_restarts
-        rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha, WL_state)
+        rand_restart_models[r] = draw_random_tree(N, M, S, lambda, gam, alpha, rates_shape, WL_state)
     end 
 
     global ais_accepts = 0
@@ -234,7 +235,7 @@ end
 
 # Not quite the same as a draw from the prior, as we don't let nu-tilde of the root be 1.0
 function draw_random_tree(N::Int64, M::Int64, S::Int64, 
-                          lambda::Float64, gam::Float64, alpha::Float64,
+                          lambda::Float64, gam::Float64, alpha::Float64, rate_k::Float64,
                           WL_state::WangLandauState)
 
     @assert M >= N
@@ -273,7 +274,13 @@ function draw_random_tree(N::Int64, M::Int64, S::Int64,
     end
     remaining_mutations = perm[N:end]
 
-    model = ModelState(lambda, gam, alpha, tree, Z, WL_state)
+    rates = zeros(2N-1)
+    for i = N+1:2N-1
+        rates[i] = rand(Exponential(1)) 
+    end
+
+    
+    model = ModelState(lambda, gam, alpha, rate_k, tree, Z, rates, WL_state)
     times = compute_times(model)
     Tau = compute_taus(model)
 
@@ -298,7 +305,7 @@ function mcmc_sweep(model::ModelState,
                     data::DataState;
                     Temp::Float64 = 1.0,
                     verbose::Bool=true,
-                    parameter_order = ["psi", "nu", "eta", "Z"])
+                    parameter_order = ["psi", "nu", "eta", "rates", "Z"])
 
     tree = model.tree
     if verbose
@@ -310,6 +317,7 @@ function mcmc_sweep(model::ModelState,
     psi_time = 0.0
     nu_time = 0.0
     eta_time = 0.0
+    rates_time = 0.0
     Z_time = 0.0
 
     for parameter in parameter_order
@@ -326,11 +334,18 @@ function mcmc_sweep(model::ModelState,
 
         elseif parameter == "nu"
 
-            slice_iterations = 5
-            nu_time = time()
-            sample_nu_nutd(model, model_spec, data, slice_iterations, verbose=verbose)
-            nu_time = time() - nu_time
+            if model_spec.latent_rates
+                slice_iterations = 5
+                nu_time = time()
+                sample_nu_nutd_from_f(model, model_spec, data, slice_iterations, full_pdf)
+                nu_time = time() - nu_time
 
+            else
+                slice_iterations = 5
+                nu_time = time()
+                sample_nu_nutd(model, model_spec, data, slice_iterations, verbose=verbose)
+                nu_time = time() - nu_time
+            end
             if verbose
                 tree_prior = prior(model,model_spec) 
                 tree_LL = likelihood(model, model_spec, data)
@@ -353,6 +368,16 @@ function mcmc_sweep(model::ModelState,
                 tree_LL = likelihood(model, model_spec, data)
                 println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
             end
+        elseif parameter == "rates"
+            slice_iterations = 5
+            rates_time = time()
+            sample_rates(model, model_spec, slice_iterations)
+            rates_time = time() - rates_time
+            if verbose
+                tree_prior = prior(model,model_spec) 
+                tree_LL = likelihood(model, model_spec, data)
+                println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
+            end
 
         elseif parameter == "Z"
             Z_iterations = 1
@@ -368,39 +393,37 @@ function mcmc_sweep(model::ModelState,
 
     end
 
-    sample_lambda(model, model_spec)
-
     if verbose
-        println("MCMC Timings (psi, nu, eta, Z) = ", (psi_time, nu_time, eta_time, Z_time))
+        println("MCMC Timings (psi, nu, eta, rates, Z) = ", (psi_time, nu_time, eta_time, rates_time, Z_time))
     end
 end
 
-function sample_lambda(model::ModelState,
-                       model_spec::ModelSpecification)
-   
-    if isdefined(:alpha_lambda) && isdefined(:beta_lambda)
-
-        tree = model.tree
-        N::Int = (length(tree.nodes)+1)/2
-        Msum = length(model.Z)
-       
-        times = compute_times(model)
-         
-        v = zeros(N-1)
-        for j = 1:2N-1
-            jcur = tree.nodes[j]
-            parent = jcur.parent
-            if j > N
-                tau_node = tau(jcur)
-                tau_t = tau_node == Nil() ? 1.0 : times[tau_node.index]
-                v[j-N] = tau_t - times[j]
-            end
-        end
-        branch_sum = sum(v)
- 
-        model.lambda = rand(Gamma( alpha_lambda + Msum, 1/(beta_lambda + branch_sum)))
-    end 
-end
+#function sample_lambda(model::ModelState,
+#                       model_spec::ModelSpecification)
+#   
+#    if isdefined(:alpha_lambda) && isdefined(:beta_lambda)
+#
+#        tree = model.tree
+#        N::Int = (length(tree.nodes)+1)/2
+#        Msum = length(model.Z)
+#       
+#        times = compute_times(model)
+#         
+#        v = zeros(N-1)
+#        for j = 1:2N-1
+#            jcur = tree.nodes[j]
+#            parent = jcur.parent
+#            if j > N
+#                tau_node = tau(jcur)
+#                tau_t = tau_node == Nil() ? 1.0 : times[tau_node.index]
+#                v[j-N] = tau_t - times[j]
+#            end
+#        end
+#        branch_sum = sum(v)
+# 
+#        model.lambda = rand(Gamma( alpha_lambda + Msum, 1/(beta_lambda + branch_sum)))
+#    end 
+#end
 
 # nu = nu_r = 1-nu_l = parent.rho
 # nutd_l = l.rhot 
@@ -891,22 +914,32 @@ function sample_nu_nutd_from_f(model::ModelState,
             if l > N
 
                 # Sample nutd_l
-                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=l, sample_nutd=false)  
+                g_splits = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=l)  
+                g = x -> logsumexp( g_splits(x))
 
                 nutd_l = nutd_l == 1.0 ? rand(Uniform(0,1)) : nutd_l
                 (nutd_u, f_nutd) = slice_sampler(nutd_l, g, 0.1, 10, 0.0, 1.0)
 
-                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=l, sample_nutd=true)
+                split_logprobs = g_splits(nutd_u)
+                split = rand(Categorical(exp_normalize(split_logprobs)))
+                nutd_l = split == 1 ? 1.0 : nutd_u
+
+                left_child.rhot = nutd_l
             end
 
             if r > N
                 # Sample nutd_r
-                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=r, sample_nutd=false)  
+                g_splits = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=r)  
+                g = x -> logsumexp( g_splits(x))
 
                 nutd_r = nutd_r == 1.0 ? rand(Uniform(0,1)) : nutd_r
                 (nutd_u, f_nutd) = slice_sampler(nutd_r, g, 0.1, 10, 0.0, 1.0)
 
-                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=r, sample_nutd=true)
+                split_logprobs = g_splits(nutd_u)
+                split = rand(Categorical(exp_normalize(split_logprobs)))
+                nutd_r = split == 1 ? 1.0 : nutd_u
+
+                right_child.rhot = nutd_r
             end
 
             # Sample nu_r = 1-nu_l
@@ -922,11 +955,16 @@ function sample_nu_nutd_from_f(model::ModelState,
                 nutd_p = cur.rhot 
                 nutd_p = nutd_p == 1.0 ? rand(Uniform(0,1)) : nutd_p
 
-                g = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=i, sample_nutd=false)  
+                g_splits = x -> f(model,model_spec, data, nutd_aug=x, nutd_index=i)  
+                g = x -> logsumexp( g_splits(x))
             
                 (nutd_u, f_nutd) = slice_sampler(nutd_p, g, 0.1, 10, 0.0, 1.0)
 
-                f(model,model_spec, data, nutd_aug=nutd_u, nutd_index=i, sample_nutd=true)
+                split_logprobs = g_splits(nutd_u)
+                split = rand(Categorical(exp_normalize(split_logprobs)))
+                nutd = split == 1 ? 1.0 : nutd_u
+
+                root.rhot = nutd
             end
 
 
@@ -1010,7 +1048,7 @@ function sample_psi(model::ModelState,
         root = FindRoot(tree, i)
         path = GetLeafToRootOrdering(tree, root.index)
 
-        (priors, pstates) = psi_infsites_logpdf(model, data, prune_index, path)
+        (priors, pstates) = psi_infsites_logpdf(model, model_spec, data, prune_index, path)
         (likelihoods, lstates) = psi_observation_logpdf(model, model_spec, data, prune_index, path)
 
 #        priors = priors .- maximum(priors)
@@ -1534,6 +1572,45 @@ function sample_eta_from_f(model::ModelState,
     end
 end
 
+function sample_rates(model::ModelState,
+                      model_spec::ModelSpecification,
+                      slice_iterations::Int64)
+
+    # Only update rates if we are using them
+    if model_spec.latent_rates
+        tree = model.tree
+ 
+        N::Int = (length(tree.nodes) + 1) / 2
+        rates = model.rates
+        R = sum(rates) 
+
+        t = compute_times(model)
+        Tau = compute_taus(model)
+
+        M = length(model.Z)
+
+        Z = model.Z
+        U = zeros(Int64, N-1)
+        for i=1:length(Z)
+            U[Z[i]-N] += 1
+        end 
+        U = U .- 1
+
+        for i = N+1:2N-1
+            f = x -> rates_logpdf(model, model_spec, i, Tau, t, R, U, M, x) 
+
+            r = rates[i]
+            fr = f(r)
+
+            for j = 1:slice_iterations
+                r, fr = slice_sampler(r, f, 0.1, 10, 0.0, Inf, fr)
+            end
+            rates[i] = r
+        end
+
+    end
+end
+
 function sample_assignments(model::ModelState,
                             model_spec::ModelSpecification,
                             data::DataState,
@@ -1718,6 +1795,7 @@ end
 function swap_nodes!(tmodel, i, j)
     tree = tmodel.tree
     tZ = tmodel.Z
+    trates = tmodel.rates
 
     tZi = find(tZ .== i)
     tZj = find(tZ .== j)
@@ -1731,6 +1809,12 @@ function swap_nodes!(tmodel, i, j)
     tZ[tZi] = j
     tZ[tZj] = i
 
+    r1 = trates[i]
+    r2 = trates[j]
+
+    trates[i] = r2
+    trates[j] = r1
+
     return tmodel
 end
 
@@ -1741,10 +1825,12 @@ function sample_num_leaves_grow_prune(model::ModelState,
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
+
+    gp = 0.5
  
-    grow_prob = N > 2 ? 0.2 : 1.0
-    rev_prune_prob = 0.8
-    rev_grow_prob = N > 3 ? 0.2 : 1.0
+    grow_prob = N > 2 ? gp : 1.0
+    rev_prune_prob = 1.0 - gp
+    rev_grow_prob = N > 3 ? gp : 1.0
 
     grow = rand() < grow_prob
     p_forward = grow ? log(grow_prob) : log(1-grow_prob)
@@ -1763,7 +1849,43 @@ function sample_num_leaves_grow_prune(model::ModelState,
     e1 = get_partition_function(wl_state, new_N-1, pi_1) 
 
     acceptance_prob = pi_1 - pi_0 - proposal_ratio + e0 - e1
-    #println("acceptance_prob: $acceptance_prob")
+
+    if model_spec.verbose
+        println("acceptance_prob: $acceptance_prob")
+    end
+
+#    Z = proposal_model.Z
+#    u = zeros(Int64, 2new_N-1)
+#    for i=1:length(Z)
+#        u[Z[i]] += 1
+#    end 
+#
+#    ZZ, leaf_times, Etas, inds = model2array(proposal_model, return_leaf_times=true)
+#    prop_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+#
+#
+#    Z = model.Z
+#    u = zeros(Int64, 2N-1)
+#    for i=1:length(Z)
+#        u[Z[i]] += 1
+#    end 
+#
+#    ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
+#    orig_dendrogram = dendrogram(ZZ,u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+#
+#    t = Table(2,1)
+#    t[1,1] = orig_dendrogram
+#    t[2,1] = prop_dendrogram
+#
+#    display(t)
+#
+#    if acceptance_prob == -Inf
+#        println("grow: $grow")
+#        println("pi_0: $pi_0")
+#        println("pi_1: $pi_1")
+#        println("proposal_ratio: $proposal_ratio")
+#        @assert false
+#    end
  
     new_model = log(rand()) < acceptance_prob ? proposal_model : model
      
@@ -1799,7 +1921,7 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
     proposal_ratio = p_forward - p_reverse
 
     model_copy = copy(model)
-    proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+    proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
 
     pi_0k = full_pdf(model, model_spec, data) 
     pi_0j = prior(proposal_model, model_spec, force_nonunit_root_nutd=true)
@@ -1829,13 +1951,13 @@ function sample_num_leaves_ais_rjmcmc(model::ModelState,
             for model_index in model_order
                 if model_index == 1
                     if rTemp == 0.0
-                        model_copy = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+                        model_copy = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
                     else
                         mcmc_sweep(model_copy, model_spec, data, Temp=1.0/rTemp, parameter_order=param_order, verbose=false)
                     end
                 else
                     if iTemp == 0.0
-                        proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+                        proposal_model = draw_random_tree(new_N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
                     else
                         mcmc_sweep(proposal_model, model_spec, data, Temp=1.0/iTemp, parameter_order=param_order, verbose=false)
                     end
@@ -1904,13 +2026,13 @@ function sample_num_leaves_pseudo_marginal(model::ModelState,
     D_k = 0 
     # W = (K-1, K) 
     if rand() < 0.5
-        model_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+        model_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
         model_j = model
         println("W = (K-1, K)")
         D_k = N-1 
     # W = (K, K+1) 
     else
-        model_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+        model_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
         model_j = model
         println("W = (K, K+1)")
         D_k = N+1 
@@ -2055,8 +2177,8 @@ function sample_num_leaves(model::ModelState,
  
     # W = (K-1, K) 
     if rand() < 0.5
-        model_star_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
-        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_k = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state) 
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state) 
 
         for i = 1:num_scan_iterations
             mcmc_sweep(model_star_k, model_spec, data, verbose=false)
@@ -2085,8 +2207,8 @@ function sample_num_leaves(model::ModelState,
  
     # W = (K, K+1) 
     else
-        model_star_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
-        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_k = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+        model_star_j = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
 
         for i = 1:num_scan_iterations
             mcmc_sweep(model_star_k, model_spec, data, verbose=false)
@@ -2276,7 +2398,7 @@ function sample_num_leaves_fixed_j(model::ModelState,
             model_pdf = full_pdf(model, model_spec, data) 
 
             if rand() < 0.5
-                model_star = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N-1)
+                model_star = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state) 
             else
                 model_star = draw_neighboring_tree(model, model_spec, data, N-1)
             end
@@ -2323,12 +2445,12 @@ function sample_num_leaves_fixed_j(model::ModelState,
 #                sample_assignments_from_f(model_k, model_spec, data, Z_iterations, f_psi)
 #            end
         else # reverse move for W=(K,K+1) forward move
-            model_k0 = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+            model_k0 = draw_random_tree(N-1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
             model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
             model_pdf = full_pdf(model_k0, model_spec, data)
 
             if rand() < 0.5
-                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
             else
                 model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
             end
@@ -2368,7 +2490,7 @@ function sample_num_leaves_fixed_j(model::ModelState,
             model_prior = prior(model, model_spec) 
             model_pdf = full_pdf(model, model_spec, data) 
             if rand() < 0.5
-                model_star = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state) #draw_neighboring_tree(model, model_spec, data, N+1)
+                model_star = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
             else
                 model_star = draw_neighboring_tree(model, model_spec, data, N+1)
             end
@@ -2413,12 +2535,12 @@ function sample_num_leaves_fixed_j(model::ModelState,
             println("W = (K, K+1), forward")
             new_model = rand(Categorical(probs)) == 1 ? model_k : model
         else # reverse move for W = (K-1,K) forward move
-            model_k0 = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+            model_k0 = draw_random_tree(N+1, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
             model_prior = prior(model_k0, model_spec, force_nonunit_root_nutd=true)
             model_pdf = full_pdf(model_k0, model_spec, data)
 
             if rand() < 0.5
-                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.WL_state)
+                model_star = draw_random_tree(N, M, S, model.lambda, model.gamma, model.alpha, model.rate_k, model.WL_state)
             else
                 model_star = draw_neighboring_tree(model_k0, model_spec, data, N)
             end

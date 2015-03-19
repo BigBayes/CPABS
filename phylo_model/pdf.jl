@@ -12,7 +12,9 @@ function full_pdf(model::ModelState,
                   data::DataState;
                   Temp::Float64=1.0,
                   nutd_aug::Float64=-1.0,
-                  nutd_index::Int64=0)
+                  nutd_index::Int64=0,
+                  nu::Float64 = -1.0,
+                  nu_index::Int64=0)
 
     if nutd_index > 0
         nutd = model.tree.nodes[nutd_index].rhot
@@ -25,6 +27,9 @@ function full_pdf(model::ModelState,
         model.tree.nodes[nutd_index].rhot = nutd
 
         return [p1 + l1, p2 + l2] + coread_loglikelihood(model, data)
+    elseif nu_index > 0
+        model.tree.nodes[nu_index].rho = nu
+        return prior(model,model_spec) + likelihood(model,model_spec,data, Temp=Temp) + coread_loglikelihood(model, data) 
     else
         prior(model,model_spec) + likelihood(model,model_spec,data, Temp=Temp) + coread_loglikelihood(model, data) 
     end
@@ -132,13 +137,33 @@ function prior(model::ModelState,
     end
 
     assignment_term = 0.0
-    for i = 1:length(U)
-        assignment_term += U[i]*log(Tau[i])
+
+    if model_spec.latent_rates
+        rates = model.rates
+
+        for i = N+1:2N-1
+            assignment_term += logpdf(Gamma(model.rate_k, 1.0 / Tau[i-N]), rates[i])
+        end
+        for i = 1:length(U)
+            assignment_term += U[i]*log(rates[i+N])
+        end
+        R = sum(rates)
+        assignment_term -= sum(U)*log(R)
+    else
+        for i = 1:length(U)
+            assignment_term += U[i]*log(Tau[i])
+        end
     end
 
     if !all( Tau .> 0)
         return -Inf
     end
+
+#    if isinf(assignment_term+psi_term)
+#        println("psi_term: $psi_term")
+#        println("assignment_term: $assignment_term")
+#        println("rates: $rates")
+#    end
 
     psi_term + assignment_term
 end
@@ -522,6 +547,7 @@ end
 #@profile begin
 #pdf for updating psi, the tree structure, assumes tree is already pruned at prune_index
 function psi_infsites_logpdf(model::ModelState,
+                             model_spec::ModelSpecification,
                              data::DataState,
                              pruned_index::Int64,
                              path::Array{Int64,1})
@@ -530,6 +556,8 @@ function psi_infsites_logpdf(model::ModelState,
     lambda = model.lambda
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
+
+    rates = model.rates
 
     Z = model.Z
     U = zeros(N-1)
@@ -707,11 +735,15 @@ function psi_infsites_logpdf(model::ModelState,
         for j = pruned_indices
             if j > N
                 L_new = L[j] * pruned_subtree_mu_prop^gam
-                subtree_probs += U[j-N]*log(L_new)
-                if isnan(subtree_probs)
-                    println("U[$j]: $(U[j-N]), L_new: $L_new")
-                    println("pruned_subtree_mu_prop: $pruned_subtree_mu_prop")
-                    println("L[$j]: $(L[j])")
+                if model_spec.latent_rates
+                    subtree_probs += -L_new*rates[j]
+                else
+                    subtree_probs += U[j-N]*log(L_new)
+                    if isnan(subtree_probs)
+                        println("U[$j]: $(U[j-N]), L_new: $L_new")
+                        println("pruned_subtree_mu_prop: $pruned_subtree_mu_prop")
+                        println("L[$j]: $(L[j])")
+                    end
                 end
             end
         end
@@ -732,10 +764,15 @@ function psi_infsites_logpdf(model::ModelState,
 
                 L_new = tau_t - grafted_subtree_mu_prop^gam * t_1[j]
                 L_new_total += L_new
-                # need to compute the difference here as these terms aren't the same for each i
-                subtree_probs += U[j-N]*(log(L_new) - log(L[j]))
-                if isnan(subtree_probs)
-                    println("U[$j]: $(U[j-N]), L_new: $L_new, L[j]: $(L[j])")
+
+                if model_spec.latent_rates
+                    subtree_probs += -(L_new - L[j])*rates[j]
+                else
+                    # need to compute the difference here as these terms aren't the same for each i
+                    subtree_probs += U[j-N]*(log(L_new) - log(L[j]))
+                    if isnan(subtree_probs)
+                        println("U[$j]: $(U[j-N]), L_new: $L_new, L[j]: $(L[j])")
+                    end
                 end
             end
         end 
@@ -759,7 +796,10 @@ function psi_infsites_logpdf(model::ModelState,
         subtree_probs += pruned_parent_term 
 
         L_graft = sum_L - L_sub[i] + L_new_total + L_pruned_parent + pruned_subtree_mu_prop^gam * L_pruned
-        subtree_probs -= sum_U * log(L_graft)
+    
+        if !model_spec.latent_rates
+            subtree_probs -= sum_U * log(L_graft)
+        end
 
         push!(total_probs, psi_probs[i] + subtree_probs)
         if isnan(total_probs[end])
@@ -1459,6 +1499,35 @@ function eta_log_prior_gradient(model::ModelState,
 end
 
 ###################################
+##### pdf for rates update ########
+###################################
+
+function rates_logpdf(model::ModelState,
+                      model_spec::ModelSpecification,
+                      index::Int64,
+                      Tau::Vector{Int64},
+                      times::Vector{Float64},
+                      R::Float64,
+                      U::Vector{Int64},
+                      M::Number,
+                      r::Float64)
+    rates = model.rates
+    rate_k = model.rate_k
+    i = index
+    
+    N = length(U) + 1
+    U_i = U[i-N]
+
+
+    R_ = R - rates[i]
+
+    tau_t = Tau[i] == 0 ? 1.0 : times[Tau[i]]
+    v = tau_t - times[i]
+
+    return (rate_k+U_i) * log(r) - M*log(R_ + r) - v*r
+end
+
+###################################
 ##### pdf for Z assignment update #
 ###################################
 
@@ -1505,8 +1574,12 @@ function z_logpdf(model::ModelState,
     for k = N+1:2N-1
         Z_tmp[index] = k
 
-        tau_t = Tau[k] == 0 ? 1.0 : times[Tau[k]]
-        v_k = tau_t - times[k]
+        if model_spec.latent_rates
+            v_k = model.rates[k]
+        else
+            tau_t = Tau[k] == 0 ? 1.0 : times[Tau[k]]
+            v_k = tau_t - times[k]
+        end
 
         n_k = U[k-N]+1
         q_k = (1 + (n_k-1)*v_k)/n_k
@@ -1830,18 +1903,23 @@ function grow_prune_kernel_sample(model::ModelState,
             @assert false
         end
 
-        if root.index in splittable_nodes
-            branch_index = rand(1:3*length(splittable_nodes)+1)
+        node_index = -1
+
+        if root.index-N in splittable_nodes
+            branch_index = rand(1:3*length(splittable_nodes))
+
+            # Grow above root
             if branch_index == 1
                 sibling_index = root.index
             else
                 node_index = splittable_nodes[rand(1:length(splittable_nodes))] + N
-                child_index = rand(1:3)
+                # only grow from the right child of the root
+                child_index = tree.nodes[node_index].parent == Nil() ? rand(1:2:3) : rand(1:3)
 
                 if child_index == 3
                     sibling_index = node_index
                     parent = tree.nodes[node_index].parent
-                    if parent != Nil() && parent.index
+                    if parent != Nil()
                         p_reverse += -log(2)
                     end 
                 else
@@ -1851,7 +1929,7 @@ function grow_prune_kernel_sample(model::ModelState,
                     end
                 end
             end
-            p_forward += -log(3*length(splittable_nodes)+1) 
+            p_forward += -log(3*length(splittable_nodes)) 
         else
             node_index = splittable_nodes[rand(1:length(splittable_nodes)) ] + N
             child_index = rand(1:3)
@@ -1872,6 +1950,7 @@ function grow_prune_kernel_sample(model::ModelState,
             p_forward += -log(3*length(splittable_nodes)) 
         end 
 
+
         new_leaf = TreeNode(zeros(S), 2N)
         new_leaf.children[1] = Nil()
         new_leaf.children[2] = Nil()
@@ -1891,14 +1970,15 @@ function grow_prune_kernel_sample(model::ModelState,
 
         p_forward += sum(logpdf(Beta(alpha*nu+1, alpha*(1-nu)+1), eta))
 
+        # new_leaf should be left child
         new_leaf.parent = new_internal
-        new_internal.children[1] = new_leaf
-        new_internal.children[2] = Nil()
+        new_internal.children[1] = Nil()
+        new_internal.children[2] = new_leaf
        
         push!(tree.nodes, new_leaf)
         push!(tree.nodes, new_internal)
 
-        parent = tree.nodes[node_index]
+        parent = node_index == -1 ? root : tree.nodes[node_index]
 
         eta2 = parent.state
 
@@ -1921,7 +2001,6 @@ function grow_prune_kernel_sample(model::ModelState,
 #        p_forward += -log(length(Z_perm)-1) # choose number to move
 #        p_forward += -lbinomial( length(Z_perm), num_moved_assignments) # select assignments to move
 
- 
         InsertIndexIntoTree!(tree, 2N, sibling_index)
         SwapIndices!(tree, 2N, N+1) # new leaf should have index N+1
 
@@ -1936,6 +2015,20 @@ function grow_prune_kernel_sample(model::ModelState,
         times = compute_times(new_model)
         Tau = compute_taus(new_model)
         phi = compute_phis(new_model)
+
+        if model_spec.latent_rates
+            rates = model.rates
+            total_rate = sum(rates)
+
+            new_rates = zeros(2new_N-1)
+            new_rates[new_N+1:end-1] = rates[N+1:end]
+
+            new_rates[2new_N-1] = rand(Exponential(total_rate/(new_N-1))) 
+            p_forward += logpdf(Exponential(total_rate/(new_N-1)), new_rates[new_N])
+
+            new_model.rates = new_rates
+        end
+
         # dummy U and Z set to ones as z_logpdf takes into account
         # the fact that we shouldn't leave clusters empty (but we don't want that here)
         U = ones(Int64,length(model.Z))
@@ -1974,17 +2067,22 @@ function grow_prune_kernel_sample(model::ModelState,
 #        right_children = [tree.nodes[i].children[1].index for i = new_N+1:2new_N-1]
 #        prunable_indices = right_children[find(right_children .<= new_N)]
 
-        p_reverse += -log(new_N)
+        p_reverse += -log(new_N-1)
 
     else #prune
         @assert N > 2
+        root = FindRoot(tree,1)
+        r = root.children[1]
+        rl = r.children[2]
 
-        prunable_indices = [1:N]     
+        exempt_index = rl == Nil() ? 0 : root.children[2].index
+
+        prunable_indices = setdiff([1:N], exempt_index)  
 #        right_children = [tree.nodes[i].children[1].index for i = N+1:2N-1]
 #        left_children = [tree.nodes[i].children[2].index for i = N+1:2N-1]
 #        prunable_indices = [right_children[find(right_children .<= N)],
 
-        prune_index = rand(1:N) #prunable_indices[rand(1:length(prunable_indices))]
+        prune_index = prunable_indices[rand(1:length(prunable_indices))]
         parent = tree.nodes[prune_index].parent
  
         p_forward += -log(length(prunable_indices))
@@ -2015,8 +2113,11 @@ function grow_prune_kernel_sample(model::ModelState,
             end
         end
 
-        # compute p_reverse
         new_N = N - 1
+
+
+        # compute p_reverse
+
 
         times = compute_times(new_model)
         Tau = compute_taus(new_model)
@@ -2029,13 +2130,22 @@ function grow_prune_kernel_sample(model::ModelState,
         dest_moved_mutations = find(Z .== dest_index)
         moved_mutations = [moving_mutations, dest_moved_mutations]
 
-
         Z_logpdfs = zeros(N-1, length(moved_mutations))
         for i = 1:length(moved_mutations)
             m = moved_mutations[i]
             Z_logpdfs[:,i] = z_logpdf(new_model, model_spec, data, m, U, times, Tau, phi) 
         end
         new_model.Z = Z
+
+        if model_spec.latent_rates
+            old_rates = model.rates
+            new_rates = zeros(2new_N-1)
+          
+            new_rates[new_N+1:parent.index-2] = old_rates[N+1:parent.index-1] 
+            new_rates[parent.index-1:end] = old_rates[parent.index+1:end]
+
+            new_model.rates = new_rates 
+        end 
 
         possible_Z_states = unique(Z[moved_mutations])
         @assert length(possible_Z_states) == 2
@@ -2101,11 +2211,22 @@ function grow_prune_kernel_sample(model::ModelState,
         splittable_nodes = find([ sum(Z .== k) for k = new_N+1:2new_N-1] .> 1)
 
         root = FindRoot(tree,1)
-        if root.index in splittable_nodes
-            p_reverse += -log(3*length(splittable_nodes)+1) 
-        else
-            p_reverse += -log(3*length(splittable_nodes)) 
-        end 
+
+#        # old version when we allowed splitting the left branch of the root
+#        if root.index in splittable_nodes
+#            p_reverse += -log(3*length(splittable_nodes)+1) 
+#        else
+#            p_reverse += -log(3*length(splittable_nodes)) 
+#        end
+
+        p_reverse += -log(3*length(splittable_nodes)) 
+
+        if model_spec.latent_rates
+            r = model.rates[parent.index]
+            total_rates = sum(model.rates) - r
+            p_reverse += logpdf(Exponential(total_rates/N), r)
+        end
+
         # end p_reverse
 
 #        d = length(dest_assignments)
