@@ -352,8 +352,10 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState)
 
     wl_state = models[end].WL_state
     M = length(models[end].Z)
-    
-    model_spec = ModelSpecification(zeros(3), false, false, false)
+   
+    latent_rates = models[1].rates == zeros(length(models[1].rates))
+ 
+    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
     total_partition_mass = logsumexp(wl_state.partition_function)
 
@@ -394,7 +396,8 @@ function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataSta
 
     total_partition_mass = logsumexp(wl_state.partition_function)
 
-    model_spec = ModelSpecification(zeros(3), false, false, false)
+    latent_rates = models[1].rates == zeros(length(models[1].rates))
+    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
     ancestorship_matrix = zeros(M,M)
     sum_w = 0.0
