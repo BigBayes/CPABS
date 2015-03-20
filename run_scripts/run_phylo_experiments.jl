@@ -127,7 +127,7 @@ function run_phylo_experiment(filename, alpha::Float64;
         D = 0
         M_per_cluster = 0
         rand_restarts=0
-        num_iterations=20000
+        num_iterations=50000
     elseif contains(filename, "phylospan")
 
         if multilocus_filename == nothing
