@@ -138,6 +138,11 @@ function prior(model::ModelState,
 
     assignment_term = 0.0
 
+    if !all( Tau .> 0)
+        return -Inf
+    end
+
+
     if model_spec.latent_rates
         rates = model.rates
 
@@ -153,10 +158,6 @@ function prior(model::ModelState,
         for i = 1:length(U)
             assignment_term += U[i]*log(Tau[i])
         end
-    end
-
-    if !all( Tau .> 0)
-        return -Inf
     end
 
 #    if isinf(assignment_term+psi_term)
