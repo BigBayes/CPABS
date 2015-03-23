@@ -329,3 +329,4 @@ end
 function model2array(model::ModelState; return_leaf_times::Bool=false)
     tree2array(model.tree, model.gamma, return_leaf_times=return_leaf_times)
 end
+
