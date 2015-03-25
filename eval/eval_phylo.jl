@@ -118,14 +118,14 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         return auprs
     elseif contains(filename_base, "betasplit")
 
-        auprs = zeros(8)
-        cauprs = zeros(8)
-        aucs = zeros(8)
+        auprs = zeros(40)
+        cauprs = zeros(40)
+        aucs = zeros(40)
 
-        S = Array(Any,8)
+        S = Array(Any,40)
         for fname in filenames
             if contains(fname, filename_base) && contains(fname, ".models")
-                m = match(r"(.*).ccm\.([0-9]+)\..*\.([0-9]+)\.models", fname)
+                m = match(r"(.*).ccm\.([0-9]+)\..*\.([0-9]+[0-9]*)\.models", fname)
                 fname_base = m.captures[1] 
                 alpha = float(m.captures[2]) 
                 index = int(m.captures[3]) 
@@ -143,7 +143,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
             end
 
         end
-        for i = 1:8
+        for i = 1:40
             auprs[i], cauprs[i] = fetch(S[i]) #eval_betasplit_experiment(data_file, models_fname, clusters, kind) 
         end
 
@@ -353,7 +353,7 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState)
     wl_state = models[end].WL_state
     M = length(models[end].Z)
    
-    latent_rates = models[1].rates == zeros(length(models[1].rates))
+    latent_rates = models[1].rates != zeros(length(models[1].rates))
  
     model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
@@ -396,7 +396,7 @@ function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataSta
 
     total_partition_mass = logsumexp(wl_state.partition_function)
 
-    latent_rates = models[1].rates == zeros(length(models[1].rates))
+    latent_rates = models[1].rates != zeros(length(models[1].rates))
     model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
     ancestorship_matrix = zeros(M,M)

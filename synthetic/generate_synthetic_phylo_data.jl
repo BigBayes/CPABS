@@ -83,7 +83,7 @@ function generate_data(passenger_rate::Float64, read_depth::Int64, mu_r::Float64
 end
 
 function generate_datasets(kind)
-    for i = 1:8
+    for i = 1:40
         A, clusters = generate_data(200.0, 50, 0.999, 0.5, kind)
         AA = Array(Any, size(A,1)+1, size(A,2))
 
