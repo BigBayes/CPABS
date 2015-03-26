@@ -46,7 +46,7 @@ function plotModelClusteringMatrices(models_filename::ASCIIString)
 
     fname = models_filename
 
-    m = match(r"(.*).ccm\.([0-9]+)\..*\.([0-9]+[0-9]*)\.models", fname)
+    m = match(r".*/([^/]*).ccm\.([0-9]+)\..*\.([0-9]+[0-9]*)\.models", fname)
     fname_base = m.captures[1] 
 #    alpha = float(m.captures[2]) 
     index = int(m.captures[3]) 
@@ -63,8 +63,8 @@ function plotModelClusteringMatrices(models_filename::ASCIIString)
 
     hold(true)
 
-    p1 = FramedPlot()
-    p2 = FramedPlot()
+    p1 = FramedPlot(title="Predicted Ancestorship")
+    p2 = FramedPlot(title="Predicted Coclustering")
 
     Winston.ghf(p1)
     imagesc(predicted_ancestorship)
@@ -74,8 +74,8 @@ function plotModelClusteringMatrices(models_filename::ASCIIString)
     t[1,1] = p1
     t[1,2] = p2
 
-    p3 = FramedPlot()
-    p4 = FramedPlot()
+    p3 = FramedPlot(title="True Ancestorship")
+    p4 = FramedPlot(title="True Coclustering")
 
     ground_truth_ancestorship = get_ancestorship_from_clusters(clusters, "chain")
     ground_truth_clustering = get_coclustering_from_clusters(clusters)
@@ -89,4 +89,5 @@ function plotModelClusteringMatrices(models_filename::ASCIIString)
     t[2,2] = p4
 
     display(t)
+    t
 end

@@ -198,7 +198,7 @@ function eval_betasplit_experiment(data_filename, models_filename, clusters, kin
 
     data = constructDataState(data_filename)
 
-    predicted = compute_ancestorship_matrix(models_filename, data)
+    predicted = compute_ancestorship_matrix(models_filename, data, start_index=50000)
     ground_truth = get_ancestorship_from_clusters(clusters, kind)
   
     N, N = size(ground_truth)
@@ -208,7 +208,7 @@ function eval_betasplit_experiment(data_filename, models_filename, clusters, kin
     a_aupr = aupr(predicted[nondiagonals], ground_truth[nondiagonals])
 
 
-    predicted = compute_cocluster_matrix(models_filename, data)
+    predicted = compute_cocluster_matrix(models_filename, data, start_index=50000)
     ground_truth = get_coclustering_from_clusters(clusters)
 
     triu_inds = find(triu(ones(N,N),1))
@@ -344,7 +344,7 @@ function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
     p    
 end
 
-function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState)
+function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState; start_index=1)
 
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -361,7 +361,7 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState)
 
     cocluster_matrix = zeros(M,M)
     sum_w = 0.0
-    for n = 1:length(models)
+    for n = start_index:length(models)
         model = models[n]
         N::Int = (length(model.tree.nodes)+1)/2
 
@@ -385,7 +385,7 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState)
     return cocluster_matrix
 end
 
-function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataState)
+function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataState; start_index=1)
 
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -401,7 +401,7 @@ function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataSta
 
     ancestorship_matrix = zeros(M,M)
     sum_w = 0.0
-    for n = 1:length(models)
+    for n = start_index:length(models)
         model = models[n]
         N::Int = (length(model.tree.nodes)+1)/2
 
