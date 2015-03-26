@@ -286,6 +286,10 @@ function get_ancestorship_from_clusters(clusters, kind)
                 Y[clusters[i], clusters[j]] = 1
             end
         end        
+    elseif kind == "branch"
+        for i = 2:length(clusters)
+            Y[clusters[1], clusters[i]] = 1
+        end
     else
         error("not implemented")
     end
