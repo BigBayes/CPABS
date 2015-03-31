@@ -50,7 +50,7 @@ function uof(Z::Matrix)
     Znew, perm
 end
 
-function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_inds=nothing)
+function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_inds=nothing, annotations=nothing)
     U = convert(Array{Int64}, U)
     Nm1, _ = size(Z)
     N = Nm1+1
@@ -130,6 +130,11 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_
             original_r = sorted_inds[int(r)]
             add(p, Winston.DataLabel(l_loc, l_t-0.02, "$original_l", color="red", size=0.3))
             add(p, Winston.DataLabel(r_loc, r_t-0.02, "$original_r", color="red", size=0.3))
+
+            if annotations != nothing
+                add(p, Winston.DataLabel(l_loc+0.06, l_t+0.05, annotations[original_l], color="black", size=0.3))
+                add(p, Winston.DataLabel(r_loc+0.06, r_t+0.05, annotations[original_r], color="black", size=0.3))
+            end
         end
 
         if U[l] > 0
@@ -150,11 +155,14 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_
                 append!(mutations_x, n_x)
                 append!(mutations_y, n_y)
                 add(p, Winston.DataLabel((l_loc+r_loc)/2, n_t-0.02, "$original_n", color="red", size=0.3))
+                if annotations != nothing
+                    add(p, Winston.DataLabel((l_loc+r_loc)/2+0.06, n_t+0.05, annotations[original_n], color="black", size=0.3))
+                end
             end
         end
     end
 
-    add(p, Points(mutations_x, mutations_y, "type", "diamond"))
+    add(p, Points(mutations_x, mutations_y, kind="diamond", size=0.3))
 
     if labels != nothing
         setattr(p.x1, "ticks", locations[1:N])

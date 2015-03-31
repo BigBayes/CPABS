@@ -97,3 +97,13 @@ function get_partition_function(wl_state::WangLandauState, K::Int64, energy::Flo
     wl_state.partition_function[K_bin, energy_bin]
 end
 
+function get_bin(wl_state::WangLandauState, K::Int64, energy::Float64)
+    @assert energy < Inf
+    energy_boundaries = wl_state.energy_boundaries
+    K_boundaries = wl_state.K_boundaries
+
+    K_bin = find(K .< K_boundaries)[1] 
+    energy_bin = find(energy .< energy_boundaries)[1]
+
+    K_bin, energy_bin
+end

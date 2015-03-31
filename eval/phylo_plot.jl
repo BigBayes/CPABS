@@ -1,8 +1,13 @@
 require("phylo_model/phylo_model.jl")
+require("phylo_model/pdf.jl")
 require("eval/eval_phylo.jl")
+require("data_utils/data_utils.jl")
 require("utils/plot_utils.jl")
+require("utils/probability_util.jl")
 
-function getModelDendrogram(model::ModelState)
+using Distributions
+
+function getModelDendrogram(model::ModelState, true_clustering=nothing)
     Z = model.Z
     N::Int = (length(model.tree.nodes) + 1) / 2
 
@@ -13,13 +18,41 @@ function getModelDendrogram(model::ModelState)
 
     ZZ, leaf_times, Etas, inds = model2array(model, return_leaf_times=true)
 
-    dendrogram(ZZ, u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+    if true_clustering != nothing
+
+        A = zeros(Int64, N-1, length(true_clustering))
+
+        for i = 1:length(Z)
+            true_cluster = find([any(true_clustering[j] .== i) for j = 1:length(true_clustering)])
+           
+            A[Z[i]-N, true_cluster] += 1
+ 
+        end
+
+        phis = compute_phis(model)
+
+        annotations = Array(ASCIIString, 2N-1)
+        annotations[1:N] = ""
+        for i = N+1:2N-1
+            annotations[i] = "$(A[i-N,:])\nphi: $(round(phis[i],3))"
+        end
+
+        dendrogram(ZZ, u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times, annotations=annotations)
+    else
+        dendrogram(ZZ, u[inds], plot=false, sorted_inds=inds, leaf_times=leaf_times)
+    end
 end
 
-function genModelsNavigator(models_filename::ASCIIString)
+function getModels(models_filename::ASCIIString)
     f = open(models_filename, "r")
     models = deserializeModels(f)
     close(f)
+    models
+end
+
+function genModelsNavigator(models_filename::ASCIIString)
+
+    models = getModels(models_filename)
 
     curindex = 1 
 
@@ -39,10 +72,64 @@ function genModelsNavigator(models_filename::ASCIIString)
     showModel, stepN
 end
 
+#function computeLogPosteriors(models, data::DataState)
+#    latent_rates = models[1].rates != zeros(length(models[1].rates))
+#    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
+#
+#    wl_state = models[end].WL_state
+#    total_partition_mass = logsumexp(wl_state.partition_function)
+#
+#    log_posteriors = zeros(length(models))
+#
+#    for n = 1:length(models)
+#        model = models[n]
+#        N::Int = (length(model.tree.nodes)+1)/2
+#
+#        log_p = full_pdf(model, model_spec, data)
+#        w = get_partition_function( wl_state, N-1, log_p)
+#        w = exp(w - total_partition_mass)
+#
+#
+#
+#    end
+#
+#    
+#end
+
+function getRepresentativeSample(models; sampled_bin=nothing)
+  
+    wl_state = models[end].WL_state 
+    @assert length(wl_state.energy_boundaries) == 1
+
+    Ns = [int((length(models[i].tree.nodes)+1)/2) for i = 1:length(models)]
+
+    bin_map = [get_bin(wl_state, N-1, 0.0)[1] for N = 1:maximum(Ns)]
+
+    bins = [bin_map[N] for N in Ns] 
+
+    bin_logprobs = wl_state.partition_function[:,1]
+    sampled_bin = sampled_bin == nothing ? rand(Categorical(exp_normalize(bin_logprobs))) : sampled_bin
+
+    I = find(bins .== sampled_bin)
+    model_index = I[rand(1:length(I))]
+
+    models[model_index]
+end
+
+function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing)
+    model = getRepresentativeSample(models, sampled_bin=bin)
+    p = getModelDendrogram(model, true_clustering)
+
+#    LL = likelihood(model, model_spec, data)
+#    println("Model log-likelihood: $LL")
+#
+    display(p)
+    p
+end 
+
+
 function plotModelClusteringMatrices(models_filename::ASCIIString)
-    f = open(models_filename, "r")
-    models = deserializeModels(f)
-    close(f)
+    models = getModels(models_filename)
 
     fname = models_filename
 
