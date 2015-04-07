@@ -3,13 +3,13 @@
 function initialize_smart_spawn()
 
     jobs = Any[]
-    running_procs = Array(Any, nworkers)
+    running_procs = Array(Any, nworkers())
 
     available_workers = workers()
 
     job_id_counter = 0
 
-    function smart_spawn(args)
+    function smart_spawn(args...)
 
         while length(available_workers) == 0
             sleep(100)

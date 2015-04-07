@@ -30,7 +30,7 @@ end
 function run_all_betasplitphylo_experiments(alpha, kind)
     filenames = readdir("../data/phylosub/beta_split_phylo")
 
-    smart_sync, get_job_counter, get_jobs = initialize_smart_spawn()
+    smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
 
     for fname in filenames
         if contains(fname, "csv") && contains(fname, kind)
@@ -43,7 +43,7 @@ end
 function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
     filenames = readdir("../data/phylosub/emptysims")
 
-    smart_sync, get_job_counter, get_jobs = initialize_smart_spawn()
+    smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
 
     for fname in filenames
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", fname)
