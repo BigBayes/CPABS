@@ -27,6 +27,19 @@ function run_all_betasplit_experiments(alpha, kind)
 
 end
 
+function run_all_betasplitphylo_experiments(alpha, kind)
+    filenames = readdir("../data/phylosub/beta_split_phylo")
+
+    smart_sync, get_job_counter, get_jobs = initialize_smart_sync()
+
+    for fname in filenames
+        if contains(fname, "csv") && contains(fname, kind)
+            job_id, job_ref = smart_spawn(run_phylo_experiment, "beta_split_phylo/$fname", alpha)
+        end
+    end
+
+end
+
 function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
     filenames = readdir("../data/phylosub/emptysims")
 
@@ -69,8 +82,11 @@ function run_phylo_experiment(filename, alpha::Float64;
                               wl_K_boundaries::Vector{Float64} = [4,5,6,7,Inf],
                               wl_f0::Float64 = 1.0,
                               wl_histogram_test_ratio::Float64 = 0.3,
-                              index::Int64 = 0 )
+                              index::Int64 = 0,
+                              init_state = nothing )
 
+
+    trial_index = index
 
     #model_spec.debug = true
 
@@ -113,6 +129,16 @@ function run_phylo_experiment(filename, alpha::Float64;
             wl_K_boundaries -= 1
         end
 
+        rand_restarts=0
+        num_iterations=100000
+    elseif contains(filename, "betasplit_phylo")
+        filename_base="betasplit_phylo"
+        aisrj_lag = Inf
+        m = match(r"_([0-9]+)_([0-9]+)_([0-9]+)_([0-9]+)\.", filename)
+        init_K = int(m.captures[1])
+        D = int(m.captures[2])
+        M_per_cluster = int(m.captures[3])
+        trial_index = int(m.captures[4])
         rand_restarts=0
         num_iterations=100000
     elseif contains(filename, "betasplit")
@@ -161,11 +187,6 @@ function run_phylo_experiment(filename, alpha::Float64;
 
 
 
-    if !isdefined(:num_trials)
-        num_trials = 1
-    end
-
-
 
 #    (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
 #
@@ -184,10 +205,12 @@ function run_phylo_experiment(filename, alpha::Float64;
 
     data = constructDataState(filename, multilocus_filename=multilocus_filename)
 
-    result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state)
+    result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state, init_state = init_state)
     (iters, Ks, trainLLs, models) = result
 
-    f = open("../results/phylo/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.$index.models", "w")
+    run(`mkdir ../results/phylo/$filename_base`)
+    
+    f = open("../results/phylo/$filename_base/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.$trial_index.models", "w")
     serialize(f, models) 
     close(f)
 end

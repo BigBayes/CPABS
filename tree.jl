@@ -232,6 +232,61 @@ function Tree(U::Array{Vector{Float64},1})
     tree 
 end
 
+function Tree(U::Array{Vector{Float64},1},
+              coalescing_order::Array{Int64,2})
+    (_2nm1,) = size(U)
+    N::Int64 = (_2nm1+1)/2
+    tree = Tree{Vector{Float64}}()
+    tree.nodes = Array(TreeNode{Vector{Float64}},2N-1)
+
+    for i = 1:N
+        tree.nodes[i] = TreeNode(U[i],i)
+        tree.nodes[i].children[1] = Nil();
+        tree.nodes[i].children[2] = Nil();
+    end
+
+    for i = N+1:2N-2
+        tree.nodes[i] = TreeNode(U[i], i)
+
+        l = coalescing_order[i-N,1]
+        r = coalescing_order[i-N,2]
+
+ 
+        tree.nodes[l].parent = tree.nodes[i]
+        tree.nodes[r].parent = tree.nodes[i]
+
+        tree.nodes[i].children = [tree.nodes[l], tree.nodes[r]]
+
+        tree.nodes[i].num_leaves = tree.nodes[l].num_leaves +
+                                   tree.nodes[r].num_leaves 
+    end
+
+    # We require that the left subtree from the root is a leaf 
+    # for the purposes of the subclonal reconstruction model, we don't expect two independent cancer populations, etc
+
+    tree.nodes[2N-1] = TreeNode(U[2N-1], 2N-1)
+    l = 1
+    r = 2N-2
+    tree.nodes[l].parent = tree.nodes[2N-1]
+    tree.nodes[r].parent = tree.nodes[2N-1]
+
+    # likelihood functions assume right child is first, and here it matters 
+    tree.nodes[2N-1].children = [tree.nodes[r], tree.nodes[l]]
+
+    tree.nodes[2N-1].num_leaves = tree.nodes[l].num_leaves +
+                                  tree.nodes[r].num_leaves 
+    
+
+
+    tree.nodes[2N-1].num_ancestors = 1
+    for i = 2N-2:-1:1
+        tree.nodes[i].num_ancestors = tree.nodes[i].parent.num_ancestors + 1
+    end 
+
+    tree 
+end
+
+
 function copy(tree::Tree{Vector{Float64}})
     n = length(tree.nodes)
     new_tree = Tree{Vector{Float64}}()

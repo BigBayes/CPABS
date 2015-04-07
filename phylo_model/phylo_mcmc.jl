@@ -28,17 +28,18 @@ function mcmc(data::DataState,
               burnin_iterations::Int64;
               aisrj_lag=10,
               rand_restarts::Int64=0,
-              WL_state = WangLandauState() )
+              WL_state = WangLandauState(),
+              init_state = nothing)
     
     # number of leaves is the number of split points plus one
     N = init_K+1
 
     (M,S) = size(data.reference_counts)
 
-    model = draw_random_tree(N, M, S, lambda, gam, alpha, rates_shape, WL_state)
+    model = draw_random_tree(N, M, S, lambda, gam, alpha, rates_shape, WL_state, init_state=init_state)
     tree = model.tree
     Z = model.Z
-
+        
     remaining_restarts = rand_restarts
     rand_restart_models = Array(Any, rand_restarts)
     rand_restart_pdfs = zeros(rand_restarts)
@@ -70,6 +71,10 @@ function mcmc(data::DataState,
     chain_probs = Float64[]
 
     iter = 0
+
+    push!(models,copy(model))
+    push!(iters, iter)
+
     while iter < iterations
         iter += 1
 
@@ -215,11 +220,11 @@ function mcmc(data::DataState,
  
         end
 
+        push!(models,copy(model))
+        push!(iters, iter)
 
-        if (iter > burnin_iterations) || iter == iterations
-            push!(models,copy(model))
-            push!(iters, iter)
-        end
+#        if (iter > burnin_iterations) || iter == iterations
+#        end
         push!(trainLLs, tree_LL)
         #push!(Ks, size(model.weights)[1])
     end
@@ -236,19 +241,27 @@ end
 # Not quite the same as a draw from the prior, as we don't let nu-tilde of the root be 1.0
 function draw_random_tree(N::Int64, M::Int64, S::Int64, 
                           lambda::Float64, gam::Float64, alpha::Float64, rate_k::Float64,
-                          WL_state::WangLandauState)
+                          WL_state::WangLandauState; init_state = nothing)
 
     @assert M >= N
-    
-    eta = [ i <= N ? -ones(S) : zeros(S) for i = 1:2N-1]
-    tree = Tree(eta)
+   
+    if init_state == nothing
+        eta = [ i <= N ? -ones(S) : zeros(S) for i = 1:2N-1]
+        tree = Tree(eta)
+    else
+        eta = init_state[1]
+        tree = Tree(eta, init_state[2])
+    end
 
     InitializeBetaSplits(tree, () -> rand(Beta(1,1)))
 
     for i = N+1:2N-1
         nu = tree.nodes[i].rho
-        eta_i = rand(Beta( alpha*nu+1, alpha*(1-nu)+1), S)
-        tree.nodes[i].state = eta_i
+        
+        if init_state == nothing
+            eta_i = rand(Beta( alpha*nu+1, alpha*(1-nu)+1), S)
+            tree.nodes[i].state = eta_i
+        end
 
         N_leaves = tree.nodes[i].num_leaves
 
@@ -296,7 +309,15 @@ function draw_random_tree(N::Int64, M::Int64, S::Int64,
         k = rand(Categorical(branch_times))
         Z[m] = k + N
     end
+
+    if init_state != nothing
+        clusters = init_state[3]
+        for i = 1:length(clusters)
+            Z[clusters[i]] = 2N-i
+        end
+    end
     model.Z = Z
+
     return model
 end
 

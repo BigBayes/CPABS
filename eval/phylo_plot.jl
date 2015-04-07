@@ -1,5 +1,6 @@
 require("phylo_model/phylo_model.jl")
 require("phylo_model/pdf.jl")
+require("phylo_model/phylo_mcmc.jl")
 require("eval/eval_phylo.jl")
 require("data_utils/data_utils.jl")
 require("utils/plot_utils.jl")
@@ -50,16 +51,18 @@ function getModels(models_filename::ASCIIString)
     models
 end
 
-function genModelsNavigator(models_filename::ASCIIString)
+function genModelsNavigator(models_filename::ASCIIString; true_clustering=nothing)
 
+    true_clustering = true_clustering
     models = getModels(models_filename)
 
     curindex = 1 
 
     function showModel(index::Int64)
-        p = getModelDendrogram(models[index])
+        p = getModelDendrogram(models[index], true_clustering)
         display(p)
         curindex = index
+        return p
     end
 
     function stepN(N::Int64)
@@ -178,3 +181,28 @@ function plotModelClusteringMatrices(models_filename::ASCIIString)
     display(t)
     t
 end
+
+function plot_phi_v_time(N, M, alpha)
+
+    X = Float64[]
+    Y = Float64[] 
+
+    for m = 1:M
+        model = draw_random_tree(N, N, 1, 1.0, 1.0, alpha, 1.0, WangLandauState()) 
+
+        tree = model.tree
+
+        times = compute_times(model)
+        phis = compute_phis(model)
+
+        for i = N+1:2N-1
+            push!(X, times[i])
+            push!(Y, phis[i])
+        end
+    end
+
+    pts = Points(X,Y, kind="dot")
+    p = FramedPlot(title="alpha= $alpha", xlabel="time", ylabel="phi")
+    add(p, pts)
+    X,Y,p
+end 
