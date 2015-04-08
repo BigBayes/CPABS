@@ -208,7 +208,6 @@ function run_phylo_experiment(filename, alpha::Float64;
     result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state, init_state = init_state)
     (iters, Ks, trainLLs, models) = result
 
-    run(`mkdir ../results/phylo/$filename_base`)
     
     f = open("../results/phylo/$filename_base/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.$trial_index.models", "w")
     serialize(f, models) 
