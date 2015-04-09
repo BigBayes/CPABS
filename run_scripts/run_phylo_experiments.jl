@@ -10,6 +10,8 @@ require("utils/general_macros.jl")
 #    filename = "CLL077.csv"
 #end
 
+phylosub_prefix = "../data/phylosub"
+phylospan_prefix = "../data/phylospan"
 
 function run_all_betasplit_experiments(alpha, kind)
     filenames = readdir("../data/phylosub/beta_split")
@@ -21,7 +23,7 @@ function run_all_betasplit_experiments(alpha, kind)
         if contains(fname, "csv") && contains(fname, kind)
             m = match(r"_([0-9]+).csv", fname)
             index = int(m.captures[1])
-            @spawn run_phylo_experiment("beta_split/$fname", alpha, index=index)
+            @spawn run_phylo_experiment("$phylosub_prefix/beta_split/$fname", alpha, index=index)
         end
     end
 
@@ -34,7 +36,22 @@ function run_all_betasplitphylo_experiments(alpha, kind)
 
     for fname in filenames
         if contains(fname, "csv") && contains(fname, kind)
-            job_id, job_ref = smart_spawn(run_phylo_experiment, "beta_split_phylo/$fname", alpha)
+            job_id, job_ref = smart_spawn(run_phylo_experiment, "$phylosub_prefix/beta_split_phylo/$fname", alpha)
+        end
+    end
+
+end
+
+function run_all_phylospan_experiments(alpha, kind)
+    filenames = readdir("../data/phylospan/phylospan_sims")
+
+    smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
+
+    base_file = "$phylospan_prefix/phylospan_sims/phylospan.50.ssm.txt"
+
+    for fname in filenames
+        if contains(fname, kind)
+            job_id, job_ref = smart_spawn(run_phylo_experiment, base_file, alpha, "$phylospan_prefix/phylospan_sims/$fname")
         end
     end
 
@@ -76,8 +93,8 @@ function run_aldous_experiments(alpha; max_depth=Inf)
     end
 end
 
-function run_phylo_experiment(filename, alpha::Float64;
-                              multilocus_filename = nothing, 
+
+function run_phylo_experiment(filename, alpha::Float64, multilocus_filename; 
                               wl_boundaries::Vector{Float64} = [Inf], #[-1400:50:-1250.0],
                               wl_K_boundaries::Vector{Float64} = [4,5,6,7,Inf],
                               wl_f0::Float64 = 1.0,
@@ -99,6 +116,8 @@ function run_phylo_experiment(filename, alpha::Float64;
     #elseif filename == "CLL006.csv"
     #    init_K = 5
     #end
+
+    multilocus_string = ""
 
     if contains(filename, "CLL")
         init_K=4
@@ -162,6 +181,13 @@ function run_phylo_experiment(filename, alpha::Float64;
             filename_base= contains(multilocus_filename, "chain") ? "phylospan_chain" : "phylospan_branch"
         end
 
+        m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", multilocus_filename)
+
+        npairs = int(m.captures[1])
+        phasing_percent = int(m.captures[2])
+        trial_index = int(m.captures[3])
+        multilocus_string = "$(npairs)_$phasing_percent"
+
         wl_K_boundaries = [3,4,Inf]
         aisrj_lag = Inf
         init_K = 3 
@@ -208,9 +234,11 @@ function run_phylo_experiment(filename, alpha::Float64;
     result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state, init_state = init_state)
     (iters, Ks, trainLLs, models) = result
 
+    mkpath("../results/phylo/$filename_base")
     
-    f = open("../results/phylo/$filename_base/$filename_base.ccm.$alpha.$init_K.$D.$M_per_cluster.$trial_index.models", "w")
+    f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster.$trial_index.models", "w")
     serialize(f, models) 
     close(f)
 end
 
+run_phylo_experiment(filename, alpha::Float64) = run_phylo_experiment(filename, alpha, nothing)

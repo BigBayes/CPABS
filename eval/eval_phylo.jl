@@ -125,10 +125,10 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         S = Array(Any,40)
         for fname in filenames
             if contains(fname, filename_base) && contains(fname, ".models")
-                m = match(r"(.*).ccm\.([0-9]+)\..*\.([0-9]+[0-9]*)\.models", fname)
+                m = match(r"(.*)(\.ccm)?\.([0-9]+)\..*\.([0-9]+[0-9]*)\.models", fname)
                 fname_base = m.captures[1] 
-                alpha = float(m.captures[2]) 
-                index = int(m.captures[3]) 
+                alpha = float(m.captures[3]) 
+                index = int(m.captures[4]) 
                 data_file = "beta_split/$(fname_base)_$index.csv"
                 clusters_file = "$(fname_base)_clusters_$index.jld"
 

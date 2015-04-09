@@ -2,15 +2,15 @@ require("phylo_model/phylo_model.jl")
 
 function read_phylosub_data(filename)
     if contains(filename, "emptysims")
-        data = readdlm("../data/phylosub/$filename", '\t', header=true)
+        data = readdlm(filename, '\t', header=true)
     elseif contains(filename, "aldous")
-        data = readdlm("../data/phylosub/$filename", '\t', header=true)
+        data = readdlm(filename, '\t', header=true)
     elseif contains(filename, "phylospan")
-        data = readdlm("../data/phylosub/$filename", '\t', header=true)
+        data = readdlm(filename, '\t', header=true)
     elseif contains(filename, "betasplit")
-        data = readdlm("../data/phylosub/$filename", '\t', header=true)
+        data = readdlm(filename, '\t', header=true)
     else
-        data = readdlm("../data/phylosub/$filename", ';', header=true)
+        data = readdlm(filename, ';', header=true)
     end
     header = data[2]
     name_index = find(header .== "gene")[1]
@@ -55,7 +55,7 @@ function read_phylosub_data(filename)
 end
 
 function read_multilocus_data(filename, name2index::Dict{ASCIIString, Int64})
-    data, headers = readdlm("../data/phylosub/$filename", '\t', header=true)
+    data, headers = readdlm(filename, '\t', header=true)
 
     num_entries, _ = size(data)
 
