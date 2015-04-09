@@ -3,7 +3,7 @@
 function initialize_smart_spawn()
 
     jobs = Any[]
-    running_procs = Array(Any, nworkers())
+    running_procs = Array(RemoteRef, nworkers())
 
     available_workers = workers()
 
@@ -25,7 +25,7 @@ function initialize_smart_spawn()
         
         job_id_counter += 1
         push!(jobs, (worker, s))
-        running_procs[worker-1] = job_id_counter 
+        running_procs[worker-1] = s
         return job_id_counter, s
     end
 
