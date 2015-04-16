@@ -266,8 +266,8 @@ function coread_loglikelihood(model::ModelState,
 
     Np, _ = size(PR)
 
-    populations = {[0,0], [0,1], [1,0], [1,1]}
-    v_states = [{pop, [0,0], [pop[1], 0], [0, pop[2]]} for pop in populations]
+    populations = Any[[0,0], [0,1], [1,0], [1,1]]
+    v_states = [Any[pop, [0,0], [pop[1], 0], [0, pop[2]]] for pop in populations]
 
     #phi = compute_phis(model)
 
@@ -382,8 +382,8 @@ function coread_loglikelihood_deta(model::ModelState,
 
     Np, _ = size(PR)
 
-    populations = {[0,0], [0,1], [1,0], [1,1]}
-    v_states = [{pop, [0,0], [pop[1], 0], [0, pop[2]]} for pop in populations]
+    populations = Any[[0,0], [0,1], [1,0], [1,1]]
+    v_states = [Any[pop, [0,0], [pop[1], 0], [0, pop[2]]] for pop in populations]
 
     phi = compute_phis(model)
 
