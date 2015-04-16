@@ -44,6 +44,43 @@ function getModelDendrogram(model::ModelState, true_clustering=nothing)
     end
 end
 
+function getModelHierarchy(model::ModelState, true_clustering=nothing)
+    Z = model.Z
+    N::Int = (length(model.tree.nodes) + 1) / 2
+
+    u = zeros(Int64, 2N-1)
+    for i=1:length(Z)
+        u[Z[i]] += 1
+    end 
+
+    T = GetAdjacencyMatrix(model.tree)
+
+    if true_clustering != nothing
+
+        A = zeros(Int64, N-1, length(true_clustering))
+
+        for i = 1:length(Z)
+            true_cluster = find([any(true_clustering[j] .== i) for j = 1:length(true_clustering)])
+           
+            A[Z[i]-N, true_cluster] += 1
+ 
+        end
+
+        phis = compute_phis(model)
+        perm = reverse(sortperm(sum(phis[N+1:end],2)[:]))
+        perm_phis = phis[N+1:end][perm]
+
+        annotations = Dict{Int64, ASCIIString}()
+        for i = N+1:2N-1
+            annotations[i-N] = "$(A[perm[i-N],:])   phi: $(round(perm_phis[i-N],3))"
+        end
+
+        plot_subclonal_hierarchy(T[perm,perm], annotations)
+    else
+        plot_subclonal_hierarchy(T, nothing)
+    end
+end
+
 function getModels(models_filename::ASCIIString)
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -59,8 +96,7 @@ function genModelsNavigator(models_filename::ASCIIString; true_clustering=nothin
     curindex = 1 
 
     function showModel(index::Int64)
-        p = getModelDendrogram(models[index], true_clustering)
-        display(p)
+        p = getModelHierarchy(models[index], true_clustering)
         curindex = index
         return p
     end
@@ -121,12 +157,11 @@ end
 
 function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing)
     model = getRepresentativeSample(models, sampled_bin=bin)
-    p = getModelDendrogram(model, true_clustering)
+    p = getModelHierarchy(model, true_clustering)
 
 #    LL = likelihood(model, model_spec, data)
 #    println("Model log-likelihood: $LL")
 #
-    display(p)
     p
 end 
 

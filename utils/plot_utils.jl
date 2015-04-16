@@ -3,6 +3,8 @@ import Winston.Interval
 import Winston.imagesc
 require("utils/probability_util.jl")
 
+using Compose
+using Color
 #function imagegs{T<:Real}(xrange::Interval, yrange::Interval, data::AbstractArray{T,2}, clims::Interval; plot=true)
 #    p = FramedPlot()
 #    setattr(p, "xrange", xrange)
@@ -173,6 +175,125 @@ function dendrogram(Z, U; plot=true, labels=nothing, leaf_times=nothing, sorted_
         display(p)
     end
     p
+end
+
+# T is the adjacency matrix of the tree to plot
+# Z is a dictionary containing a string to display for each cluster
+# Heavily borrowed from Compose.introspect()
+function plot_subclonal_hierarchy(T, Z; labels=nothing)
+    # Find root
+    root = 0
+    for c = 1:size(T,1)
+        if sum(T[:,c]) == 0 && sum(T[c,:]) > 0
+            @assert root == 0
+            root = c
+        end
+    end
+
+    positions = Dict{Int64, (Float64, Float64)}()
+    queue = Any[]
+    push!(queue, (root, 0.0))
+
+    figure_width = Z == nothing ? 10cm : 20cm
+
+    Compose.set_default_graphic_size(figure_width, 10cm)
+    figsize = 10mm
+    figs = compose!(context(), stroke("#333"), linewidth(0.5mm))
+    #p = FramedPlot()
+    #add(p, Winston.DataLabel( 0.0, 0.0, label, color="black", size=2.5))
+    label = labels == nothing ? "$root" : labels[root]
+
+    cur_x = -1.0
+    depth = -Inf
+    max_x = -Inf
+    while !isempty(queue)
+
+        cur, cur_y = shift!(queue)
+
+        if cur_y > depth
+            cur_x = -1.0
+        end
+        cur_x += 1
+        children = find(T[cur,:])
+        L = length(children)
+
+        label = labels == nothing ? "$cur" : labels[cur]
+
+        fig = context(cur_x, cur_y)
+
+        compose!(fig, circle(0.5, 0.5, figsize/2), fill("#333"))
+        label_fig = context(cur_x, cur_y, order=1)
+        compose!(label_fig, text(0.5, 0.5, label, hcenter, vcenter, Rotation()), stroke("white"), fill("white"), fontsize(8))
+
+        positions[cur] =  (cur_x+0.5, cur_y+0.5)
+
+        for c in children
+            push!(queue, (c,cur_y+1))
+        end
+
+        max_x = max(max_x, cur_x)
+        depth = cur_y
+
+        compose!(figs, fig)
+        compose!(figs, label_fig)
+    end 
+
+    lines_ctx = compose!(context(order=-1), stroke("#333"))
+
+    push!(queue, root)
+    while !isempty(queue)
+        cur = shift!(queue)
+        pos = positions[cur]
+
+
+        children = find(T[cur,:])
+
+        for c in children
+            push!(queue, c)
+
+            c_pos = positions[c]
+            compose!(lines_ctx, line([ pos, c_pos]))
+        end
+
+
+    end
+
+
+    if Z != nothing
+        zfigs = compose!(context(0,0), stroke("black"))
+
+        for cur in keys(Z)
+            label = labels == nothing ? "$cur" : labels[cur]
+
+            fig = context(1, cur)
+            compose!(fig, circle(0.5, 0.5, figsize/2), stroke("#333"), fill("#333"))
+            label_fig = context(1, cur, order=1)
+            compose!(label_fig, text(0.5, 0.5, label, hcenter, vcenter, Rotation()), stroke("white"), fill("white"), fontsize(8))
+
+            compose!(zfigs, fig)
+            compose!(zfigs, label_fig)
+
+            text_fig = context(3, cur)
+            compose!(text_fig, text(0.5, 0.5, Z[cur], hleft, vcenter, Rotation()), stroke("black"), fill("black"), fontsize(6))
+
+            compose!(zfigs, text_fig)
+        end
+        tree = compose!(context(0,0,1,1,units=UnitBox(0, 0, max_x+1, depth+1)),
+                   (context(order=-2), rectangle(), fill("white")),
+                   lines_ctx, figs)
+
+        panel = compose!(context(1,0,2,1,units=UnitBox(0,0, 30, length(Z)+2)),(context(order=-2), rectangle(), fill("white")), zfigs)
+
+        full_fig = compose!(context(units=UnitBox(0,0,2,1)), tree, panel)
+
+        return full_fig
+    else
+        tree = compose!(context(units=UnitBox(0, 0, max_x+1, depth+1)),
+                   (context(order=-2), rectangle(), fill("white")),
+                   lines_ctx, figs)
+        return tree 
+    end
+
 end
 
 function get_mutation_plot_locations(nU, x, y_min, y_max)

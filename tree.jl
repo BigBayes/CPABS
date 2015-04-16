@@ -923,6 +923,37 @@ function IsRightAncestor{T}(tree::Tree{T},
     return false
 end
 
+# Get adjacency matrix for the "right descendents are children"
+# interpretation of the tree
+function GetAdjacencyMatrix{T}(tree::Tree{T})
+    N::Int = (length(tree.nodes) + 1) / 2
+   
+    M = zeros(N-1, N-1)
+ 
+    for i = 1:N
+        cur = tree.nodes[i]
+
+        cur_direction = 0
+
+        indices = Int64[]
+
+        while cur_direction != 1 && cur.parent != Nil()
+            par = cur.parent
+            cur_direction = find(par.children .== cur)[1]
+
+            if cur_direction == 1
+                M[par.index-N, indices] = 1
+            elseif cur_direction == 2
+                push!(indices, par.index - N)
+            end
+            cur = par
+        end
+
+    end
+
+    M
+end
+
 function tree2array(tree::Tree,
                     gam::Float64;
                     return_leaf_times::Bool=false)
