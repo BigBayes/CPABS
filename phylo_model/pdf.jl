@@ -1546,6 +1546,7 @@ function z_logpdf(model::ModelState,
 
     tree = model.tree
     N::Int = (length(tree.nodes) + 1) / 2
+    K = N-1
 
     alpha = model.alpha
     Z = model.Z
@@ -1572,6 +1573,10 @@ function z_logpdf(model::ModelState,
 #    PR = data.paired_reads
 #    relevant_coread_indices = [find(PR[:,1] .== index), find(PR[:,2] .== index)] 
 
+    if model_spec.latent_rates
+        V = sum(model.rates[N+1:2N-1])
+    end
+
     for k = N+1:2N-1
         Z_tmp[index] = k
 
@@ -1583,7 +1588,8 @@ function z_logpdf(model::ModelState,
         end
 
         n_k = U[k-N]+1
-        q_k = (1 + (n_k-1)*v_k)/n_k
+        #q_k = (1 + (n_k-1)*v_k)/n_k
+        q_k = (1 + (M-K)*v_k)/M
 
         if n_k == 0
             log_pdf[k-N] = -Inf
@@ -2024,7 +2030,9 @@ function grow_prune_kernel_sample(model::ModelState,
             new_rates = zeros(2new_N-1)
             new_rates[new_N+1:end-1] = rates[N+1:end]
 
-            new_rates[2new_N-1] = rand(Exponential(total_rate/(new_N-1))) 
+            # draw a rate parameter with mean total_rate/(new_N-1) 
+            new_rates[2new_N-1] = rand(Exponential(total_rate/(new_N-1)))
+
             p_forward += logpdf(Exponential(total_rate/(new_N-1)), new_rates[new_N])
 
             new_model.rates = new_rates
