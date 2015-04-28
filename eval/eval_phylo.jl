@@ -150,8 +150,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 clusters = load("../data/phylosub/beta_split_phylo/$clusters_file", "clusters")
 
                 models_fname = "$path/$fname"
-                kind = contains(fname, "chain") ? "chain" : 
-                       contains(fname, "branch") ? "branch" : nothing
+                kind = "chain" 
 
                 println("evaluating trial $C $D $N $index")
                 #S[index] = @spawn eval_betasplit_experiment(data_file, models_fname, clusters, kind) 
