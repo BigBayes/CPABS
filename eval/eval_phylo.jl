@@ -144,7 +144,7 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
                 D_index = find(D .== depths)[1]
                 N_index = find(N .== n_mutations)[1]
 
-                data_file = "beta_split_phylo/$(fname_base)_chain_$(C)_$(D)_$(N)_$index.csv"
+                data_file = "../data/phylosub/beta_split_phylo/$(fname_base)_chain_$(C)_$(D)_$(N)_$index.csv"
                 clusters_file = "gt_$(fname_base)_chain_$(C)_$(D)_$(N)_$index.jld"
 
                 clusters = load("../data/phylosub/beta_split_phylo/$clusters_file", "clusters")
