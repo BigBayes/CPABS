@@ -122,12 +122,15 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
     if contains(filename, "CLL")
         init_K=4
         filename_base="CLL"
-        eta_Temp = 0.0000001
         aisrj_lag = Inf
         num_iterations=10000
+        rand_restarts=0
+        D = 0
+        M_per_cluster = 0
+        trial_index=1
+        
     elseif contains(filename, "emptysims")
         filename_base="emptysims"
-        eta_Temp = 0.001
         aisrj_lag = Inf
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = int(m.captures[1])-1
@@ -137,7 +140,6 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
         num_iterations=100000
     elseif contains(filename, "aldous")
         filename_base="aldous"
-        eta_Temp = 0.1
         aisrj_lag = Inf
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
         init_K = 4

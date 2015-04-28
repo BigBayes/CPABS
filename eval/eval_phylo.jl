@@ -116,6 +116,53 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
         end
 
         return auprs
+    elseif contains(filename_base, "betasplit_phylo")
+
+        smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
+
+        n_clusters = [3,4,5]
+        depths = [50,70,100]
+        n_mutations = [10, 25, 100]
+
+        auprs = zeros(3,3,3,8)
+        cauprs = zeros(3,3,3,8)
+        aucs = zeros(3,3,3,8)
+
+        S = Array(Any,3,3,3,8)
+        for fname in filenames
+            if contains(fname, filename_base) && contains(fname, ".models") && !contains(fname, "ccm")
+                m = match(r"(.*)(\.ccm)?\.0\.0\.([0-9]+)\.([0-9]+[0-9]*)\.([0-9]+[0-9]*)\.([0-9]+)\.models", fname)
+                fname_base = m.captures[1] 
+
+                C = int(m.captures[3])
+                D = int(m.captures[4])
+                N = int(m.captures[5])
+                index = int(m.captures[6])
+
+                C_index = find(C .== n_clusters)[1]
+                D_index = find(D .== depths)[1]
+                N_index = find(N .== n_mutations)[1]
+
+                data_file = "beta_split_phylo/$(fname_base)_chain_$(C)_$(D)_$(N)_$index.csv"
+                clusters_file = "gt_$(fname_base)_chain_$(C)_$(D)_$(N)_$index.jld"
+
+                clusters = load("../data/phylosub/beta_split_phylo/$clusters_file", "clusters")
+
+                models_fname = "$path/$fname"
+                kind = contains(fname, "chain") ? "chain" : 
+                       contains(fname, "branch") ? "branch" : nothing
+
+                println("evaluating trial $C $D $N $index")
+                #S[index] = @spawn eval_betasplit_experiment(data_file, models_fname, clusters, kind) 
+                job_id, S[C_index, D_index, N_index, index] = smart_spawn(eval_betasplit_experiment, data_file, models_fname, clusters, kind) 
+            end
+
+        end
+        for i = 1:length(S)
+            auprs[i], cauprs[i] = fetch(S[i])
+        end
+
+        return auprs, cauprs
     elseif contains(filename_base, "betasplit")
 
         auprs = zeros(40)
