@@ -4,6 +4,7 @@ require("eval/eval_utils.jl")
 require("phylo_model/phylo_model.jl")
 require("data_utils/read_phylosub_data.jl")
 require("phylo_model/phylo_mcmc.jl")
+require("utils/parallel_utils.jl")
 
 function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, color="red", label="", kind="diamond", alpha=1)
     filenames = readdir(path)
