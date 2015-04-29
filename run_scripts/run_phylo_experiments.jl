@@ -100,7 +100,8 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
                               wl_f0::Float64 = 1.0,
                               wl_histogram_test_ratio::Float64 = 0.3,
                               index::Int64 = 0,
-                              init_state = nothing )
+                              init_state = nothing,
+                              read_subsample_rate = 1.0 )
 
 
     trial_index = index
@@ -119,6 +120,7 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     multilocus_string = ""
 
+    subsample_rate_string = ""
     if contains(filename, "CLL")
         init_K=4
         filename_base="CLL"
@@ -128,6 +130,7 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
         D = 0
         M_per_cluster = 0
         trial_index=1
+        subsample_rate_string = ".$read_subsample_rate"
         
     elseif contains(filename, "emptysims")
         filename_base="emptysims"
@@ -202,8 +205,8 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     WL_state = WangLandauState(wl_boundaries, wl_K_boundaries, wl_f0, wl_histogram_test_ratio)
 
-    use_latent_rates = true
-    #use_latent_rates = false
+    #use_latent_rates = true
+    use_latent_rates = false
 
     @ifndef verbose false
 
@@ -233,12 +236,17 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     data = constructDataState(filename, multilocus_filename=multilocus_filename)
 
+    if read_subsample_rate < 1.0
+        data.reference_counts = round(data.reference_counts * read_subsample_rate)
+        data.total_counts = round(data.total_counts * read_subsample_rate)
+    end
+
     result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state, init_state = init_state)
     (iters, Ks, trainLLs, models) = result
 
     mkpath("../results/phylo/$filename_base")
     
-    f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster.$trial_index.models", "w")
+    f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
     serialize(f, models) 
     close(f)
 end

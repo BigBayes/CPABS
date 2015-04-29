@@ -389,7 +389,7 @@ function mcmc_sweep(model::ModelState,
                 tree_LL = likelihood(model, model_spec, data)
                 println("tree probability, prior, LL: ", tree_prior + tree_LL, ",", tree_prior, ",",tree_LL)
             end
-        elseif parameter == "rates"
+        elseif parameter == "rates" && model_spec.latent_rates
             slice_iterations = 5
             rates_time = time()
             sample_rates(model, model_spec, slice_iterations)
@@ -1795,14 +1795,14 @@ function sample_node_swaps(model::ModelState,
         for j = 1:N-1
 
             tmodel = copy(model)
-            swap_nodes!(tmodel, i+N, j+N)
+            swap_nodes!(tmodel, model_spec, i+N, j+N)
 
             lprobs[j] = full_pdf(tmodel, model_spec, data)
         end
 
         sampled_j = rand(Categorical( exp_normalize(lprobs))) 
        
-        swap_nodes!(model, i+N, sampled_j+N) 
+        swap_nodes!(model, model_spec, i+N, sampled_j+N) 
 #        if sampled_j != i
 #            println("lprobs: $lprobs")
 #            println("nodes $(i+N) and $(sampled_j+N) swapped!")
@@ -1813,10 +1813,9 @@ function sample_node_swaps(model::ModelState,
 
 end
 
-function swap_nodes!(tmodel, i, j)
+function swap_nodes!(tmodel, model_spec, i, j)
     tree = tmodel.tree
     tZ = tmodel.Z
-    trates = tmodel.rates
 
     tZi = find(tZ .== i)
     tZj = find(tZ .== j)
@@ -1830,11 +1829,15 @@ function swap_nodes!(tmodel, i, j)
     tZ[tZi] = j
     tZ[tZj] = i
 
-    r1 = trates[i]
-    r2 = trates[j]
+    if model_spec.latent_rates
+        trates = tmodel.rates
 
-    trates[i] = r2
-    trates[j] = r1
+        r1 = trates[i]
+        r2 = trates[j]
+
+        trates[i] = r2
+        trates[j] = r1
+    end
 
     return tmodel
 end
