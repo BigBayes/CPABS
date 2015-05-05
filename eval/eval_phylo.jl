@@ -11,7 +11,40 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
     delim = contains(filename_base, "pwgs") ? ' ' : ','
 
-    if contains(filename_base, "aldous")
+    if contains(filename_base, "CLL")
+        m = match(r"CLL([0-9]+)", filename_base)
+        CLL_id = m.captures[1] 
+        clusters, Ytrue= get_true_clustering_CLL(CLL_id)
+
+        subsample_rates = [0.0001, 0.001, 0.01, 1.0]
+
+        auprs = zeros(length(subsample_rates))
+        S = Array(Any, length(subsample_rates))
+
+        smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
+
+        for fname in filenames
+            if contains(fname, filename_base) && contains(fname, "CLL$CLL_id")
+                m = match(r"\.([01]\.[0-9]+)\.[0-9]\.models", fname)
+                subsample_rate = float(m.captures[1])
+
+                rate_index = find(subsample_rates .== subsample_rate)[1]
+                data_file = "../data/phylosub/CLL$CLL_id.csv"
+                models_fname = "$path/$fname"
+
+                job_id, S[rate_index] = smart_spawn( () -> eval_CLL_experiment(data_file, models_fname, Ytrue, subsample_rate))
+
+            end
+        end
+
+        println("Fetching results")
+        for i = 1:length(S)
+            auprs[i] = fetch(S[i])
+        end
+
+        return auprs
+
+    elseif contains(filename_base, "aldous")
         Ytrue = get_true_clustering()
         depths = [20,30,50,70,100,200,300]
         auprs = zeros(length(depths), 10)
@@ -198,7 +231,18 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
     end
 end
 
-
+#function eval_phylospan_experiments(path, filename_base)
+#    filenames = readdir(path)
+#
+#    
+#
+#    for fname in filenames
+#        if contains(fname, filename_base)
+#
+#
+#        end
+#    end
+#end
 
 function eval_phylospan_experiment(data_filename, multilocus_filename, models_filename, kind)
 
@@ -277,6 +321,30 @@ function eval_emptysims_experiment(data_filename, models_filename, ground_truth)
     c_aupr
 end
 
+function eval_CLL_experiment(data_filename, models_filename, ground_truth, subsample_rate)
+
+    data = constructDataState(data_filename)
+    if subsample_rate < 1.0
+        # subsample in a reproducible way
+        r = MersenneTwister(1)
+        tied_binomial = (n, n2, p) -> (A = [rand(r) < p for i = 1:n]; (sum(A), sum(A[1:n2])))
+
+        for i = 1:length(data.reference_counts)
+            data.total_counts[i], data.reference_counts[i] = 
+                tied_binomial(data.total_counts[i], data.reference_counts[i], subsample_rate)
+        end
+    end
+
+    predicted = compute_cocluster_matrix(models_filename, data)
+    N, N = size(predicted)
+
+    triu_inds = find(triu(ones(N,N),1))
+    c_aupr = aupr(predicted[triu_inds], ground_truth[triu_inds])
+
+    c_aupr
+
+end
+
 function get_true_clustering()
     Y = zeros(288,288)
     ranges = { 1:108, 109:192, 193:252, 253:288 }
@@ -318,6 +386,49 @@ function get_true_ancestorship_phylospan(kind)
     Y2[201:300, 201:300] = 1 
  
     return Y, Y2
+end
+
+#      CLL077      CLL003      CLL006
+# 1    BCL2L13     ADAD1       ARHGAP29
+# 2    COL24A1     AMTN        EGFR
+# 3    DAZAP1      APBB2       IRF4
+# 4    EXOC6B      ASXL1       KIAA0182
+# 5    GHDC        ATM         KIAA0319L
+# 6    GPR158      BPIL2       KLHL4
+# 7    HMCN1       CHRNB2      MED12
+# 8    KLHDC2      CHTF8       PILRB
+# 9    LRRC16A     FAT3        RBPJ
+# 10   MAP2K1      HERC2       SIK1
+# 11   NAMPTL      IL11RA      U2AF1
+# 12   NOD1        MTUS1
+# 13   OCA2        MUSK
+# 14   PLA2G16     NPY
+# 15   SAMHD1      NRG3
+# 16   SLC12A1     PLEKHG5
+# 17               SEMA3E
+# 18               SF3B1
+# 19               SHROOM1
+# 20               SPTAN1
+
+
+
+function get_true_clustering_CLL(id)
+    if id == "077"
+        groups = { [1,11,6,15,16], [3,4,5,13,14], [9], [8,2,12,7,10] } 
+    elseif id == "003"
+        groups = { [1,8,10,11,18,19], [4,13,17], [14,15,9,7], [2,3,5,6,16,12,20] }
+    elseif id == "006"
+        groups = { [1,2,4,6,7,8,10], [11], [5], [3], [9] }
+    end
+
+    N = maximum([maximum(g) for g in groups])
+    Y = zeros(N,N)
+
+    for g in groups
+        Y[g, g] = 1
+    end
+
+    return (groups, Y)
 end
 
 # assumes clusters is ordered from root to leaves
@@ -395,7 +506,7 @@ function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
     p    
 end
 
-function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState; start_index=1)
+function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false)
 
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -404,7 +515,7 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState;
     wl_state = models[end].WL_state
     M = length(models[end].Z)
    
-    latent_rates = models[1].rates != zeros(length(models[1].rates))
+    #latent_rates = models[1].rates != zeros(length(models[1].rates))
  
     model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
@@ -436,7 +547,7 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState;
     return cocluster_matrix
 end
 
-function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataState; start_index=1)
+function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false)
 
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -447,7 +558,7 @@ function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataSta
 
     total_partition_mass = logsumexp(wl_state.partition_function)
 
-    latent_rates = models[1].rates != zeros(length(models[1].rates))
+    #latent_rates = models[1].rates != zeros(length(models[1].rates))
     model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
 
     ancestorship_matrix = zeros(M,M)

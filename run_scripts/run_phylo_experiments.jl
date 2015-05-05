@@ -13,6 +13,15 @@ require("utils/general_macros.jl")
 phylosub_prefix = "../data/phylosub"
 phylospan_prefix = "../data/phylospan"
 
+function run_all_CLL_experiments(filename, alpha)
+
+    smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
+    for sample_rate in [0.0001, 0.001, 0.01, 1.0]
+        job_id, job_ref = smart_spawn( () -> run_phylo_experiment( filename, alpha, nothing; read_subsample_rate=sample_rate)) 
+    end 
+
+end
+
 function run_all_betasplit_experiments(alpha, kind)
     filenames = readdir("../data/phylosub/beta_split")
 
@@ -123,7 +132,8 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
     subsample_rate_string = ""
     if contains(filename, "CLL")
         init_K=4
-        filename_base="CLL"
+        m = match(r"(CLL[0-9]+)\.csv", filename)
+        filename_base=m.captures[1] #"CLL"
         aisrj_lag = Inf
         num_iterations=10000
         rand_restarts=0
@@ -237,16 +247,27 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
     data = constructDataState(filename, multilocus_filename=multilocus_filename)
 
     if read_subsample_rate < 1.0
-        data.reference_counts = round(data.reference_counts * read_subsample_rate)
-        data.total_counts = round(data.total_counts * read_subsample_rate)
+        # subsample in a reproducible way
+        r = MersenneTwister(1)
+        tied_binomial = (n, n2, p) -> (A = [ rand(r) < p for i = 1:n]; (sum(A), sum(A[1:n2])))
+
+        for i = 1:length(data.reference_counts)
+            data.total_counts[i], data.reference_counts[i] = 
+                tied_binomial(data.total_counts[i], data.reference_counts[i], read_subsample_rate)
+        end
     end
 
     result = mcmc(data, lambda, gamma, alpha, rates_shape, init_K, model_spec, num_iterations, 1000, aisrj_lag = aisrj_lag, rand_restarts=rand_restarts, WL_state = WL_state, init_state = init_state)
     (iters, Ks, trainLLs, models) = result
 
     mkpath("../results/phylo/$filename_base")
-    
-    f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
+
+    if contains("phylospan", filename_base)
+        f = open("../results/phylo/$filename_base/$filename_base.$npairs.$phasing_percent.$trial_index.models")
+    else
+        f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
+    end
+
     serialize(f, models) 
     close(f)
 end

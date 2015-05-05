@@ -22,7 +22,7 @@ function initialize_smart_spawn()
         s = RemoteRef()
         worker = pop!(available_workers)
         @async put!(s, remotecall_fetch(worker, args...) )
-        
+       
         job_id_counter += 1
         push!(jobs, (worker, s))
         running_procs[worker] = s

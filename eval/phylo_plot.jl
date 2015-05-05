@@ -67,12 +67,12 @@ function getModelHierarchy(model::ModelState, true_clustering=nothing)
         end
 
         phis = compute_phis(model)
-        perm = reverse(sortperm(sum(phis[N+1:end],2)[:]))
-        perm_phis = phis[N+1:end][perm]
+        perm = reverse(sortperm(sum(phis[N+1:end,:],2)[:]))
+        perm_phis = phis[N+1:end,:][perm,:]
 
         annotations = Dict{Int64, ASCIIString}()
         for i = N+1:2N-1
-            annotations[i-N] = "$(A[perm[i-N],:])   phi: $(round(perm_phis[i-N],3))"
+            annotations[i-N] = "$(A[perm[i-N],:])   phi: $(round(mean(perm_phis[i-N,:]),3))"
         end
 
         plot_subclonal_hierarchy(T[perm,perm], annotations)
