@@ -49,7 +49,9 @@ function prior(model::ModelState,
     _2Nm1 = length(tree.nodes)
     N::Int = (_2Nm1+1)/2
 
-    psi_term = poisson_logpdf(N-1, lambda)
+    #psi_term = poisson_logpdf(N-1, lambda)
+    psi_term = logpdf(NegativeBinomial(2, lambda), N)
+
 
     root = FindRoot(tree, 1)
     indices = GetLeafToRootOrdering(tree, root.index)

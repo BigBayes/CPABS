@@ -468,6 +468,12 @@ function get_coclustering_from_clusters(clusters)
     return Y
 end
 
+function compute_cocluster_aupr(predicted, ground_truth)
+    N, N = size(ground_truth)
+ 
+    nondiagonals = find(1 .- eye(N)) 
+    aupr(predicted[nondiagonals], ground_truth[nondiagonals])
+end
 
 function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
 
@@ -620,4 +626,45 @@ function read_phylosub_results()
     end
 
     auprs #, aucs
+end
+
+function eval_betasplit_phylo_results()
+    path = "../results/phylo/betasplit_phylo"
+
+    n_clusters = [3,4,5]
+    depths = [50,70,100]
+    n_mutations = [10, 25, 100]
+
+    auprs = zeros(3,3,3,8)
+    cauprs = zeros(3,3,3,8)
+   
+    filenames = readdir(path)
+
+    for fname in filenames
+        m = match(r"betasplit_phylo_chain_([0-9]+)_([0-9]+)_([0-9]+)_([0-9]+).csv.*", fname)
+        fname_base = "betasplit_phylo"
+
+        C = int(m.captures[1])
+        D = int(m.captures[2])
+        N = int(m.captures[3])
+        index = int(m.captures[4])
+
+        C_index = find(C .== n_clusters)[1]
+        D_index = find(D .== depths)[1]
+        N_index = find(N .== n_mutations)[1]
+
+        clusters_file = "gt_$(fname_base)_chain_$(C)_$(D)_$(N)_$index.jld"
+        clusters = load("../data/phylosub/beta_split_phylo/$clusters_file", "clusters")
+        ground_truth = get_coclustering_from_clusters(clusters)
+
+        predicted_ut = readdlm("$path/$fname", ' ')[1,:][:]
+
+        predicted = zeros(C*N,C*N)
+        predicted[find(tril(ones(C*N,C*N),-1))] = predicted_ut
+        predicted = predicted + predicted'
+        
+        auprs[C_index, D_index, N_index, index] = compute_cocluster_aupr(predicted, ground_truth) 
+    end
+
+    auprs 
 end
