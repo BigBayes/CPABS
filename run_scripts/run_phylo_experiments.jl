@@ -117,7 +117,7 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     #model_spec.debug = true
 
-    lambda = 0.5
+    lambda = 2.0
     gamma = 1.0
     rates_shape = 1.0
 
