@@ -262,7 +262,7 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     mkpath("../results/phylo/$filename_base")
 
-    if contains("phylospan", filename_base)
+    if contains(filename_base, "phylospan")
         f = open("../results/phylo/$filename_base/$filename_base.$npairs.$phasing_percent.$trial_index.models")
     else
         f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
