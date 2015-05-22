@@ -160,7 +160,13 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
         auprs = zeros(3,3,3,8)
         cauprs = zeros(3,3,3,8)
-        aucs = zeros(3,3,3,8)
+
+
+        precs = Array(Any, 3,3,3,8)
+        recalls = Array(Any, 3,3,3,8)
+        c_precs = Array(Any, 3,3,3,8)
+        c_recalls = Array(Any, 3,3,3,8)
+
 
         S = Array(Any,3,3,3,8)
         for fname in filenames
@@ -192,10 +198,10 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
         end
         for i = 1:length(S)
-            auprs[i], cauprs[i] = fetch(S[i])
+            auprs[i], precs[i], recalls[i], cauprs[i], c_precs[i], c_recalls[i] = fetch(S[i])
         end
 
-        return auprs, cauprs
+        return auprs, precs, recalls, cauprs, c_precs, c_recalls
     elseif contains(filename_base, "betasplit")
 
         auprs = zeros(40)
@@ -296,16 +302,16 @@ function eval_betasplit_experiment(data_filename, models_filename, clusters, kin
  
     nondiagonals = find(1 .- eye(N)) 
 
-    a_aupr = aupr(predicted[nondiagonals], ground_truth[nondiagonals])
+    a_aupr, a_precs, a_recalls = aupr(predicted[nondiagonals], ground_truth[nondiagonals], return_curves=true)
 
 
     predicted = compute_cocluster_matrix(models_filename, data, start_index=50000)
     ground_truth = get_coclustering_from_clusters(clusters)
 
     triu_inds = find(triu(ones(N,N),1))
-    c_aupr = aupr(predicted[triu_inds], ground_truth[triu_inds])
+    c_aupr, c_precs, c_recalls = aupr(predicted[triu_inds], ground_truth[triu_inds], return_curves=true)
 
-    a_aupr, c_aupr
+    a_aupr, a_precs, a_recalls, c_aupr, c_precs, c_recalls
 end
 
 function eval_emptysims_experiment(data_filename, models_filename, ground_truth)
@@ -468,11 +474,11 @@ function get_coclustering_from_clusters(clusters)
     return Y
 end
 
-function compute_cocluster_aupr(predicted, ground_truth)
+function compute_cocluster_aupr(predicted, ground_truth; return_curves=false)
     N, N = size(ground_truth)
  
     nondiagonals = find(1 .- eye(N)) 
-    aupr(predicted[nondiagonals], ground_truth[nondiagonals])
+    aupr(predicted[nondiagonals], ground_truth[nondiagonals], return_curves=return_curves)
 end
 
 function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
@@ -512,7 +518,7 @@ function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
     p    
 end
 
-function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false)
+function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false, K=nothing)
 
     f = open(models_filename, "r")
     models = deserializeModels(f)
@@ -532,6 +538,10 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState;
     for n = start_index:length(models)
         model = models[n]
         N::Int = (length(model.tree.nodes)+1)/2
+
+        if K != nothing && N-1 != K
+            continue
+        end
 
         log_pdf = full_pdf(model, model_spec, data)
         w = get_partition_function(wl_state, N-1, log_pdf)
@@ -636,8 +646,13 @@ function eval_betasplit_phylo_results()
     n_mutations = [10, 25, 100]
 
     auprs = zeros(3,3,3,8)
-    cauprs = zeros(3,3,3,8)
-   
+    precs = Array(Any, 3,3,3,8)
+    recalls = Array(Any, 3,3,3,8)
+
+    a_auprs = zeros(3,3,3,8)
+    a_precs = Array(Any, 3,3,3,8)
+    a_recalls = Array(Any, 3,3,3,8)
+ 
     filenames = readdir(path)
 
     for fname in filenames
@@ -657,14 +672,38 @@ function eval_betasplit_phylo_results()
         clusters = load("../data/phylosub/beta_split_phylo/$clusters_file", "clusters")
         ground_truth = get_coclustering_from_clusters(clusters)
 
-        predicted_ut = readdlm("$path/$fname", ' ')[1,:][:]
+        phylosub_results = readdlm("$path/$fname", ' ')
+
+        predicted_lt = phylosub_results[1,:][:]
 
         predicted = zeros(C*N,C*N)
-        predicted[find(tril(ones(C*N,C*N),-1))] = predicted_ut
+        predicted[find(tril(ones(C*N,C*N),-1))] = predicted_lt
         predicted = predicted + predicted'
-        
-        auprs[C_index, D_index, N_index, index] = compute_cocluster_aupr(predicted, ground_truth) 
+       
+        area, precision, recall = compute_cocluster_aupr(predicted, ground_truth, return_curves=true)
+
+        auprs[C_index, D_index, N_index, index] = area
+        precs[C_index, D_index, N_index, index] = precision
+        recalls[C_index, D_index, N_index, index] = recall 
+
+        ancestor_lt = phylosub_results[2,:][:]
+        descendant_lt = phylosub_results[3,:][:]
+
+        predicted = zeros(C*N,C*N)
+        predicted[find(tril(ones(C*N,C*N),-1))] = descendant_lt
+        predicted = predicted'
+        predicted[find(tril(ones(C*N,C*N),-1))] = ancestor_lt
+
+        ground_truth = get_ancestorship_from_clusters(clusters, "chain")
+
+        nondiagonals = find(1 .- eye(C*N)) 
+
+        area, precision, recall = aupr(predicted[nondiagonals], ground_truth[nondiagonals], return_curves=true)
+ 
+        a_auprs[C_index, D_index, N_index, index] = area
+        a_precs[C_index, D_index, N_index, index] = precision
+        a_recalls[C_index, D_index, N_index, index] = recall 
     end
 
-    auprs 
+    a_auprs, a_precs, a_recalls, auprs, precs, recalls 
 end

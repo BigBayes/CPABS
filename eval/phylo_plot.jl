@@ -155,13 +155,17 @@ function getRepresentativeSample(models; sampled_bin=nothing)
     models[model_index]
 end
 
-function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing)
+function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing, data=nothing)
     model = getRepresentativeSample(models, sampled_bin=bin)
     p = getModelHierarchy(model, true_clustering)
 
-#    LL = likelihood(model, model_spec, data)
-#    println("Model log-likelihood: $LL")
-#
+    if data != nothing
+        model_spec = ModelSpecification(false, zeros(3), false, false, false)
+        LL = likelihood(model, model_spec, data)
+        PR = prior(model, model_spec)
+        println("Model prior, log-likelihood: $PR, $LL")
+    end
+
     p
 end 
 
