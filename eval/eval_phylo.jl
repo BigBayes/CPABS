@@ -237,18 +237,47 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
     end
 end
 
-#function eval_phylospan_experiments(path, filename_base)
-#    filenames = readdir(path)
-#
-#    
-#
-#    for fname in filenames
-#        if contains(fname, filename_base)
-#
-#
-#        end
-#    end
-#end
+function eval_phylospan_experiments(path, filename_base)
+    filenames = readdir(path)
+    
+    smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
+
+    data_filename = "../data/phylospan.50.ssm.txt"
+
+    npairs = [5,10,20,50,100]
+    phasing_percents = [0,10,20,30,40,50]
+    
+    auprs = zeros(5,6,10)
+
+    S = Array(Any, 5,6,10)
+
+    for fname in filenames
+        if contains(fname, filename_base)
+            m = match(r"(.*)\.([0-9]+)\.([0-9]+)\.([0-9]+)\.models", fname)
+
+            npair = int(m.captures[1])
+            phasing_percent = int(m.captures[2])
+            index = int(m.captures[3])
+
+            multilocus_filename = "../data/phylospan/pholospan.$filename_base.$npair.$phasing_percent.$index.ssm.txt"
+
+            
+            npair_index = find(npairs .== npair)[1]
+            phasing_index = find(phasing_percents .== phasing_percent)[1]
+
+            
+
+            S[npair_index, phasing_index, index] = smart_spawn(eval_phylospan_experiment, data_filename, multilocus_filename, fname, filename_base) 
+
+        end
+    end
+    
+    for i = 1:length(S)
+        auprs[i] = fetch(S[i])
+    end
+
+    auprs
+end
 
 function eval_phylospan_experiment(data_filename, multilocus_filename, models_filename, kind)
 
