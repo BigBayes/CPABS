@@ -242,7 +242,7 @@ function eval_phylospan_experiments(path, filename_base)
     
     smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
 
-    data_filename = "../data/phylospan.50.ssm.txt"
+    data_filename = "../data/phylospan/phylospan_sims/phylospan.50.ssm.txt"
 
     npairs = [5,10,20,50,100]
     phasing_percents = [0,10,20,30,40,50]
@@ -253,21 +253,21 @@ function eval_phylospan_experiments(path, filename_base)
 
     for fname in filenames
         if contains(fname, filename_base)
-            m = match(r"(.*)\.([0-9]+)\.([0-9]+)\.([0-9]+)\.models", fname)
+            m = match(r".*\.([0-9]+)\.([0-9]+)\.([0-9]+)\.models", fname)
 
             npair = int(m.captures[1])
             phasing_percent = int(m.captures[2])
             index = int(m.captures[3])
 
-            multilocus_filename = "../data/phylospan/pholospan.$filename_base.$npair.$phasing_percent.$index.ssm.txt"
+            multilocus_filename = "../data/phylospan/phylospan_sims/phylospan.$filename_base.$npair.$phasing_percent.$index.ssm.txt"
 
             
             npair_index = find(npairs .== npair)[1]
             phasing_index = find(phasing_percents .== phasing_percent)[1]
 
-            
+            println("evaluating experiment $npair_index, $phasing_index, $index")  
 
-            S[npair_index, phasing_index, index] = smart_spawn(eval_phylospan_experiment, data_filename, multilocus_filename, fname, filename_base) 
+            job_id, S[npair_index, phasing_index, index] = smart_spawn(eval_phylospan_experiment, data_filename, multilocus_filename, "$path/$fname", filename_base) 
 
         end
     end
@@ -276,7 +276,7 @@ function eval_phylospan_experiments(path, filename_base)
         auprs[i] = fetch(S[i])
     end
 
-    auprs
+    return auprs
 end
 
 function eval_phylospan_experiment(data_filename, multilocus_filename, models_filename, kind)
@@ -314,8 +314,6 @@ function eval_phylospan_experiment(data_filename, multilocus_filename, models_fi
 
     N_n = length(find(P_truth[triu_inds] .== 1))
 
-    println("auprs: $a_aupr, $d_aupr, $c_aupr, $n_aupr")
-    println("Ns: $N_a, $N_d, $N_c, $N_n")
 
     (a_aupr * N_a + d_aupr * N_d + c_aupr * N_c + n_aupr * N_n) / (N_a + N_d + N_c + N_n)
 end
