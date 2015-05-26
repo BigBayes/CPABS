@@ -673,6 +673,9 @@ function compute_average_AMI(models_filename::ASCIIString, data::DataState, grou
             push!(C[Z[i]], i)
         end
 
+	nonempty_inds = find([length(c) > 0 for c in C])
+	C = C[nonempty_inds]
+
         AMI += w*adjusted_mutual_information(C, ground_truth)
 
     end

@@ -50,6 +50,9 @@ function adjusted_mutual_information(predicted_clusters, true_clusters)
     n1 = [length(A) for A in predicted_clusters]
     n2 = [length(A) for A in true_clusters]
 
+    @assert all(n1 .> 0)
+    @assert all(n2 .> 0)
+
     n = [length(intersect(U,V)) for U in predicted_clusters, V in true_clusters]
     N = sum(n1) 
     
@@ -68,8 +71,8 @@ function adjusted_mutual_information(predicted_clusters, true_clusters)
 
             p12 = n[i,j]/N
             p1 = n1[i]/N
-            p2 = n2[i]/N
- 
+            p2 = n2[j]/N
+
             MI += p12 > 0 ? p12*log(p12/(p1*p2)) : 0.0
             
         end
