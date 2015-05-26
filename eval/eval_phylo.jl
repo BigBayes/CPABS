@@ -160,13 +160,12 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
         auprs = zeros(3,3,3,8)
         cauprs = zeros(3,3,3,8)
-
+        AMIs = zeros(3,3,3,8)
 
         precs = Array(Any, 3,3,3,8)
         recalls = Array(Any, 3,3,3,8)
         c_precs = Array(Any, 3,3,3,8)
         c_recalls = Array(Any, 3,3,3,8)
-
 
         S = Array(Any,3,3,3,8)
         for fname in filenames
@@ -198,10 +197,10 @@ function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, col
 
         end
         for i = 1:length(S)
-            auprs[i], precs[i], recalls[i], cauprs[i], c_precs[i], c_recalls[i] = fetch(S[i])
+            auprs[i], precs[i], recalls[i], cauprs[i], c_precs[i], c_recalls[i], AMIs[i] = fetch(S[i])
         end
 
-        return auprs, precs, recalls, cauprs, c_precs, c_recalls
+        return auprs, precs, recalls, cauprs, c_precs, c_recalls, AMIs
     elseif contains(filename_base, "betasplit")
 
         auprs = zeros(40)
@@ -322,6 +321,8 @@ function eval_betasplit_experiment(data_filename, models_filename, clusters, kin
 
     data = constructDataState(data_filename)
 
+    AMI = compute_average_AMI(models_filename, data, clusters, start_index=50000)
+
     predicted = compute_ancestorship_matrix(models_filename, data, start_index=50000)
     ground_truth = get_ancestorship_from_clusters(clusters, kind)
   
@@ -338,7 +339,7 @@ function eval_betasplit_experiment(data_filename, models_filename, clusters, kin
     triu_inds = find(triu(ones(N,N),1))
     c_aupr, c_precs, c_recalls = aupr(predicted[triu_inds], ground_truth[triu_inds], return_curves=true)
 
-    a_aupr, a_precs, a_recalls, c_aupr, c_precs, c_recalls
+    a_aupr, a_precs, a_recalls, c_aupr, c_precs, c_recalls, AMI
 end
 
 function eval_emptysims_experiment(data_filename, models_filename, ground_truth)
@@ -634,6 +635,50 @@ function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataSta
     
 
     return ancestorship_matrix
+end
+
+function compute_average_AMI(models_filename::ASCIIString, data::DataState, ground_truth::Array{Vector{Int64}}; start_index=1, latent_rates=false, K=nothing)
+
+    f = open(models_filename, "r")
+    models = deserializeModels(f)
+    close(f)
+
+    wl_state = models[end].WL_state
+    M = length(models[end].Z)
+   
+    #latent_rates = models[1].rates != zeros(length(models[1].rates))
+ 
+    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
+
+    total_partition_mass = logsumexp(wl_state.partition_function)
+
+    AMI = 0.0
+    sum_w = 0.0
+    for n = start_index:length(models)
+        model = models[n]
+        N::Int = (length(model.tree.nodes)+1)/2
+
+        if K != nothing && N-1 != K
+            continue
+        end
+
+        log_pdf = full_pdf(model, model_spec, data)
+        w = get_partition_function(wl_state, N-1, log_pdf)
+        w = exp(w - total_partition_mass)
+        sum_w += w
+
+        Z = model.Z
+        C = [Int64[] for x=1:maximum(Z)]
+        for i = 1:length(Z)
+            push!(C[Z[i]], i)
+        end
+
+        AMI += w*adjusted_mutual_information(C, ground_truth)
+
+    end
+    AMI /= sum_w
+    
+    return AMI
 end
 
 function read_phylosub_results()
