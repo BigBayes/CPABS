@@ -44,7 +44,7 @@ function getModelDendrogram(model::ModelState, true_clustering=nothing)
     end
 end
 
-function getModelHierarchy(model::ModelState, true_clustering=nothing)
+function getModelHierarchy(model::ModelState, true_clustering=nothing, names=nothing)
     Z = model.Z
     N::Int = (length(model.tree.nodes) + 1) / 2
 
@@ -55,14 +55,24 @@ function getModelHierarchy(model::ModelState, true_clustering=nothing)
 
     T = GetAdjacencyMatrix(model.tree)
 
-    if true_clustering != nothing
+    # really should refactor this
+    if true_clustering != nothing || names != nothing
 
-        A = zeros(Int64, N-1, length(true_clustering))
+        if true_clustering != nothing
+            A = zeros(Int64, N-1, length(true_clustering))
+        end
+        printed_names = ["" for i = 1:N-1]
 
         for i = 1:length(Z)
-            true_cluster = find([any(true_clustering[j] .== i) for j = 1:length(true_clustering)])
-           
-            A[Z[i]-N, true_cluster] += 1
+            if true_clustering != nothing
+                true_cluster = find([any(true_clustering[j] .== i) for j = 1:length(true_clustering)])
+                A[Z[i]-N, true_cluster] += 1
+            end
+
+            if names != nothing 
+                old_name = printed_names[Z[i]-N] 
+                printed_names[Z[i]-N] = old_name == "" ? names[i] : "$old_name, $(names[i])"
+            end
  
         end
 
@@ -72,7 +82,11 @@ function getModelHierarchy(model::ModelState, true_clustering=nothing)
 
         annotations = Dict{Int64, ASCIIString}()
         for i = N+1:2N-1
-            annotations[i-N] = "$(A[perm[i-N],:])   phi: $(round(mean(perm_phis[i-N,:]),3))"
+            if names != nothing
+                annotations[i-N] = "$(printed_names[perm[i-N]])\nphi: $([round(perm_phis[i-N,j],3) for j = 1:length(perm_phis[i-N,:])])"
+            else
+                annotations[i-N] = "$(A[perm[i-N],:])   phi: $(round(mean(perm_phis[i-N,:]),3))"
+            end
         end
 
         plot_subclonal_hierarchy(T[perm,perm], annotations)
@@ -155,9 +169,9 @@ function getRepresentativeSample(models; sampled_bin=nothing)
     models[model_index]
 end
 
-function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing, data=nothing)
+function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing, data=nothing, names=nothing)
     model = getRepresentativeSample(models, sampled_bin=bin)
-    p = getModelHierarchy(model, true_clustering)
+    p = getModelHierarchy(model, true_clustering, names)
 
     if data != nothing
         model_spec = ModelSpecification(false, zeros(3), false, false, false)

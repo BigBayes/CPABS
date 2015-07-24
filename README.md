@@ -1,4 +1,7 @@
-Infinite Sites Binary Matrix Prior
+Phylogenetic Tumor Reconstruction with Aldous' Beta Splitting
 
-Prior over binary matrices that have hierarchical structure.  The provided code includes inference for social network analysis.
+This
 
+Required Packages
+ArgParse
+...  

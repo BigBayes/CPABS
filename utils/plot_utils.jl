@@ -274,7 +274,7 @@ function plot_subclonal_hierarchy(T, Z; labels=nothing)
             compose!(zfigs, label_fig)
 
             text_fig = context(3, cur)
-            compose!(text_fig, text(0.5, 0.5, Z[cur], hleft, vcenter, Rotation()), stroke("black"), fill("black"), fontsize(6))
+            compose!(text_fig, text(0.5, 0.5, Z[cur], hleft, vcenter, Rotation()), stroke("black"), fill("black"), fontsize(4))
 
             compose!(zfigs, text_fig)
         end

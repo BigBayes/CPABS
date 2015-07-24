@@ -713,6 +713,39 @@ function read_phylosub_results()
     auprs #, aucs
 end
 
+function read_phylosub_ami_results()
+    path = "../results/phylosub_ami"
+
+    filenames = readdir(path)
+
+    n_clusters = [3,4,5]
+    depths = [50,70,100]
+    n_mutations = [10, 25, 100]
+
+    amis = zeros(length(n_clusters), length(depths), length(n_mutations), 8)
+
+    for fname in filenames
+        
+        m = match(r"betasplit_phylo_chain_([0-9]+)_([0-9]+)_([0-9]+)_([0-9]+).csv.*", fname)
+        C = int(m.captures[1])
+        D = int(m.captures[2])
+        N = int(m.captures[3])
+        index = int(m.captures[4])
+
+        C_index = find(C .== n_clusters)[1]
+        D_index = find(D .== depths)[1]
+        N_index = find(N .== n_mutations)[1]
+
+        phylosub_result = readdlm("$path/$fname", ' ')
+
+        @assert length(phylosub_result) == 1
+
+        amis[C_index, D_index, N_index, index] = float(phylosub_result[1])
+    end
+
+    amis
+end
+
 function eval_betasplit_phylo_results()
     path = "../results/phylo/betasplit_phylo"
 

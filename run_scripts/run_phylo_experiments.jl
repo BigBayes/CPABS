@@ -17,7 +17,10 @@ function run_all_CLL_experiments(filename, alpha)
 
     smart_spawn, get_job_counter, get_jobs = initialize_smart_spawn()
     for sample_rate in [0.0001, 0.001, 0.01, 1.0]
-        job_id, job_ref = smart_spawn( () -> run_phylo_experiment( filename, alpha, nothing; read_subsample_rate=sample_rate)) 
+        job_id, job_ref = smart_spawn( () -> run_phylo_experiment( filename, alpha, nothing,
+                                                                   read_subsample_rate=sample_rate,
+                                                                   num_iterations=20000,
+                                                                   init_K=4)) 
     end 
 
 end
@@ -32,7 +35,10 @@ function run_all_betasplit_experiments(alpha, kind)
         if contains(fname, "csv") && contains(fname, kind)
             m = match(r"_([0-9]+).csv", fname)
             index = int(m.captures[1])
-            @spawn run_phylo_experiment("$phylosub_prefix/beta_split/$fname", alpha, index=index)
+            @spawn run_phylo_experiment("$phylosub_prefix/beta_split/$fname", alpha, nothing,
+                                         index=index,
+                                         num_iterations=100000,
+                                         wl_K_boundaries=[3,4,Inf])
         end
     end
 
@@ -45,7 +51,11 @@ function run_all_betasplitphylo_experiments(alpha, kind)
 
     for fname in filenames
         if contains(fname, "csv") && contains(fname, kind)
-            job_id, job_ref = smart_spawn(run_phylo_experiment, "$phylosub_prefix/beta_split_phylo/$fname", alpha)
+
+            init_K = int(m.captures[1])
+            job_id, job_ref = smart_spawn( () -> run_phylo_experiment("$phylosub_prefix/beta_split_phylo/$fname", alpha, nothing,
+                                                                       num_iterations=100000,
+                                                                       init_K=init_K))
         end
     end
 
@@ -60,7 +70,9 @@ function run_all_phylospan_experiments(alpha, kind)
 
     for fname in filenames
         if contains(fname, kind)
-            job_id, job_ref = smart_spawn(run_phylo_experiment, base_file, alpha, "$phylospan_prefix/phylospan_sims/$fname")
+            job_id, job_ref = smart_spawn( () -> run_phylo_experiment( base_file, alpha, "$phylospan_prefix/phylospan_sims/$fname",
+                                                                       num_iterations=10000,
+                                                                       wl_K_boundaries=[3,4,Inf] ))
         end
     end
 
@@ -77,8 +89,11 @@ function run_all_emptysims_experiments(alpha; max_SSMs=Inf)
         if N_SSMs <= max_SSMs
             println("running experiment with $N_SSMs mutations")
             #@spawn run_phylo_experiment("emptysims/$fname", alpha)
-           
-            job_id, job_ref = smart_spawn( run_phylo_experiment, "emptysims/$fname", alpha)
+          
+            init_K = int(m.captures[1])-1
+            job_id, job_ref = smart_spawn( () -> run_phylo_experiment( "emptysims/$fname", alpha, nothing,
+                                                                        num_iterations=100000,
+                                                                        init_K = init_K))
  
 
         else
@@ -97,11 +112,17 @@ function run_aldous_experiments(alpha; max_depth=Inf)
         m = match(r"\.([0-9]+)\.([0-9]+)\.", fname)
         D = int(m.captures[1])
         if D <= max_depth
-            @spawn run_phylo_experiment("aldous/$fname", alpha)
+
+            wl_K_boundaries = D < 100 ? [3,4,5,6,Inf] : [4,5,6,7,Inf]
+            @spawn run_phylo_experiment("aldous/$fname", alpha, nothing,
+                                         num_iterations=100000,
+                                         wl_K_boundaries=wl_K_boundaries,
+                                         init_K=4)
         end
     end
 end
 
+# Main entry point
 
 function run_phylo_experiment(filename, alpha::Float64, multilocus_filename; 
                               wl_boundaries::Vector{Float64} = [Inf], #[-1400:50:-1250.0],
@@ -110,7 +131,10 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
                               wl_histogram_test_ratio::Float64 = 0.3,
                               index::Int64 = 0,
                               init_state = nothing,
-                              read_subsample_rate = 1.0 )
+                              read_subsample_rate = 1.0,
+                              num_iterations = 10000,
+                              init_K = 3,
+                              outputfile=nothing )
 
 
     trial_index = index
@@ -127,16 +151,18 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
     #    init_K = 5
     #end
 
+    # not useful in conjunction with WL
+    rand_restarts=0
+
+    # aisrj too slow
+    aisrj_lag = Inf
+
     multilocus_string = ""
 
     subsample_rate_string = ""
     if contains(filename, "CLL")
-        init_K=4
         m = match(r"(CLL[0-9]+)\.csv", filename)
         filename_base=m.captures[1] #"CLL"
-        aisrj_lag = Inf
-        num_iterations=10000
-        rand_restarts=0
         D = 0
         M_per_cluster = 0
         trial_index=1
@@ -144,50 +170,29 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
         
     elseif contains(filename, "emptysims")
         filename_base="emptysims"
-        aisrj_lag = Inf
         m = match(r"\.([0-9]+)\.([0-9]+)\.([0-9]+)\.", filename)
-        init_K = int(m.captures[1])-1
         D = int(m.captures[2])
         M_per_cluster = int(m.captures[3])
-        rand_restarts=0
-        num_iterations=100000
     elseif contains(filename, "aldous")
         filename_base="aldous"
-        aisrj_lag = Inf
         m = match(r"\.([0-9]+)\.([0-9]+)\.", filename)
-        init_K = 4
         D = int(m.captures[1])
         count = int(m.captures[2])
 
-        if D < 100
-            wl_K_boundaries -= 1
-        end
-
-        rand_restarts=0
-        num_iterations=100000
     elseif contains(filename, "betasplit_phylo")
         filename_base="betasplit_phylo"
-        aisrj_lag = Inf
         m = match(r"_([0-9]+)_([0-9]+)_([0-9]+)_([0-9]+)\.", filename)
-        init_K = int(m.captures[1])
         D = int(m.captures[2])
         M_per_cluster = int(m.captures[3])
         trial_index = int(m.captures[4])
-        rand_restarts=0
-        num_iterations=100000
     elseif contains(filename, "betasplit")
         if contains(filename, "chain")
             filename_base = "betasplit_chain"
         elseif contains(filename, "branch")
             filename_base = "betasplit_branch"
         end
-        wl_K_boundaries = [3,4,Inf]
-        aisrj_lag = Inf
-        init_K = 3 
         D = 0
         M_per_cluster = 0
-        rand_restarts=0
-        num_iterations=100000
     elseif contains(filename, "phylospan")
 
         if multilocus_filename == nothing
@@ -203,13 +208,8 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
         trial_index = int(m.captures[3])
         multilocus_string = "$(npairs)_$phasing_percent"
 
-        wl_K_boundaries = [3,4,Inf]
-        aisrj_lag = Inf
-        init_K = 3 
         D = 0
         M_per_cluster = 0
-        rand_restarts=0
-        num_iterations=10000
     end
 
 
@@ -227,22 +227,6 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
     end
 
 
-
-
-#    (AA, DD, mu_r, mu_v, names) = read_phylosub_data(filename)
-#
-#    (M, S) = size(AA)
-#    paired_reads = zeros(0,9)
-#    if multilocus_filename != nothing
-#        name2index = Dict{ASCIIString, Int64}()
-#
-#        for i = 1:length(names)
-#            name2index[names[i]] = i
-#        end
-#
-#        paired_reads = read_multilocus_data(multilocus_filename, name2index)
-#    end
-#    data = DataState(AA, DD, mu_r, mu_v, paired_reads, names)
 
     data = constructDataState(filename, multilocus_filename=multilocus_filename)
 
@@ -262,10 +246,21 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     mkpath("../results/phylo/$filename_base")
 
-    if contains(filename_base, "phylospan")
-        f = open("../results/phylo/$filename_base/$filename_base.$npairs.$phasing_percent.$trial_index.models", "w")
+    if outputfile == nothing
+        if contains(filename_base, "phylospan")
+            f = open("../results/phylo/$filename_base/$filename_base.$npairs.$phasing_percent.$trial_index.models", "w")
+        else
+            f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
+        end
+
     else
-        f = open("../results/phylo/$filename_base/$filename_base.$alpha.$init_K.$D.$M_per_cluster$subsample_rate_string.$trial_index.models", "w")
+        try 
+            f = open(outputfile, "w")
+        catch
+            outf = "../results/phylo/$filename_base/$filename_base..$filename..$multilocus_filename.models"
+            println("Unable to open $outputfile, outputting to $outf")
+            f = open(outf, "w")
+        end
     end
 
     serialize(f, models) 
