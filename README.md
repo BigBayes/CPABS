@@ -11,5 +11,6 @@ NumericExtensions
 
 Optional Packages:
 
-For real time diagnostics plotting: Winston 
+For real time diagnostics plotting: Winston
+
 For phylogeny plotting: Compose, Color
