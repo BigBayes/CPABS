@@ -5,7 +5,6 @@
 #
 # 
 
-using ArgParse
 require("run_scripts/run_phylo_experiments.jl")
 
 function parse_commandline()

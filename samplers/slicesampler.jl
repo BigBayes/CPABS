@@ -11,7 +11,7 @@
 #   upper Upper bound on support of the distribution (default +Inf)
 #   gx0   g(x0)
 #
-using Distributions
+#using Distributions
 function slice_sampler(x0::Float64, g::Function, w::Float64, m::Int64, lower::Float64, upper::Float64, gx0::Float64)
 
   if w <= 0
