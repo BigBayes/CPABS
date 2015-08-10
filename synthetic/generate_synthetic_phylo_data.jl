@@ -1,6 +1,6 @@
-using Distributions
-using HDF5
-using JLD
+#using Distributions
+#using HDF5
+#using JLD
 
 function generate_data(N::Int64, passenger_rate::Float64, read_depth::Int64, mu_r::Float64, mu_v::Float64, kind::ASCIIString; 
                        num_mutations = nothing, fixed_depth::Bool = false)

@@ -1,4 +1,4 @@
-using Distributions
+#using Distributions
 require("probability_util.jl")
 
 function generate_Z(N, lambda, gam)
