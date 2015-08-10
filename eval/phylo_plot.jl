@@ -6,7 +6,7 @@ require("data_utils/data_utils.jl")
 require("utils/plot_utils.jl")
 require("utils/probability_util.jl")
 
-#using Distributions
+using Distributions
 
 function getModelDendrogram(model::ModelState, true_clustering=nothing)
     Z = model.Z

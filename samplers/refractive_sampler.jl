@@ -1,5 +1,5 @@
-#require("Options")
-#using OptionsMod
+require("Options")
+using OptionsMod
 require("samplers/transformation.jl")
 
 function refractive_sampler(init_x::Vector{Float64},

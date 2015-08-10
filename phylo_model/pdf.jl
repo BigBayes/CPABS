@@ -2,8 +2,8 @@ require("phylo_model/phylo_model.jl")
 require("tree.jl")
 require("utils/probability_util.jl")
 
-#using NumericExtensions
-#import NumericExtensions.evaluate, NumericExtensions.result_type
+using NumericExtensions
+import NumericExtensions.evaluate, NumericExtensions.result_type
 
 #require("profile.jl")
 #Global pdf
