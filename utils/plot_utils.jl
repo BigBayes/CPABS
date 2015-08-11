@@ -1,7 +1,6 @@
 using Winston
 import Winston.Interval
 import Winston.imagesc
-require("utils/probability_util.jl")
 
 using Compose
 using Color

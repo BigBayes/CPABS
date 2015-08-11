@@ -1,6 +1,5 @@
-#require("Options")
-#using OptionsMod
-require("samplers/transformation.jl")
+require("Options")
+using OptionsMod
 
 function hmc_sampler(x::Vector{Float64},
                      U::Function,

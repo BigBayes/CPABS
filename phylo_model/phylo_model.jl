@@ -1,5 +1,5 @@
-require("tree.jl")
-require("wang_landau.jl")
+include("../tree.jl")
+include("../wang_landau.jl")
 
 import Base.copy
 import Base.ref

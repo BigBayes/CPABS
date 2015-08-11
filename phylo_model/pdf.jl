@@ -1,6 +1,5 @@
-require("phylo_model/phylo_model.jl")
-require("tree.jl")
-require("utils/probability_util.jl")
+
+include("../utils/probability_util.jl")
 
 #using NumericExtensions
 #import NumericExtensions.evaluate, NumericExtensions.result_type

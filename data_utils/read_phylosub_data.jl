@@ -1,4 +1,3 @@
-require("phylo_model/phylo_model.jl")
 
 function read_phylosub_data(filename)
     if contains(filename, "emptysims")

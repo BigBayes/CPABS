@@ -1,9 +1,7 @@
-require("phylo_model/phylo_mcmc.jl")
-require("samplers/hmc.jl")
-require("samplers/refractive_sampler.jl")
-require("data_utils/read_phylosub_data.jl")
-require("utils/parallel_utils.jl")
-require("utils/general_macros.jl")
+include("../phylo_model/phylo_mcmc.jl")
+include("../data_utils/read_phylosub_data.jl")
+include("../utils/parallel_utils.jl")
+include("../utils/general_macros.jl")
 
 #if !isdefined(:filename)
 #    println("Using default input file CLL077.csv")    
@@ -51,6 +49,8 @@ function run_all_betasplitphylo_experiments(alpha, kind)
 
     for fname in filenames
         if contains(fname, "csv") && contains(fname, kind)
+            
+            m = match(r"_([0-9])_", fname)
 
             init_K = int(m.captures[1])
             job_id, job_ref = smart_spawn( () -> run_phylo_experiment("$phylosub_prefix/beta_split_phylo/$fname", alpha, nothing,

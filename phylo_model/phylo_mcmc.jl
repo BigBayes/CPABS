@@ -1,20 +1,18 @@
-require("phylo_model/phylo_model.jl")
-require("tree.jl")
-require("utils/probability_util.jl")
-require("phylo_model/pdf.jl")
-require("samplers/transformation.jl")
+include("phylo_model.jl")
+include("pdf.jl")
+include("../samplers/transformation.jl")
 
 plot_utils_loaded = true
 if Pkg.installed("Winston") != nothing && isdefined(:plotting)
-    require("utils/plot_utils.jl")
+    include("../utils/plot_utils.jl")
 else
     println("Failed to load plot_utils.jl or plotting disabled")
     plot_utils_loaded = false
 end
 
-require("samplers/slicesampler.jl")
-require("samplers/refractive_sampler.jl")
-require("samplers/hmc.jl")
+include("../samplers/slicesampler.jl")
+include("../samplers/refractive_sampler.jl")
+include("../samplers/hmc.jl")
 
 #@profile begin
 function mcmc(data::DataState,
