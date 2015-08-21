@@ -25,15 +25,26 @@ Pkg.add("ArgParse")
 ### Required Packages
 
 ArgParse
-OptionsMod
+
+Options
+
 HDF5
+
 Distributions
+
 NumericExtensions
 
 ### Optional Packages
 
-For real time diagnostics plotting: Winston
-For phylogeny plotting: Compose, Color
+For real time diagnostics plotting: 
+
+Winston
+
+For phylogeny plotting: 
+
+Compose
+
+Color
 
 After all packages are installed you should be ready to use CPABS.
 
