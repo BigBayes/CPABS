@@ -36,17 +36,15 @@ NumericExtensions
 
 ### Optional Packages
 
-For real time diagnostics plotting: 
+##### For real time diagnostics plotting: 
 
 Winston
 
-For phylogeny plotting: 
+##### For phylogeny plotting: 
 
 Compose
 
 Color
-
-After all packages are installed you should be ready to use CPABS.
 
 ## Usage
 
