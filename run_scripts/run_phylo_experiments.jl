@@ -1,7 +1,7 @@
-include("../phylo_model/phylo_mcmc.jl")
-include("../data_utils/read_phylosub_data.jl")
-include("../utils/parallel_utils.jl")
-include("../utils/general_macros.jl")
+#include("../model/phylo_mcmc.jl")
+#include("../data_utils/read_phylosub_data.jl")
+#include("../utils/parallel_utils.jl")
+#include("../utils/general_macros.jl")
 
 #if !isdefined(:filename)
 #    println("Using default input file CLL077.csv")    

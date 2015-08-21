@@ -1,10 +1,6 @@
 #using HDF5, JLD
 
-require("eval/eval_utils.jl")
-require("phylo_model/phylo_model.jl")
-require("data_utils/read_phylosub_data.jl")
-require("phylo_model/phylo_mcmc.jl")
-require("utils/parallel_utils.jl")
+include("eval_utils.jl")
 
 function eval_phylo_experiments(path, filename_base; p=nothing, offset= 0.0, color="red", label="", kind="diamond", alpha=1)
     filenames = readdir(path)
@@ -552,29 +548,11 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState;
     models = deserializeModels(f)
     close(f)
 
-    wl_state = models[end].WL_state
-    M = length(models[end].Z)
-   
-    #latent_rates = models[1].rates != zeros(length(models[1].rates))
- 
-    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
-
-    total_partition_mass = logsumexp(wl_state.partition_function)
-
-    cocluster_matrix = zeros(M,M)
-    sum_w = 0.0
-    for n = start_index:length(models)
-        model = models[n]
+    function func(model)
         N::Int = (length(model.tree.nodes)+1)/2
-
-        if K != nothing && N-1 != K
-            continue
-        end
-
-        log_pdf = full_pdf(model, model_spec, data)
-        w = get_partition_function(wl_state, N-1, log_pdf)
-        w = exp(w - total_partition_mass)
-        sum_w += w
+       
+        M = length(model.Z)
+        cocluster_matrix = zeros(M,M) 
 
         Z = model.Z
         C = [Int64[] for x=1:maximum(Z)]
@@ -582,13 +560,115 @@ function compute_cocluster_matrix(models_filename::ASCIIString, data::DataState;
             push!(C[Z[i]], i)
         end
         for c in C
-            cocluster_matrix[c,c] += w
+            cocluster_matrix[c,c] += 1.0
         end
-    end
-    cocluster_matrix /= sum_w
-    
 
-    return cocluster_matrix
+        cocluster_matrix
+    end
+
+    compute_expectation(data, models, func)
+ 
+#    wl_state = models[end].WL_state
+#    M = length(models[end].Z)
+#    #latent_rates = models[1].rates != zeros(length(models[1].rates))
+# 
+#    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
+#
+#    total_partition_mass = logsumexp(wl_state.partition_function)
+#
+#    cocluster_matrix = zeros(M,M)
+#    sum_w = 0.0
+#    for n = start_index:length(models)
+#        model = models[n]
+#        N::Int = (length(model.tree.nodes)+1)/2
+#
+#        if K != nothing && N-1 != K
+#            continue
+#        end
+#
+#        log_pdf = full_pdf(model, model_spec, data)
+#        w = get_partition_function(wl_state, N-1, log_pdf)
+#        w = exp(w - total_partition_mass)
+#        sum_w += w
+#
+#        Z = model.Z
+#        C = [Int64[] for x=1:maximum(Z)]
+#        for i = 1:length(Z)
+#            push!(C[Z[i]], i)
+#        end
+#        for c in C
+#            cocluster_matrix[c,c] += w
+#        end
+#    end
+#    cocluster_matrix /= sum_w
+#    
+#
+#    return cocluster_matrix
+end
+
+function compute_cluster_ancestor_descendent_sibling_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false)
+    f = open(models_filename, "r")
+    models = deserializeModels(f)
+    close(f)
+
+    function cocluster_func(model)
+        N::Int = (length(model.tree.nodes)+1)/2
+       
+        M = length(model.Z)
+        cocluster_matrix = zeros(M,M) 
+
+        Z = model.Z
+        C = [Int64[] for x=1:maximum(Z)]
+        for i = 1:length(Z)
+            push!(C[Z[i]], i)
+        end
+        for c in C
+            cocluster_matrix[c,c] += 1.0
+        end
+
+        cocluster_matrix
+    end
+
+    function ancestor_func(model)
+        N::Int = (length(model.tree.nodes)+1)/2
+       
+        M = length(model.Z)
+        ancestorship_matrix = zeros(M,M) 
+
+        Z = model.Z
+        C = [Int64[] for x=1:maximum(Z)]
+        for i = 1:length(Z)
+            push!(C[Z[i]], i)
+        end
+
+        for c1_index in 1:length(C)
+            for c2_index in 1:length(C)
+                if IsRightAncestor(model.tree, c1_index, c2_index) && c1_index != c2_index
+                    c1 = C[c1_index]
+                    c2 = C[c2_index]
+                    ancestorship_matrix[c1, c2] += 1
+                end 
+            end
+        end
+
+        ancestorship_matrix
+    end
+
+    cc = compute_expectation(data, models, cocluster_func)
+    ac = compute_expectation(data, models, ancestor_func)
+    dc = ac'
+    sc = 1.0 - cc - ac - dc
+
+    M,M = size(cc)
+
+    result = zeros(4,int(M*(M-1)/2))
+
+    result[1,:] = cc[find(tril(ones(M,M), -1))]
+    result[2,:] = ac[find(tril(ones(M,M), -1))]
+    result[3,:] = dc[find(tril(ones(M,M), -1))]
+    result[4,:] = sc[find(tril(ones(M,M), -1))]
+
+    result
 end
 
 function compute_ancestorship_matrix(models_filename::ASCIIString, data::DataState; start_index=1, latent_rates=false)
@@ -815,3 +895,47 @@ function eval_betasplit_phylo_results()
 
     a_auprs, a_precs, a_recalls, auprs, precs, recalls 
 end
+
+function apply_func_to_models(data_file, models_file, func)
+    data = constructDataState(data_filename, multilocus_filename=nothing)
+
+    f = open(models_file, "r")
+    models = deserializeModels(f)
+    close(f)
+
+    func_results = apply_func_to_chain(models, func)
+    wl_weights = get_chain_WL_weights(data, models)
+
+    return func_results, wl_weights
+end
+
+function get_chain_WL_weights(data, models; latent_rates=false)
+    model_spec = ModelSpecification(latent_rates, zeros(3), false, false, false)
+
+    wl_state = models[end].WL_state
+    total_partition_mass = logsumexp(wl_state.partition_function)
+
+    weights = zeros(length(models))
+    for i in 1:length(models)
+        model = models[i]
+        N::Int = (length(model.tree.nodes)+1)/2
+        log_pdf = full_pdf(model, model_spec, data)
+        w = get_partition_function(wl_state, N-1, log_pdf)
+        weights[i] = exp(w - total_partition_mass)
+    end
+    weights
+end
+
+function compute_expectation(data, models, func)
+    w = get_chain_WL_weights(data, models)
+    v = apply_func_to_chain(models, func)
+
+    result = 0.0
+    for i = 1:length(v)
+        result += w[i]*v[i]
+    end
+
+    result /= sum(w)
+    result
+end
+

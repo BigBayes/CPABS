@@ -1,5 +1,5 @@
-include("../tree.jl")
-include("../wang_landau.jl")
+include("tree.jl")
+include("wang_landau.jl")
 
 import Base.copy
 import Base.ref
@@ -61,6 +61,14 @@ function deserializeModels(stream)
 
     models
 end
+
+function loadModels(filename)
+    f = open(filename)
+    models = deserializeModels(f)
+    close(f)
+    models
+end
+
 
 type ModelSpecification
     latent_rates::Bool # do we use the latent rate variables model.rates

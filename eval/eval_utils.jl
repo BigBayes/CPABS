@@ -96,3 +96,14 @@ function get_vectors(chain, variable_name::ASCIIString, vectorize::Function)
 
     V
 end
+
+function apply_func_to_chain(chain, func)
+
+    results = Array(Any, length(chain))
+    for i = 1:length(chain)
+        c = chain[i]
+        results[i] = func(c)
+    end
+
+    results
+end

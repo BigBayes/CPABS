@@ -4,8 +4,8 @@
 # Main entry point for running betasplitting phylogenetic reconstruction from the shell
 #
 # 
-
-require("run_scripts/run_phylo_experiments.jl")
+using CPABS
+using ArgParse
 
 function parse_commandline()
 
@@ -23,7 +23,7 @@ function parse_commandline()
         "--alpha", "-a"
             help = "alpha parameter, default = 0 (recommended)"
             arg_type = Float64
-            default = 0
+            default = 0.0
         "--multilocus-filename"
             help = "Input file for multilocus reads (see README for format)"
         "--wang-landau-partition", "-w"
@@ -52,16 +52,15 @@ function main()
     init_K = parsed_args["init-K"]
 
     s = split(wl_partition[2:end-1], ",")
-    wl_partition = [Float64(i) for i in s] 
+    wl_partition = [float(i) for i in s] 
 
     num_iterations = num_iterations == nothing ? 10000 : num_iterations
 
-    run_phylo_experiment(inputfile, alpha, multilocus_filename,
-                         wl_K_boundaries=wl_partition,
-                         num_iterations=num_iterations,
-                         outputfile=outputfile,
-                         multilocus_filename=multilocus_filename,
-                         init_K=init_K)
+    CPABS.run_phylo_experiment(inputfile, alpha, multilocus_filename,
+                               wl_K_boundaries=wl_partition,
+                               num_iterations=num_iterations,
+                               outputfile=outputfile,
+                               init_K=init_K)
                           
 end
 
