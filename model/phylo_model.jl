@@ -338,3 +338,55 @@ function model2array(model::ModelState; return_leaf_times::Bool=false)
     tree2array(model.tree, model.gamma, return_leaf_times=return_leaf_times)
 end
 
+function model2dict(model::ModelState, wl_state::WangLandauState, log_likelihood::Float64, log_pdf::Float64, mutation_names::Vector{ASCIIString})
+    dict = Dict{ASCIIString, Any}()
+    dict["llh"] = log_likelihood
+
+    N::Int = (length(model.tree.nodes)+1)/2
+    log_weight = get_partition_function(wl_state, N, log_pdf)
+    dict["log_weight"] = log_weight
+
+
+    T = GetAdjacencyMatrix(model.tree)
+    phis = compute_phis(model)
+    perm = reverse(sortperm(sum(phis[N+1:end,:],2)[:]))
+    perm_phis = phis[N+1:end,:][perm,:]
+    perm_T = T[perm,perm]
+
+    structure = Dict{ASCIIString, Any}()
+    for i = 1:size(T,1)
+        if length(find(perm_T[i,:])) > 0
+            structure["$i"] = find(perm_T[i,:])
+        end
+    end
+    dict["structure"] = structure
+
+    Z = model.Z
+    C = [Int64[] for x = 1:maximum(Z)]
+    for i = 1:length(Z)
+        push!(C[perm[Z[i]-N]], i)
+    end
+
+    populations = Dict{ASCIIString, Any}()
+    mutation_assignments = Dict{ASCIIString, Any}()
+    for i = 1:size(T,1)
+        d = Dict{ASCIIString, Any}()
+        d["num_ssms"] = length(C[i])
+        d["num_cnvs"] = 0
+        d["cellular_prevalence"] = perm_phis[i,:][:]
+ 
+        populations["$i"] = d
+
+        m = Dict{ASCIIString, Any}()
+        names = [mutation_names[c] for c in C[i]]
+        m["ssms"] = names
+        m["cnvs"] = ASCIIString[]
+        
+        mutation_assignments["$i"] = m
+    end
+    dict["populations"] = populations
+
+   
+
+    dict, mutation_assignments
+end

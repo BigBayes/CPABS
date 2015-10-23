@@ -1,11 +1,11 @@
-require("phylo_model/phylo_model.jl")
-require("phylo_model/pdf.jl")
-require("phylo_model/phylo_mcmc.jl")
-require("eval/eval_phylo.jl")
-require("data_utils/data_utils.jl")
-require("utils/plot_utils.jl")
-require("utils/probability_util.jl")
-
+#require("phylo_model/phylo_model.jl")
+#require("phylo_model/pdf.jl")
+#require("phylo_model/phylo_mcmc.jl")
+#require("eval/eval_phylo.jl")
+#require("data_utils/data_utils.jl")
+#require("utils/plot_utils.jl")
+#require("utils/probability_util.jl")
+#
 #using Distributions
 
 function getModelDendrogram(model::ModelState, true_clustering=nothing)
@@ -183,6 +183,23 @@ function plotRepresentativeSample(models; true_clustering=nothing, bin=nothing, 
     p
 end 
 
+function getWLPartitionFuncs(models)
+
+    K = length(models[1].WL_state.partition_function)
+    N = length(models)
+   
+    Zs = zeros(K,N) 
+
+    for i = 1:N
+
+        model = models[i]
+        Z = model.WL_state.partition_function
+
+        Zs[:,i] = Z
+    end
+
+    Zs
+end
 
 function plotModelClusteringMatrices(models_filename::ASCIIString)
     models = getModels(models_filename)

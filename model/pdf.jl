@@ -176,8 +176,8 @@ function likelihood(model::ModelState,
                     data::DataState;
                     Temp::Float64=1.0)
 
-    AA = int(data.reference_counts)
-    DD = int(data.total_counts)
+    AA = round(Int64,data.reference_counts)
+    DD = round(Int64,data.total_counts)
 
     mu_r = data.mu_r
     mu_v = data.mu_v
@@ -655,7 +655,7 @@ function psi_infsites_logpdf(model::ModelState,
     end
 
     # Tau, the first ancestor reached from the right child
-    Tau = zeros(2N-1)
+    Tau = zeros(Int64, 2N-1)
     for i = reverse(indices)
         cur = tree.nodes[i]
         if i == root.index
@@ -824,8 +824,8 @@ function psi_observation_logpdf(model::ModelState,
                                 pruned_index::Int64,
                                 path::Array{Int64,1})
 
-    AA = int(data.reference_counts)
-    DD = int(data.total_counts)
+    AA = round(Int64,data.reference_counts)
+    DD = round(Int64,data.total_counts)
 
     mu_r = data.mu_r
     mu_v = data.mu_v
@@ -2087,7 +2087,7 @@ function grow_prune_kernel_sample(model::ModelState,
 
         exempt_index = rl == Nil() ? 0 : root.children[2].index
 
-        prunable_indices = setdiff([1:N], exempt_index)  
+        prunable_indices = setdiff(collect(1:N), exempt_index)  
 #        right_children = [tree.nodes[i].children[1].index for i = N+1:2N-1]
 #        left_children = [tree.nodes[i].children[2].index for i = N+1:2N-1]
 #        prunable_indices = [right_children[find(right_children .<= N)],
@@ -2138,7 +2138,7 @@ function grow_prune_kernel_sample(model::ModelState,
         new_model.Z = ones(Int64, length(Z)) + N
 
         dest_moved_mutations = find(Z .== dest_index)
-        moved_mutations = [moving_mutations, dest_moved_mutations]
+        moved_mutations = [moving_mutations; dest_moved_mutations]
 
         Z_logpdfs = zeros(N-1, length(moved_mutations))
         for i = 1:length(moved_mutations)

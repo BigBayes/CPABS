@@ -30,9 +30,11 @@ Options
 
 HDF5
 
+JLD
+
 Distributions
 
-NumericExtensions
+JSON
 
 ### Optional Packages
 

@@ -134,7 +134,8 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
                               read_subsample_rate = 1.0,
                               num_iterations = 10000,
                               init_K = 3,
-                              outputfile=nothing )
+                              outputfile=nothing,
+                              json_output_directory=nothing )
 
 
     trial_index = index
@@ -265,6 +266,68 @@ function run_phylo_experiment(filename, alpha::Float64, multilocus_filename;
 
     serialize(f, models) 
     close(f)
+
+    if json_output_directory != nothing
+
+        base_filename = split(split(filename,"/")[end],".")[1]
+        mkpath(json_output_directory)
+        mkpath("$json_output_directory/$base_filename.mutass")
+
+        json_dict = Dict{ASCIIString, Any}()
+        json_dict["dataset_name"] = base_filename
+
+        json_trees = Dict{ASCIIString, Any}()
+        json_dict["trees"] = json_trees
+
+        for i in 1:length(models)
+            model = models[i]
+            log_likelihood = likelihood(model, model_spec, data)
+            log_pdf = full_pdf(model, model_spec, data) 
+            summary, mutation_assignments = model2dict(model, models[end].WL_state, log_likelihood,
+                                                       log_pdf, data.mutation_names)
+            json_trees["$i"] = summary
+
+            mutation_dict = Dict{ASCIIString, Any}()
+            mutation_dict["dataset_name"] = base_filename
+            mutation_dict["mut_assignments"] = mutation_assignments
+
+            f = open("$json_output_directory/$base_filename.mutass/$i.json", "w")
+            JSON.print(f, mutation_dict)
+            close(f) 
+
+        end
+       
+        f = open("$json_output_directory/$base_filename.summ.json", "w")
+        JSON.print(f, json_dict)
+        close(f) 
+
+
+
+        json_data = Dict{ASCIIString, Any}()
+        json_data["dataset_name"] = base_filename
+        json_data["cnvs"] = Dict{ASCIIString, Any}()
+
+
+        json_ssms = Dict{ASCIIString, Any}()
+        for i = 1:size(data.total_counts,1)
+            json_mut = Dict{ASCIIString, Any}()
+            json_mut["total_reads"] = data.total_counts[i,:][:]
+            json_mut["ref_reads"] = data.reference_counts[i,:][:]
+            json_mut["expected_ref_in_ref"] = data.mu_r[i]
+            json_mut["expected_ref_in_variant"] = data.mu_v[i]
+            json_mut["name"] = data.mutation_names[i]
+
+            json_ssms[data.mutation_names[i]] = json_mut
+        end
+
+
+        json_data["ssms"] = json_ssms
+        f = open("$json_output_directory/$base_filename.muts.json", "w")
+        JSON.print(f, json_data)
+        close(f)
+
+    end
+
 end
 
 run_phylo_experiment(filename, alpha::Float64) = run_phylo_experiment(filename, alpha, nothing)

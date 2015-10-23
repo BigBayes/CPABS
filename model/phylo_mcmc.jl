@@ -123,7 +123,7 @@ function mcmc(data::DataState,
             end
             tree = model.tree
             Z = model.Z
-            N = ifloor((length(tree.nodes)+1) / 2)
+            N = floor(Integer,(length(tree.nodes)+1) / 2)
         end
 
         if iter > 50
@@ -1011,7 +1011,7 @@ function sample_psi(model::ModelState,
         println("psi: ")
     end
 
-    indices = [N+1:2N-1]
+    indices = collect(N+1:2N-1)
     if random_order
         indices = indices[ randperm(N-1)]
     end
@@ -1655,7 +1655,7 @@ function sample_assignments(model::ModelState,
     end 
     U = U .- 1
 
-    indices = [1:M]
+    indices = collect(1:M)
     if random_order
         indices = indices[randperm(M)]
     end

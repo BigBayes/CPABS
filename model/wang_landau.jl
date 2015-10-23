@@ -53,7 +53,8 @@ function stepsize(wl_state::WangLandauState)
 end
 
 function wang_landau_stepsize(f0::Float64, epoch::Int64)
-    f0/(2*epoch)
+    log(1+f0*0.5^epoch)
+    #f0/(2*epoch)
 end
 
 function gen_wang_landau_histogram_test(frequency_ratio::Float64)

@@ -377,7 +377,7 @@ end
 
 function get_true_clustering()
     Y = zeros(288,288)
-    ranges = { 1:108, 109:192, 193:252, 253:288 }
+    ranges = Any[ 1:108, 109:192, 193:252, 253:288 ]
     for k = 1:4
         Y[ranges[k], ranges[k]] = 1
     end
@@ -386,7 +386,7 @@ end
 
 function get_true_clustering_emptysims(C, N)
     base_range = 1:N
-    ranges = { base_range + i*N for i = 0:C-1}
+    ranges = Any[ base_range + i*N for i = 0:C-1]
 
     Y = zeros(C*N,C*N)
     for k = 1:C
@@ -444,11 +444,11 @@ end
 
 function get_true_clustering_CLL(id)
     if id == "077"
-        groups = { [1,11,6,15,16], [3,4,5,13,14], [9], [8,2,12,7,10] } 
+        groups = Any[ [1,11,6,15,16], [3,4,5,13,14], [9], [8,2,12,7,10] ] 
     elseif id == "003"
-        groups = { [1,8,10,11,18,19], [4,13,17], [14,15,9,7], [2,3,5,6,16,12,20] }
+        groups = Any[ [1,8,10,11,18,19], [4,13,17], [14,15,9,7], [2,3,5,6,16,12,20] ]
     elseif id == "006"
-        groups = { [1,2,4,6,7,8,10], [11], [5], [3], [9] }
+        groups = Any[ [1,2,4,6,7,8,10], [11], [5], [3], [9] ]
     end
 
     N = maximum([maximum(g) for g in groups])
@@ -530,7 +530,7 @@ function plot_paired_scatter(auprs1, auprs2, label1, label2, row_index, title)
     
     setattr(p, yrange=( min_aupr - 0.15, max_aupr+0.03))
 
-    l = Legend(0.65, 0.2, {c1, c2})
+    l = Legend(0.65, 0.2, Any[c1, c2])
 
     add(p, l)
 

@@ -75,11 +75,11 @@ end
 
 # Probability Manipulation
 
-#function logsumexp(x)
-#    max_x = maximum(x)
-#    xp = x - max_x
-#    log(sum(exp(xp))) + max_x
-#end
+function logsumexp(x)
+    max_x = maximum(x)
+    xp = x - max_x
+    log(sum(exp(xp))) + max_x
+end
 
 function logsumexp_d_dx(x,xp)
     #zeros in shape of xp[1]

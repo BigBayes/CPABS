@@ -169,7 +169,7 @@ function Tree(U::Array{Vector{Float64},1})
         tree.nodes[i].children[1] = Nil();
         tree.nodes[i].children[2] = Nil();
     end
-    coalescing_nodes = [2:N]
+    coalescing_nodes = collect(2:N)
     coalescing_nodes_remaining = N-1
 
     for i = N+1:2N-2

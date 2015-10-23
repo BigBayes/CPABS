@@ -1,5 +1,3 @@
-require("Options")
-using OptionsMod
 
 function hmc_sampler(x::Vector{Float64},
                      U::Function,
@@ -7,7 +5,7 @@ function hmc_sampler(x::Vector{Float64},
                      opts::Options)
 
 
-  @defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 transformation=identity_transformation always_accept=false
+  OptionsMod.@defaults opts stepsize=.01 numsteps=50 nadapt=0 w=.01 transformation=identity_transformation always_accept=false
 
   T = transformation.transformation_function
   T_inv = transformation.transformation_inverse
