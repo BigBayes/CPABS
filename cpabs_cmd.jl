@@ -3,7 +3,6 @@
 # Main entry point for running betasplitting phylogenetic reconstruction from the shell
 #
 #
-push!(LOAD_PATH, ".")
  
 using CPABS
 using ArgParse
