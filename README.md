@@ -13,7 +13,7 @@ This will create a julia package directory, e.g. `~/.julia/v0.4` if you installe
 
 ```
 cd ~/.julia/v0.4
-git clone https://github.com/leviboyles/cpabs.git
+git clone https://github.com/leviboyles/CPABS.git
 ```
 
 Next, you will need to install all required Julia packages, as well as any optional ones you need.  This is done from the Julia shell, e.g.:
