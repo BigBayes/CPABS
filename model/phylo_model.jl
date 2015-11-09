@@ -23,7 +23,7 @@ function copy(model::ModelState)
     ModelState(model.lambda, model.gamma, model.alpha, model.rate_k, copy(model.tree), copy(model.Z), copy(model.rates), copy(model.WL_state))
 end
 
-function serialize(stream, model::ModelState)
+function serialize(stream::SerializationState, model::ModelState)
     serialize(stream, (model.lambda, model.gamma, model.alpha, model.rate_k )) 
     serialize(stream, model.tree)
     serialize(stream, model.Z)
@@ -31,7 +31,7 @@ function serialize(stream, model::ModelState)
     serialize(stream, model.WL_state)
 end
 
-function serialize(stream, models::Vector{ModelState})
+function serialize(stream::SerializationState, models::Vector{ModelState})
     N = length(models)
 
     serialize(stream, N)
@@ -41,7 +41,7 @@ function serialize(stream, models::Vector{ModelState})
 
 end
 
-function deserializeModel(stream)
+function deserializeModel(stream::SerializationState)
     (lambda, gamma, alpha, rate_k) = deserialize(stream)
     tree = deserializeTree(stream)
     Z = deserialize(stream)
@@ -51,7 +51,7 @@ function deserializeModel(stream)
     ModelState(lambda, gamma, alpha, rate_k, tree, Z, rates, WL_state)
 end
 
-function deserializeModels(stream)
+function deserializeModels(stream::SerializationState)
     N = deserialize(stream)
     models = Array(ModelState, N)
 

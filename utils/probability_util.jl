@@ -81,6 +81,12 @@ function logsumexp(x)
     log(sum(exp(xp))) + max_x
 end
 
+function logsumexp(x,d)
+    max_x = maximum(x,d)
+    xp = x .- max_x
+    log(sum(exp(xp),d)) + max_x
+end
+
 function logsumexp_d_dx(x,xp)
     #zeros in shape of xp[1]
     xout = xp[1]-xp[1]

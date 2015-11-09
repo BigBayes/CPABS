@@ -9,10 +9,10 @@ To install CPABS, you will need the Julia technical language.  After installing 
 Pkg.init()
 ```
 
-This will create a julia package directory, e.g. `~/.julia/v0.3` if you installed julia 0.3.  Next, clone the CPABS git repository into your julia package directory, for example
+This will create a julia package directory, e.g. `~/.julia/v0.4` if you installed julia 0.4.  Next, clone the CPABS git repository into your julia package directory, for example
 
 ```
-cd ~/.julia/v0.3
+cd ~/.julia/v0.4
 git clone https://github.com/leviboyles/cpabs.git
 ```
 
@@ -48,6 +48,8 @@ Compose
 
 Color
 
+Note that there is a JSON output option which is compatible with the `witness` program available with [PhyloWGS](https://github.com/morrislab/phylowgs), which may be preferable to the plotting options provided with CPABS.
+
 ## Usage
 
 You can use CPABS from within Julia or from the command line.
@@ -64,6 +66,7 @@ CPABS.run_phylo_experiment(inputfile, alpha, multilocus_filename,
                            wl_K_boundaries=wl_K_boundaries,
                            num_iterations=num_iterations,
                            outputfile=outputfile,
+                           json_output_directory=json_output_directory,
                            init_K=init_K)
 ```
 The first 3 arguments are required, although `nothing` may be entered for `multilocus_filename`.  `alpha` is as described in the CPABS paper.
@@ -73,6 +76,8 @@ The first 3 arguments are required, although `nothing` may be entered for `multi
 `wl_K_boundaries` is a vector of floats indicating the boundaries of the Wang-Landau partition on the number of clones `K` used for rjmcmc.  For example, `[3,5,Inf]` specifies the partition `(1:2, 3:4, 5:Inf)`.
 
 `outputfile` is the name and path to write the resulting chain.
+
+`json_output_directory` is the path to write a summary of the chain that is suitable for input into PhyloWGS's plotting utility, `witness`.
 
 `init_K` is the number of clones in the initial MCMC state.
 

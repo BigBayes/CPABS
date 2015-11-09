@@ -1,9 +1,10 @@
-
 # run_phylo_cmd
 # 
 # Main entry point for running betasplitting phylogenetic reconstruction from the shell
 #
-# 
+#
+push!(LOAD_PATH, ".")
+ 
 using CPABS
 using ArgParse
 
@@ -20,6 +21,8 @@ function parse_commandline()
             default = 10000
         "--output", "-o"
             help = "Output file to store the MCMC chain"
+        "--json_output", "-j"
+            help = "Output directory to store the JSON summary"
         "--alpha", "-a"
             help = "alpha parameter, default = 0 (recommended)"
             arg_type = Float64
@@ -46,13 +49,16 @@ function main()
     inputfile = parsed_args["input_file"]
     num_iterations = parsed_args["num-iterations"]    
     outputfile = parsed_args["output"]
+    json_dir = parsed_args["json_output"]
     alpha = parsed_args["alpha"]
     multilocus_filename = parsed_args["multilocus-filename"]
     wl_partition = parsed_args["wang-landau-partition"]
     init_K = parsed_args["init-K"]
 
+
+
     s = split(wl_partition[2:end-1], ",")
-    wl_partition = [float(i) for i in s] 
+    wl_partition = [float(i)::Float64 for i in s] 
 
     num_iterations = num_iterations == nothing ? 10000 : num_iterations
 
@@ -60,6 +66,7 @@ function main()
                                wl_K_boundaries=wl_partition,
                                num_iterations=num_iterations,
                                outputfile=outputfile,
+                               json_output_directory=json_dir,
                                init_K=init_K)
                           
 end

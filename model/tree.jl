@@ -1025,7 +1025,7 @@ function tree2array(tree::Tree,
     end
 end
 
-function serialize(stream, tree::Tree)
+function serialize(stream::SerializationState, tree::Tree)
     nodes = tree.nodes
     _2Nm1 = length(nodes)
 
@@ -1057,7 +1057,7 @@ function get_children_indices(node::TreeNode)
     return (c1,c2)
 end
 
-function deserializeTree(stream)
+function deserializeTree(stream::SerializationState)
 
     (states, rhos, rhots, parents, childrens, n_leaves, n_ancestors) = deserialize(stream)
 
