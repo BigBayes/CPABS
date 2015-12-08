@@ -1,20 +1,31 @@
 FROM ubuntu
 
-RUN sudo add-apt-repository ppa:staticfloat/juliareleases && apt-get update && apt-get install julia
-RUN sudo apt-get install libhdf5-7 hdf5-tools
+RUN apt-get update && \
+    apt-get -y install software-properties-common && \
+    apt-get -y install wget && \
+    apt-get -y install build-essential
 
-RUN julia -e 'Pkg.init()'
-RUN julia -e 'Pkg.add("HDF5")'
-RUN julia -e 'Pkg.add("JLD")'
-RUN julia -e 'Pkg.add("ArgParse")'
-RUN julia -e 'Pkg.add("Options")'
-RUN julia -e 'Pkg.add("Distributions")'
-RUN julia -e 'Pkg.add("JSON")'
+RUN add-apt-repository -y ppa:staticfloat/juliareleases && \
+    add-apt-repository -y ppa:staticfloat/julia-deps && \
+    apt-get update && \
+    apt-get install -y julia && \
+    rm -rf /var/lib/apt/lists/*
 
-WORKDIR ~/.julia/v0.4/
+RUN apt-get update && apt-get -y install libhdf5-7
+
+RUN julia -e 'Pkg.init()' && \
+    julia -e 'Pkg.add("Blosc")' && \
+    julia -e 'Pkg.add("HDF5")' && \
+    julia -e 'Pkg.add("JLD")' && \
+    julia -e 'Pkg.add("ArgParse")' && \
+    julia -e 'Pkg.add("Options")' && \
+    julia -e 'Pkg.add("Distributions")' && \
+    julia -e 'Pkg.add("JSON")'
+
+WORKDIR /root/.julia/v0.4/
 RUN git clone https://github.com/leviboyles/CPABS.git
 
 WORKDIR /opt
 RUN mkdir cpabs
-RUN cp ~/.julia/v0.4/CPABS/cpabs_cmd.jl cpabs/
-RUN cp ~/.julia/v0.4/CPABS/*.xml cpabs/
+RUN cp /root/.julia/v0.4/CPABS/cpabs_cmd.jl cpabs/
+RUN cp /root/.julia/v0.4/CPABS/*.xml cpabs/
